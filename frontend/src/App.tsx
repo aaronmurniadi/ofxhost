@@ -24,6 +24,14 @@ import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
 /** How often the shell asks whether a decode has landed. */
 const POLL_INTERVAL_MS = 120;
 
+/**
+ * How many polls before the shell gives up.
+ *
+ * A 25 MP RAW takes a couple of seconds to develop, so the cap is generous: it is
+ * there so a real failure ends with a message rather than an endless "Opening…".
+ */
+const MAX_POLLS = 600;
+
 export default function App() {
   const [doc, setDoc] = useState<DocumentDTO | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -38,29 +46,61 @@ export default function App() {
   // input to the decode, so it is asked before the file opens.
   const [pendingPath, setPendingPath] = useState("");
 
-  // One poll while a decode is in flight. The Go side decodes on its own goroutine
-  // and applies the result when the shell asks, so the window never blocks.
+  // Poll while a decode is in flight.
+  //
+  // The Go side decodes on its own goroutine, so the window never blocks on a RAW
+  // file; the decode becomes visible through Current() once it lands. A repeating
+  // timer is what waits for that, and the attempt cap is what keeps a genuine
+  // failure from looking like an endless wait.
   useEffect(() => {
     if (!busy) {
       return;
     }
-    const timer = window.setTimeout(async () => {
-      const current = await api.current();
-      if (!current.open) {
-        setBusy(false);
+
+    let attempts = 0;
+    let cancelled = false;
+
+    const tick = async () => {
+      if (cancelled) {
         return;
       }
+      attempts += 1;
+
+      const current = await api.current();
+      if (cancelled) {
+        return;
+      }
+
+      if (!current.open) {
+        if (attempts >= MAX_POLLS) {
+          setMessage("The image did not open. See the log for the reason.");
+          setBusy(false);
+          return;
+        }
+        window.setTimeout(tick, POLL_INTERVAL_MS);
+        return;
+      }
+
       const published = await api.publishPreview();
+      if (cancelled) {
+        return;
+      }
       if (published.error) {
         setMessage(published.error);
         setBusy(false);
         return;
       }
+
       setDoc(current);
       setPreview({ url: published.url, width: published.width, height: published.height });
+      setMessage("");
       setBusy(false);
-    }, POLL_INTERVAL_MS);
-    return () => window.clearTimeout(timer);
+    };
+
+    window.setTimeout(tick, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+    };
   }, [busy]);
 
   useEffect(() => {

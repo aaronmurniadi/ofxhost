@@ -149,8 +149,29 @@ func (d *Document) Open(req OpenRequest) OpenResult {
 	return OpenResult{Started: true}
 }
 
+// pump applies any decode that has finished.
+//
+// The document service decodes on its own goroutine and hands the result to a
+// channel, so that a slow file does not block the caller that opened it. Somebody
+// has to drain that channel, and in a window there is no frame loop to do it: the
+// frontend polls, and every poll drains first. Without this the decode completes and
+// is never published, which reads as "stuck on Opening" with no error anywhere.
+func (d *Document) pump() {
+	if d.docs == nil {
+		return
+	}
+	// A bounded loop, not "for": a decode that finished and a second that finished
+	// while this ran are both applied, but a storm of them cannot hold this call.
+	for i := 0; i < 8; i++ {
+		if !d.docs.Pump() {
+			return
+		}
+	}
+}
+
 // Current returns the open document.
 func (d *Document) Current() DocumentDTO {
+	d.pump()
 	state := d.docs.State()
 	out := DocumentDTO{
 		Open:         state.Path != "",
@@ -195,6 +216,7 @@ type PreviewURLResponse struct {
 // parameter edit. It does the colour conversion and the scaling in one place, so
 // the frontend never sees a pixel.
 func (d *Document) PublishPreview() PreviewURLResponse {
+	d.pump()
 	state := d.docs.State()
 	if state.Path == "" || state.Full.Empty() {
 		return PreviewURLResponse{Error: "no image is open"}
