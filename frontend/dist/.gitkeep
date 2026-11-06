@@ -1,0 +1,4 @@
+The built frontend lands here.
+
+This file keeps the directory present so the go:embed directive in embed.go has
+something to embed before the first `npm run build` in frontend/.

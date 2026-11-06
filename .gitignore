@@ -1,0 +1,23 @@
+# Wails
+.task/
+.wails/
+bin/
+
+# Go
+/ofxhost
+*.test
+*.out
+
+# Frontend
+frontend/node_modules/
+frontend/bindings/
+# The built frontend is an artefact. The .gitkeep keeps the directory present,
+# because go:embed needs a non-empty directory to compile.
+frontend/dist/*
+!frontend/dist/.gitkeep
+
+# Editor and OS noise
+.DS_Store
+.pi/
+.pi-lens.json
+.pi-web/

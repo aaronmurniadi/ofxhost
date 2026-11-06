@@ -1,0 +1,122 @@
+// Package desktop owns the window.
+//
+// It is the only place that knows the window exists: menus, native dialogs, the
+// WebView and the asset server live here. Nothing below this package imports
+// Wails, so replacing the window framework would touch this directory and
+// nothing else.
+//
+// Layout of the package as it grows:
+//
+//	app.go      application creation, service registration, lifecycle
+//	menu.go     the File, View, Theme and Help menus
+//	dialogs.go  open, save and folder pickers
+//
+// The window never holds pixels at full resolution. A preview reaches the WebView
+// as an 8-bit sRGB image from internal/transport/frames, and pan and zoom are CSS
+// transforms in the frontend. That keeps the bridge to small payloads.
+package desktop
+
+import (
+	"embed"
+	"log/slog"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
+
+// Window defaults. The first launch opens at a size that fits a laptop screen and
+// shows the four panels without shrinking any of them below its minimum.
+const (
+	defaultWidth  = 1400
+	defaultHeight = 900
+	maximumWidth  = 4000
+	maximumHeight = 3000
+)
+
+// Options is what the composition root passes in.
+//
+// Everything is supplied rather than looked up, so the window starts with the real
+// services already wired and has no global to reach for.
+type Options struct {
+	// Assets embeds the built frontend.
+	Assets embed.FS
+	// Version is the build version shown in the About panel.
+	Version string
+	// Logger receives diagnostics. A nil logger is replaced by a discard logger.
+	Logger *slog.Logger
+	// Services are the bindings the frontend calls. The composition root builds
+	// them, so this package does not import the service layer to make them.
+	Services []application.Service
+	// AssetMiddleware lets the composition root mount the frame server in front of
+	// the static assets. It receives the static handler and returns the combined
+	// one. Nil means static assets only.
+	AssetMiddleware func(static application.AssetOptions) application.AssetOptions
+}
+
+// App is the running window.
+type App struct {
+	app    *application.App
+	logger *slog.Logger
+}
+
+// New builds the application and its window without starting the message loop.
+//
+// Creating the application is separate from running it so a caller can register
+// more services or emit an event before the first frame.
+func New(opts Options) *App {
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+
+	assets := application.AssetOptions{
+		Handler: application.AssetFileServerFS(opts.Assets),
+	}
+	if opts.AssetMiddleware != nil {
+		assets = opts.AssetMiddleware(assets)
+	}
+
+	app := application.New(application.Options{
+		Name:        "OfxHost",
+		Description: "An OpenFX host for still images.",
+		Services:    opts.Services,
+		Logger:      logger,
+		Assets:      assets,
+		Mac: application.MacOptions{
+			// A finishing tool with no document open still has a window worth
+			// showing, but closing the last window means the user is done.
+			ApplicationShouldTerminateAfterLastWindowClosed: true,
+		},
+	})
+
+	app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            "OfxHost",
+		Width:            defaultWidth,
+		Height:           defaultHeight,
+		MaxWidth:         maximumWidth,
+		MaxHeight:        maximumHeight,
+		BackgroundColour: application.NewRGB(30, 30, 30),
+		Mac: application.MacWindow{
+			// The four panels need the full height, so the title bar is inset
+			// rather than stacked above the content.
+			TitleBar: application.MacTitleBarHiddenInset,
+		},
+		URL: "/",
+	})
+
+	return &App{app: app, logger: logger}
+}
+
+// Application exposes the underlying application, so a caller can register more
+// services before Run.
+func (a *App) Application() *application.App { return a.app }
+
+// Run starts the message loop and blocks until the last window closes.
+func (a *App) Run() error {
+	a.logger.Info("window starting")
+	if err := a.app.Run(); err != nil {
+		a.logger.Error("window stopped with an error", "err", err)
+		return err
+	}
+	a.logger.Info("window closed")
+	return nil
+}
