@@ -39,7 +39,7 @@ func parseSpaceName(name string) (string, bool) {
 
 func TestSettingsJSONRoundTrip(t *testing.T) {
 	in := DefaultSettings()
-	in.View.Panels = Panels{Right: 25, Plugins: 40, Filmstrip: 0}
+	in.View.Panels = Panels{Right: 25, Plugins: 40}
 	in.View.PreviewFitToWindow = false
 	in.Appearance.Theme = "Light"
 	in.Appearance.FontPt = 15
@@ -207,7 +207,7 @@ func TestPanelsAbsentStaysZero(t *testing.T) {
 // TestPanelsZeroMeansHidden is the other half: a zero that the file does record is
 // a panel the user hid, not a missing value.
 func TestPanelsZeroMeansHidden(t *testing.T) {
-	const hidden = `{"format":"ofxhost","version":1,"view":{"panels":{"right":0,"plugins":0,"filmstrip":0}}}`
+	const hidden = `{"format":"ofxhost","version":1,"view":{"panels":{"right":0,"plugins":0}}}`
 
 	var settings Settings
 	if err := json.Unmarshal([]byte(hidden), &settings); err != nil {
@@ -223,8 +223,8 @@ func TestClampPanels(t *testing.T) {
 	cases := []struct {
 		in, want Panels
 	}{
-		{Panels{Right: -5, Plugins: 200, Filmstrip: 90}, Panels{Right: 0, Plugins: 90, Filmstrip: 50}},
-		{Panels{Right: 22.04, Plugins: 55.06, Filmstrip: 16}, Panels{Right: 22, Plugins: 55.1, Filmstrip: 16}},
+		{Panels{Right: -5, Plugins: 200}, Panels{Right: 0, Plugins: 90}},
+		{Panels{Right: 22.04, Plugins: 55.06}, Panels{Right: 22, Plugins: 55.1}},
 		{Panels{}, Panels{}},
 	}
 	for _, c := range cases {

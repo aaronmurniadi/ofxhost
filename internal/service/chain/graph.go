@@ -265,6 +265,18 @@ func (g *Graph) Apply(in image.Raster) (image.Raster, error) {
 // The generation is what makes a superseded render stop: every instance is told
 // that anything older is stale before the first pass runs.
 func (g *Graph) ApplyWithGeneration(in image.Raster, generation uint64) (image.Raster, error) {
+	return g.ApplyProjected(in, in.LongEdge(), generation)
+}
+
+// ApplyProjected runs the chain on a frame that may be smaller than the project.
+//
+// projectEdge is the long edge the chain would have at full resolution. The chain
+// cannot work it out from the frame it is given - a preview frame already shrank -
+// and several plugins size a kernel or a noise model in project pixels, so passing
+// a preview frame without the project size makes them wrong by the scale factor.
+//
+// A caller that has the full frame passes in.LongEdge() and gets ApplyWithGeneration.
+func (g *Graph) ApplyProjected(in image.Raster, projectEdge int, generation uint64) (image.Raster, error) {
 	if in.Empty() {
 		return image.Raster{}, errors.New("chain: the frame has no pixels")
 	}
@@ -286,7 +298,9 @@ func (g *Graph) ApplyWithGeneration(in image.Raster, generation uint64) (image.R
 	g.mu.Unlock()
 
 	frame := in
-	projectEdge := in.LongEdge()
+	if projectEdge <= 0 {
+		projectEdge = in.LongEdge()
+	}
 	for i, instance := range instances {
 		outW, outH, err := instance.OutputSize(frame.W, frame.H)
 		if err != nil {

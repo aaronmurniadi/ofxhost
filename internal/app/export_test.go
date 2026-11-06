@@ -6,12 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/codes"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/lcms"
+	"github.com/aaronmurniadi/ofxhost/internal/adapter/ofxhost"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/rawlib"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/status"
+	chainsvc "github.com/aaronmurniadi/ofxhost/internal/service/chain"
 	exportservice "github.com/aaronmurniadi/ofxhost/internal/service/export"
 )
 
@@ -350,5 +353,68 @@ func TestExportTheRealSample(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestPreviewResolutionIsFaster measures what the preview cap is for: the chain runs
+// on fewer pixels, so an edit comes back sooner.
+func TestPreviewResolutionIsFaster(t *testing.T) {
+	root := repoRoot(t)
+	sample := filepath.Join(root, "samples", "DSCF0209.RAF")
+	if _, err := os.Stat(sample); err != nil {
+		t.Skip("no sample")
+	}
+	decoded, err := rawlib.New().Decode(sample, image.SRGB)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	full := decoded.Image
+	t.Logf("decoded %dx%d (%.1f MP)", full.W, full.H, float64(full.W*full.H)/1e6)
+
+	host, err := ofxhost.New(ofxhost.Options{})
+	if err != nil {
+		t.Skipf("no ofx host: %v", err)
+	}
+	defer host.Close()
+	if err := host.Discover(nil); err != nil {
+		t.Skipf("scan: %v", err)
+	}
+	graph := chainsvc.New(host)
+	defer graph.Close()
+
+	added := false
+	for _, p := range host.Plugins() {
+		if p.Label != "Glyph Blocks" {
+			continue
+		}
+		if _, addErr := graph.Add(p.Index); addErr == nil {
+			t.Logf("using plugin %q", p.Label)
+			added = true
+		}
+		break
+	}
+	if !added {
+		t.Skip("the measurement needs Glyph Blocks")
+	}
+
+	for _, limit := range []int{0, 2560, 1920, 1280} {
+		frame := full
+		if limit > 0 {
+			frame = image.ScaleToLongEdge(full, limit)
+		}
+		_, _ = graph.ApplyProjected(frame, full.LongEdge(), 1) // warm
+
+		start := time.Now()
+		out, renderErr := graph.ApplyProjected(frame, full.LongEdge(), 1)
+		if renderErr != nil {
+			t.Fatalf("render: %v", renderErr)
+		}
+		name := "full"
+		if limit > 0 {
+			name = "cap"
+		}
+		t.Logf("%-4s %-6d %4dx%-5d %8.0f ms   %.1fx fewer pixels", name, limit, out.W, out.H,
+			float64(time.Since(start).Microseconds())/1000,
+			float64(full.W*full.H)/float64(out.W*out.H))
 	}
 }

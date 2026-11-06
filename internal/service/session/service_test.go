@@ -73,7 +73,7 @@ func newService(t *testing.T, store *fakeStore, checker port.UpdateChecker) *Ser
 func TestNewLoadsTheStoredSettings(t *testing.T) {
 	stored := project.DefaultSettings()
 	stored.Appearance.Theme = "Light"
-	stored.View.Panels = project.Panels{Right: 30, Plugins: 40, Filmstrip: 20}
+	stored.View.Panels = project.Panels{Right: 30, Plugins: 40}
 
 	service := newService(t, &fakeStore{settings: stored}, nil)
 	if got := service.Settings(); got != stored {
@@ -102,11 +102,11 @@ func TestSetPanelsSavesAndClamps(t *testing.T) {
 	store := &fakeStore{settings: project.DefaultSettings()}
 	service := newService(t, store, nil)
 
-	got, err := service.SetPanels(project.Panels{Right: 900, Plugins: -2, Filmstrip: 12.34})
+	got, err := service.SetPanels(project.Panels{Right: 900, Plugins: -2})
 	if err != nil {
 		t.Fatalf("SetPanels: %v", err)
 	}
-	want := project.Panels{Right: 60, Plugins: 0, Filmstrip: 12.3}
+	want := project.Panels{Right: 60, Plugins: 0}
 	if got != want {
 		t.Fatalf("SetPanels returned %+v, want the clamped %+v", got, want)
 	}
@@ -129,7 +129,7 @@ func TestFailedSaveLeavesTheOldValueVisible(t *testing.T) {
 	before := service.Settings()
 	store.saveErr = errors.New("disk full")
 
-	if _, err := service.SetPanels(project.Panels{Right: 50, Plugins: 50, Filmstrip: 20}); err == nil {
+	if _, err := service.SetPanels(project.Panels{Right: 50, Plugins: 50}); err == nil {
 		t.Fatal("SetPanels hid the save error")
 	}
 	if got := service.Settings(); got.View.Panels != before.View.Panels {
@@ -139,7 +139,7 @@ func TestFailedSaveLeavesTheOldValueVisible(t *testing.T) {
 
 func TestSetThemeKeepsTheRest(t *testing.T) {
 	stored := project.DefaultSettings()
-	stored.View.Panels = project.Panels{Right: 30, Plugins: 40, Filmstrip: 20}
+	stored.View.Panels = project.Panels{Right: 30, Plugins: 40}
 	store := &fakeStore{settings: stored}
 	service := newService(t, store, nil)
 

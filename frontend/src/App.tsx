@@ -11,7 +11,7 @@
  *   MS-peek  the preview URL is fetched, shown, and replaced on demand
  *   M3       the chain list and the parameter controls
  *   M4       the export dialog with the colour space and intent
- *   M5       the filmstrip, the settings panel and the saved layout
+ *   M5       the settings panel and the saved layout
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -230,20 +230,23 @@ export default function App() {
               zoomLabel="100%"
               busy={busy}
               onResize={onResize}
+              onChange={requestRender}
             />
           }
           plugins={<PluginsPanel onChange={requestRender} />}
           parameters={
             <ParametersPanel selected={chain?.selected ?? -1} onChange={requestRender} />
           }
-          filmstrip={
-            <section className="panel panel--filmstrip" aria-label="Filmstrip">
-              <p className="panel__placeholder">{message}</p>
-            </section>
-          }
         />
         ) : null}
       </main>
+
+      {/* The status line carries the result of the last action, or why it failed.
+          It is always present so the layout does not jump when a message appears. */}
+      <footer className="app__status" role="status" aria-live="polite">
+        {busy ? <span className="app__status--busy">Working…</span> : null}
+        <span>{message}</span>
+      </footer>
 
       {pendingPath !== "" ? (
         <OpenDialog

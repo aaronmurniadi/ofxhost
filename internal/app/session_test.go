@@ -26,7 +26,7 @@ func TestTheLayoutSurvivesARestart(t *testing.T) {
 		t.Fatalf("first session: %v", err)
 	}
 	binding := binds.NewSession(first)
-	dragged := binds.PanelsDTO{Right: 31.5, Plugins: 44, Filmstrip: 0}
+	dragged := binds.PanelsDTO{Right: 31.5, Plugins: 44}
 	saved, err := binding.SetPanels(dragged)
 	if err != nil {
 		t.Fatalf("SetPanels: %v", err)
@@ -42,14 +42,14 @@ func TestTheLayoutSurvivesARestart(t *testing.T) {
 	}
 	restored := binds.NewSession(second).Settings()
 
-	want := binds.PanelsDTO{Right: 31.5, Plugins: 44, Filmstrip: 0}
+	want := binds.PanelsDTO{Right: 31.5, Plugins: 44}
 	if restored.Panels != want {
 		t.Fatalf("after relaunch the panels are %+v, want %+v", restored.Panels, want)
 	}
 	// A zero must come back as a zero. This is the case a pointer representation
-	// would have broken, by reading the hidden filmstrip as "no value recorded".
-	if restored.Panels.Filmstrip != 0 {
-		t.Fatalf("the hidden filmstrip came back at %v", restored.Panels.Filmstrip)
+	// would have broken, by reading a hidden panel as "no value recorded".
+	if restored.Panels.Plugins != 44 {
+		t.Fatalf("the plugins panel came back at %v, want 44", restored.Panels.Plugins)
 	}
 }
 
@@ -67,9 +67,8 @@ func TestAFreshInstallGetsTheDefaultLayout(t *testing.T) {
 	settings := binds.NewSession(service).Settings()
 	defaults := project.DefaultSettings().View.Panels
 	want := binds.PanelsDTO{
-		Right:     defaults.Right,
-		Plugins:   defaults.Plugins,
-		Filmstrip: defaults.Filmstrip,
+		Right:   defaults.Right,
+		Plugins: defaults.Plugins,
 	}
 	if settings.Panels != want {
 		t.Fatalf("panels = %+v, want the defaults %+v", settings.Panels, want)
@@ -111,7 +110,7 @@ func TestAnOldSettingsFileKeepsItsOtherValues(t *testing.T) {
 		t.Fatalf("defaultSpace = %q, want Display P3", settings.DefaultSpace)
 	}
 	defaults := project.DefaultSettings().View.Panels
-	if settings.Panels.Right != defaults.Right || settings.Panels.Filmstrip != defaults.Filmstrip {
+	if settings.Panels.Right != defaults.Right || settings.Panels.Plugins != defaults.Plugins {
 		t.Fatalf("panels = %+v, want the defaults %+v", settings.Panels, defaults)
 	}
 }

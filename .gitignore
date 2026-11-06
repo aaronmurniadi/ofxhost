@@ -25,3 +25,4 @@ frontend/dist/*
 .pi/
 .pi-lens.json
 .pi-web/
+.graph-it/

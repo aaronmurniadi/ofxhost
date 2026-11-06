@@ -7,7 +7,7 @@ import "github.com/aaronmurniadi/ofxhost/internal/domain/image"
 // The filter is a box average over the source pixels that fall inside each
 // destination pixel. It is not the sharpest choice, but it is the correct one for
 // a thumbnail: it does not ring, it costs one pass, and it does not need a
-// separable implementation to stay fast enough at filmstrip sizes.
+// separable implementation to stay fast enough at preview sizes.
 func scaleDown(src image.Raster, maxEdge int) image.Raster {
 	if !src.Valid() || maxEdge <= 0 {
 		return image.Raster{}

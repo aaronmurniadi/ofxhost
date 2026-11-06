@@ -29,9 +29,6 @@ type PanelsDTO struct {
 	Right float64 `json:"right"`
 	// Plugins is the height of the plugins panel inside that column.
 	Plugins float64 `json:"plugins"`
-	// Filmstrip is the height of the filmstrip, as a percentage of the window
-	// height.
-	Filmstrip float64 `json:"filmstrip"`
 }
 
 // ThemeDTO is the appearance the window draws with.
@@ -53,9 +50,8 @@ func (b *Session) Settings() SettingsDTO {
 	panels := stored.View.ResolvedPanels()
 	return SettingsDTO{
 		Panels: PanelsDTO{
-			Right:     panels.Right,
-			Plugins:   panels.Plugins,
-			Filmstrip: panels.Filmstrip,
+			Right:   panels.Right,
+			Plugins: panels.Plugins,
 		},
 		Appearance: ThemeDTO{
 			Theme:  stored.Appearance.Theme,
@@ -72,17 +68,15 @@ func (b *Session) Settings() SettingsDTO {
 // actually got.
 func (b *Session) SetPanels(panels PanelsDTO) (PanelsDTO, error) {
 	saved, err := b.service.SetPanels(project.Panels{
-		Right:     panels.Right,
-		Plugins:   panels.Plugins,
-		Filmstrip: panels.Filmstrip,
+		Right:   panels.Right,
+		Plugins: panels.Plugins,
 	})
 	if err != nil {
 		return PanelsDTO{}, err
 	}
 	return PanelsDTO{
-		Right:     saved.Right,
-		Plugins:   saved.Plugins,
-		Filmstrip: saved.Filmstrip,
+		Right:   saved.Right,
+		Plugins: saved.Plugins,
 	}, nil
 }
 

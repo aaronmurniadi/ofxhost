@@ -320,7 +320,7 @@ func TestConcurrentPublish(t *testing.T) {
 
 func TestScaleToLongEdgeKeepsSmallFrames(t *testing.T) {
 	src := solid(10, 10, 0.5)
-	got := scaleToLongEdge(src, 100)
+	got := ScaleToLongEdge(src, 100)
 	if got.W != src.W || got.H != src.H {
 		t.Fatalf("a small frame was scaled to %dx%d", got.W, got.H)
 	}
@@ -333,7 +333,7 @@ func TestScaleToLongEdgePreservesAverage(t *testing.T) {
 	// A box average over a solid frame is the same colour, which is the cheapest
 	// check that the filter does not shift brightness.
 	src := solid(100, 50, 0.25)
-	got := scaleToLongEdge(src, 25)
+	got := ScaleToLongEdge(src, 25)
 	if got.LongEdge() != 25 {
 		t.Fatalf("long edge = %d, want 25", got.LongEdge())
 	}

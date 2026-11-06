@@ -43,6 +43,10 @@ type ChainRunner interface {
 	// ApplyWithGeneration runs the chain with a render generation, so a superseded
 	// pass stops.
 	ApplyWithGeneration(in image.Raster, generation uint64) (image.Raster, error)
+	// ApplyProjected runs the chain on a frame that may be smaller than the
+	// project, and passes the project long edge so a plugin that sizes a kernel or
+	// a noise model in project pixels stays honest at preview resolution.
+	ApplyProjected(in image.Raster, projectEdge int, generation uint64) (image.Raster, error)
 	// Close frees the instances.
 	Close()
 }
@@ -303,6 +307,22 @@ func (s *Service) SetChain(runner ChainRunner) {
 // With no chain, or with every node disabled, the frame comes back unchanged. The
 // result is a new raster, so the decoded frame stays available for the next pass.
 func (s *Service) Render(generation uint64) (image.Raster, error) {
+	return s.RenderAt(generation, 0)
+}
+
+// RenderAt runs the chain on a frame no longer than maxEdge.
+//
+// This is what makes a preview quick. The chain is run at the size the window can
+// show, not at the size of the file, so a plugin costs what the panel needs rather
+// than what the sensor recorded. A 25 MP file at 1080p is a tenth of the pixels, and
+// a plugin that convolves a kernel gets about ten times faster.
+//
+// maxEdge of zero or less renders at full resolution, which is what export does.
+//
+// The project long edge is passed on separately: several plugins size a kernel, a
+// blur radius or a noise model in project pixels, and a chain that only saw the
+// shrunken frame would compute them wrong by the scale factor.
+func (s *Service) RenderAt(generation uint64, maxEdge int) (image.Raster, error) {
 	s.mu.RLock()
 	frame := s.state.Full
 	runner := s.chain
@@ -311,12 +331,23 @@ func (s *Service) Render(generation uint64) (image.Raster, error) {
 	if frame.Empty() {
 		return image.Raster{}, errors.New("document: no image is open")
 	}
+
+	projectEdge := frame.LongEdge()
+	if maxEdge > 0 {
+		// Scaled before the first plugin, not after the last. Scaling afterwards
+		// would leave every pass running on the full frame and save only the encode.
+		frame = image.ScaleToLongEdge(frame, maxEdge)
+		if frame.Empty() {
+			return image.Raster{}, errors.New("document: the scaled frame has no pixels")
+		}
+	}
+
 	if runner == nil {
 		out := image.New(frame.W, frame.H)
 		copy(out.Pixels, frame.Pixels)
 		return out, nil
 	}
-	return runner.ApplyWithGeneration(frame, generation)
+	return runner.ApplyProjected(frame, projectEdge, generation)
 }
 
 // Chain returns the open document's chain.

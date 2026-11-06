@@ -33,7 +33,7 @@ func TestSaveThenLoadSettings(t *testing.T) {
 	want := project.DefaultSettings()
 	want.Appearance.Theme = "Light"
 	want.Appearance.FontPt = 15
-	want.View.Panels = project.Panels{Right: 30, Plugins: 60, Filmstrip: 0}
+	want.View.Panels = project.Panels{Right: 30, Plugins: 60}
 	want.Updates.Channel = string(project.ChannelPrerelease)
 
 	if err := store.SaveSettings(want); err != nil {
@@ -408,7 +408,7 @@ func TestLoadSettingsWithZeroPanelsStaysHidden(t *testing.T) {
 	const hidden = `{
 	  "format": "ofxhost",
 	  "version": 1,
-	  "view": {"previewSpace": "sRGB", "panels": {"right": 0, "plugins": 0, "filmstrip": 0}}
+	  "view": {"previewSpace": "sRGB", "panels": {"right": 0, "plugins": 0}}
 	}`
 	writeSettingsFile(t, dir, hidden)
 
@@ -425,14 +425,14 @@ func TestLoadSettingsWithZeroPanelsStaysHidden(t *testing.T) {
 // larger than the window.
 func TestLoadSettingsClampsPanels(t *testing.T) {
 	store, dir := newStore(t)
-	const extreme = `{"format":"ofxhost","version":1,"view":{"panels":{"right":250,"plugins":-4,"filmstrip":95}}}`
+	const extreme = `{"format":"ofxhost","version":1,"view":{"panels":{"right":250,"plugins":-4}}}`
 	writeSettingsFile(t, dir, extreme)
 
 	got, err := store.LoadSettings()
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
-	want := project.Panels{Right: 60, Plugins: 0, Filmstrip: 50}
+	want := project.Panels{Right: 60, Plugins: 0}
 	if got.View.Panels != want {
 		t.Fatalf("Panels = %+v, want %+v", got.View.Panels, want)
 	}

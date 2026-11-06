@@ -23,7 +23,6 @@ const SERVICE = "github.com/aaronmurniadi/ofxhost/internal/transport/binds";
 export interface PanelsDTO {
   right: number;
   plugins: number;
-  filmstrip: number;
 }
 
 /** ThemeDTO is the appearance the window draws with. */
@@ -56,7 +55,7 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
  * A failure here must not stop the window from opening, so the caller falls back
  * to the defaults rather than blocking on the answer.
  */
-export const DEFAULT_PANELS: PanelsDTO = { right: 22, plugins: 55, filmstrip: 16 };
+export const DEFAULT_PANELS: PanelsDTO = { right: 22, plugins: 55 };
 
 export const sessionApi = {
   settings: (): Promise<SettingsDTO> => call("Settings"),

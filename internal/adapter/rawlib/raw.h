@@ -65,7 +65,7 @@ typedef struct {
  *
  * Returns NULL on failure and stores a static error string in *err.
  * ofxr_identify is cheap: it reads the header and the EXIF block only, which is
- * what a filmstrip needs before it decides to decode anything.
+ * what a thumbnail needs before it decides to decode anything.
  */
 ofxr_image *ofxr_identify(const char *path, ofxr_info *info, const char **err);
 

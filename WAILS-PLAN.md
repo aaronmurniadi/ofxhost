@@ -638,7 +638,7 @@ Consequences to accept and document:
   ordered dither before encode. Do not do this pre-emptively.
 
 Pan and zoom are pure CSS transforms on the `<img>`. No pixel work in JavaScript.
-Filmstrip thumbnails use the same endpoint with a smaller `maxEdge`.
+A thumbnail uses the same endpoint with a smaller `maxEdge`.
 
 ### 7.2 Export: wide gamut, first class
 
@@ -777,7 +777,7 @@ embed non-empty before the first `npm run build`.
 #### M1 — Domain and cheap adapters
 
 - `domain/image`, `domain/chain`, `domain/project`, `domain/status`.
-- `adapter/statefiles` (JSON), `adapter/film` (worker pool), `adapter/github`
+- `adapter/statefiles` (JSON), `adapter/github`
   (update check) — all pure Go.
 - Table tests for the rules: colour space names, export format capabilities,
   version ordering, chain reorder.
@@ -882,21 +882,43 @@ Three findings worth recording:
 16-bit is measured, not assumed: a shallow gradient over 4096 pixels keeps 2,915
 distinct levels at 16 bits against 14 at 8, read back through libpng.
 
-#### M5 — Workspace, filmstrip, settings
+#### M5 — Workspace and settings
+
+*Done, in part.* The layout, the settings service, the drag-scrub number field and the
+preview render cap are in. Workspace open stays.
+
+**The preview was rendering at full resolution.** The cap was applied to the encoded
+PNG, after every plugin had already run on all 16.3 million pixels, so a smaller
+preview was cheaper to encode and not cheaper to render. The cap now reaches the chain
+first: the frame is scaled before the first plugin, and the project long edge travels
+alongside it so a plugin that sizes a kernel or a noise model in project pixels stays
+honest.
+
+Measured on the committed RAF through a real filter plugin:
+
+| Render size | Time | Fewer pixels |
+|---|---|---|
+| full 4952x3288 | 295 ms | 1.0x |
+| 2560 | 42 ms | 3.7x |
+| 1920 | 25 ms | 6.7x |
+| 1280 | 11 ms | 15x |
+
+The filmstrip is dropped. `adapter/film`, the 796-line thumbnail pool built in M1,
+existed only to drive it and had no other caller, so it is gone with it.
 
 - **Base UI** replaces the hand-rolled modal, the native `<select>`, and the
   `title`-attribute tooltips, and provides `NumberField` with drag-scrub for the twelve
   parameter kinds (§7.2b).
 - **`react-resizable-panels`** replaces the fixed CSS grid: the four panels resize,
   collapse to hidden, and restore (§7.2b). Docking is out of scope.
-- `service/document` workspace open, `_directory.json`, filmstrip with the
-  thumbnail pool.
+- `service/document` workspace open and `_directory.json`, so relaunching reopens
+  the folder and the image that was open.
 - `service/session` settings load and save, theme, font size, update checker, panel
   layout. `adapter/statefiles` has been waiting for a caller since M1.
-- `project.View` changes shape: `ShowPlugins`, `ShowParameters` and `ShowFilmstrip`
-  become per-panel sizes, where zero means hidden. A settings file from an earlier
-  build reads as "that panel had its default size", which is what the missing key
-  already means to the reader.
+- `project.View` changes shape: `ShowPlugins` and `ShowParameters` become per-panel
+  sizes, where zero means hidden. A settings file from an earlier build reads as
+  "that panel had its default size", which is what the missing key already means to
+  the reader.
 - `docs/state-format.md`.
 
 **Gate:** quit and relaunch restores the chain, the open image, the theme, and the

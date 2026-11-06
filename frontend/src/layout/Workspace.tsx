@@ -30,7 +30,6 @@ export interface WorkspaceProps {
   preview: React.ReactNode;
   plugins: React.ReactNode;
   parameters: React.ReactNode;
-  filmstrip: React.ReactNode;
 }
 
 export default function Workspace({
@@ -39,14 +38,12 @@ export default function Workspace({
   preview,
   plugins,
   parameters,
-  filmstrip,
 }: WorkspaceProps) {
   // The View menu is drawn by the shell, which is outside this tree, so the refs
   // leave through the ref object the shell passes down. Holding them here and
   // publishing a toggle function is what keeps one state for a panel rather than a
   // menu flag that can disagree with the splitter.
   const rightRef = useRef<PanelImperativeHandle | null>(null);
-  const filmstripRef = useRef<PanelImperativeHandle | null>(null);
 
   // save writes the whole layout, not one panel.
   //
@@ -58,9 +55,8 @@ export default function Workspace({
       const next: PanelsDTO = {
         right: sizeOf(layout, "right", panels.right),
         plugins: sizeOf(layout, "plugins", panels.plugins),
-        filmstrip: sizeOf(layout, "filmstrip", panels.filmstrip),
       };
-      if (next.right === panels.right && next.plugins === panels.plugins && next.filmstrip === panels.filmstrip) {
+      if (next.right === panels.right && next.plugins === panels.plugins) {
         return;
       }
       void sessionApi
@@ -76,55 +72,38 @@ export default function Workspace({
 
   return (
     <div className="workspace">
-      <Group orientation="vertical" className="workspace__group" onLayoutChanged={save}>
-        <Panel id="main" minSize={MIN_PX}>
-          <Group orientation="horizontal" onLayoutChanged={save}>
-            <Panel id="preview" minSize={MIN_PX}>
-              {preview}
-            </Panel>
-
-            <Separator className="separator separator--vertical" />
-
-            <Panel
-              id="right"
-              panelRef={rightRef}
-              minSize={MIN_PX}
-              collapsible
-              // Collapsing to zero is hiding. A zero stored in the settings file
-              // therefore restores as a hidden panel with no special case.
-              collapsedSize={0}
-              defaultSize={`${panels.right}%`}
-            >
-              <Group orientation="vertical" onLayoutChanged={save}>
-                <Panel
-                  id="plugins"
-                  minSize={MIN_PX}
-                  collapsible
-                  collapsedSize={0}
-                  defaultSize={`${panels.plugins}%`}
-                >
-                  {plugins}
-                </Panel>
-                <Separator className="separator separator--horizontal" />
-                <Panel id="parameters" minSize={MIN_PX}>
-                  {parameters}
-                </Panel>
-              </Group>
-            </Panel>
-          </Group>
+      <Group orientation="horizontal" className="workspace__group" onLayoutChanged={save}>
+        <Panel id="preview" minSize={MIN_PX}>
+          {preview}
         </Panel>
 
-        <Separator className="separator separator--horizontal" />
+        <Separator className="separator separator--vertical" />
 
         <Panel
-          id="filmstrip"
-          panelRef={filmstripRef}
+          id="right"
+          panelRef={rightRef}
           minSize={MIN_PX}
           collapsible
+          // Collapsing to zero is hiding. A zero stored in the settings file
+          // therefore restores as a hidden panel with no special case.
           collapsedSize={0}
-          defaultSize={`${panels.filmstrip}%`}
+          defaultSize={`${panels.right}%`}
         >
-          {filmstrip}
+          <Group orientation="vertical" onLayoutChanged={save}>
+            <Panel
+              id="plugins"
+              minSize={MIN_PX}
+              collapsible
+              collapsedSize={0}
+              defaultSize={`${panels.plugins}%`}
+            >
+              {plugins}
+            </Panel>
+            <Separator className="separator separator--horizontal" />
+            <Panel id="parameters" minSize={MIN_PX}>
+              {parameters}
+            </Panel>
+          </Group>
         </Panel>
       </Group>
     </div>

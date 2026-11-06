@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "../api/document";
 
 /** The zoom range, matching what the previous host allowed. */
 const MIN_ZOOM = 0.05;
@@ -30,9 +31,36 @@ interface Props {
   busy: boolean;
   /** Called with the preview area, so "fit" can follow the panel size. */
   onResize: (width: number, height: number) => void;
+  /** Asks for a fresh preview after the render size changed. */
+  onChange: () => void;
 }
 
-export default function PreviewPanel({ preview, fileName, zoomLabel, busy, onResize }: Props) {
+export default function PreviewPanel({ preview, fileName, zoomLabel, busy, onResize, onChange }: Props) {
+  // The render size is a control on the panel because it is the one setting a user
+  // reaches for while iterating: a smaller frame makes every parameter edit return
+  // sooner. It is persisted by the Go side alongside the other view settings.
+  const [resolutions, setResolutions] = useState<string[]>([]);
+  const [resolution, setResolution] = useState(0);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setResolutions((await api.previewResolutions()) ?? []);
+      } catch {
+        // The control stays hidden when the list cannot be read.
+      }
+    })();
+  }, []);
+
+  const chooseResolution = useCallback(
+    async (index: number) => {
+      setResolution(index);
+      await api.setPreviewResolution(index);
+      // Ask for the frame again at the new size; the old one is now the wrong one.
+      onChange();
+    },
+    [onChange],
+  );
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -102,6 +130,22 @@ export default function PreviewPanel({ preview, fileName, zoomLabel, busy, onRes
           <p className="panel__placeholder">Open a RAW file to see the preview.</p>
         )}
 
+        {resolutions.length > 0 ? (
+          <label className="preview__overlay preview__overlay--resolution">
+            <span className="visually-hidden">Preview resolution</span>
+            <select
+              className="preview__resolution"
+              value={resolution}
+              onChange={(event) => void chooseResolution(Number(event.target.value))}
+            >
+              {resolutions.map((name, index) => (
+                <option key={name} value={index}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         {fileName ? <span className="preview__overlay preview__overlay--name">{fileName}</span> : null}
         {preview ? <span className="preview__overlay preview__overlay--zoom">{zoomLabel}</span> : null}
       </div>

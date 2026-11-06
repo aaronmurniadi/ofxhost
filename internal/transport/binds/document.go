@@ -237,10 +237,13 @@ func (d *Document) PublishPreview() PreviewURLResponse {
 	generation := d.generation.Add(1)
 	d.mu.Unlock()
 
-	// The chain runs over the decoded frame. With no chain, or with every node
-	// disabled, this returns a copy of the decode, so the preview is always the
-	// chain output rather than a special case.
-	frame, renderErr := d.docs.Render(generation)
+	// The chain runs over the decoded frame at the size the window can show, not at
+	// the size of the file. Scaling here rather than at encode time is what makes a
+	// plugin cost what the panel needs instead of what the sensor recorded.
+	//
+	// With no chain, or with every node disabled, this returns a copy of the
+	// decode, so the preview is always the chain output rather than a special case.
+	frame, renderErr := d.docs.RenderAt(generation, d.preview.MaxEdge())
 	if renderErr != nil {
 		return PreviewURLResponse{Error: renderErr.Error()}
 	}

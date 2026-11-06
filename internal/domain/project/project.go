@@ -94,9 +94,6 @@ type Panels struct {
 	// Plugins is the height of the plugins panel inside that column. Zero gives
 	// the whole column to the parameters.
 	Plugins float64 `json:"plugins"`
-	// Filmstrip is the height of the filmstrip, as a percentage of the window
-	// height. Zero hides it.
-	Filmstrip float64 `json:"filmstrip"`
 }
 
 // Appearance is the theme and interface text size.
@@ -123,7 +120,7 @@ func DefaultSettings() Settings {
 		Version: Version,
 		View: View{
 			PreviewSpace:       "sRGB",
-			Panels:             Panels{Right: 22, Plugins: 55, Filmstrip: 16},
+			Panels:             Panels{Right: 22, Plugins: 55},
 			PreviewFitToWindow: true,
 		},
 		Appearance: Appearance{Theme: "Dark", FontPt: 0},
@@ -171,9 +168,8 @@ func (v View) ResolvedPanels() Panels {
 // file edited by hand cannot make a panel larger than the window.
 func ClampPanels(in Panels) Panels {
 	return Panels{
-		Right:     clampPercent(in.Right, 60),
-		Plugins:   clampPercent(in.Plugins, 90),
-		Filmstrip: clampPercent(in.Filmstrip, 50),
+		Right:   clampPercent(in.Right, 60),
+		Plugins: clampPercent(in.Plugins, 90),
 	}
 }
 

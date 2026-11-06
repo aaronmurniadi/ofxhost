@@ -398,3 +398,112 @@ func TestOpenUsesTheRealFilesystemNotADirectory(t *testing.T) {
 		t.Fatalf("the decoder ran %d times", decoder.callCount())
 	}
 }
+
+// recordingRunner is a chain that records the frame it was given, so a test can
+// tell whether the render was scaled before the chain or after it.
+type recordingRunner struct {
+	gotW, gotH   int
+	gotProject   int
+	applyCalls   int
+	projectCalls int
+}
+
+func (r *recordingRunner) Apply(in image.Raster) (image.Raster, error) {
+	return in, nil
+}
+
+func (r *recordingRunner) ApplyWithGeneration(in image.Raster, _ uint64) (image.Raster, error) {
+	r.applyCalls++
+	return in, nil
+}
+
+func (r *recordingRunner) ApplyProjected(in image.Raster, projectEdge int, _ uint64) (image.Raster, error) {
+	r.projectCalls++
+	r.gotW, r.gotH = in.W, in.H
+	r.gotProject = projectEdge
+	return in, nil
+}
+
+func (r *recordingRunner) Close() {}
+
+// TestRenderAtShrinksBeforeTheChain is the point of the feature. A preview that is
+// scaled after the chain costs exactly as much as a full render, so the only useful
+// measurement is what the chain was handed.
+func TestRenderAtShrinksBeforeTheChain(t *testing.T) {
+	decoder := newFakeDecoder()
+	// 4000x2000: at a 1000 long edge the chain should see 1000x500.
+	decoder.frames["/tmp/big.cr3"] = image.New(4000, 2000)
+	s := newService(t, decoder)
+	runner := &recordingRunner{}
+	s.SetChain(runner)
+
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/big.cr3", Space: image.SRGB}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, s)
+
+	out, err := s.RenderAt(7, 1000)
+	if err != nil {
+		t.Fatalf("RenderAt: %v", err)
+	}
+
+	// The chain saw the small frame, which is the whole point.
+	if runner.gotW != 1000 || runner.gotH != 500 {
+		t.Fatalf("the chain ran on %dx%d, want 1000x500", runner.gotW, runner.gotH)
+	}
+	// The project size still travels, so a plugin that sizes a kernel in project
+	// pixels is not wrong by the scale factor.
+	if runner.gotProject != 4000 {
+		t.Fatalf("projectEdge = %d, want 4000", runner.gotProject)
+	}
+	if out.W != 1000 || out.H != 500 {
+		t.Fatalf("the output is %dx%d, want 1000x500", out.W, out.H)
+	}
+}
+
+// TestRenderAtFullResolutionPassesTheWholeFrame keeps export honest: it asks for no
+// cap and must get the full frame and the full project edge.
+func TestRenderAtFullResolutionPassesTheWholeFrame(t *testing.T) {
+	decoder := newFakeDecoder()
+	decoder.frames["/tmp/big.cr3"] = image.New(4000, 2000)
+	s := newService(t, decoder)
+	runner := &recordingRunner{}
+	s.SetChain(runner)
+
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/big.cr3", Space: image.SRGB}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, s)
+
+	if _, err := s.RenderAt(8, 0); err != nil {
+		t.Fatalf("RenderAt: %v", err)
+	}
+	if runner.gotW != 4000 || runner.gotH != 2000 {
+		t.Fatalf("the chain ran on %dx%d, want the full 4000x2000", runner.gotW, runner.gotH)
+	}
+	if runner.gotProject != 4000 {
+		t.Fatalf("projectEdge = %d, want 4000", runner.gotProject)
+	}
+}
+
+// TestRenderAtDoesNotScaleUp checks that a small file is left alone. A preview cap
+// is a ceiling, not a target.
+func TestRenderAtDoesNotScaleUp(t *testing.T) {
+	decoder := newFakeDecoder()
+	decoder.frames["/tmp/small.cr3"] = image.New(400, 200)
+	s := newService(t, decoder)
+	runner := &recordingRunner{}
+	s.SetChain(runner)
+
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/small.cr3", Space: image.SRGB}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, s)
+
+	if _, err := s.RenderAt(9, 4000); err != nil {
+		t.Fatalf("RenderAt: %v", err)
+	}
+	if runner.gotW != 400 || runner.gotH != 200 {
+		t.Fatalf("the chain ran on %dx%d, want the untouched 400x200", runner.gotW, runner.gotH)
+	}
+}
