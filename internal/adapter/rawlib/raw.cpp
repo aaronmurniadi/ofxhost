@@ -204,9 +204,13 @@ void loadThumbnail(ofxr_image *img) {
     return;
   }
 
-  /* A file may carry several previews; the list holds their count after the
-   * header was read. A file with none is not a failure: the caller re-encodes a
-   * preview from the developed frame. */
+  /* A file may carry several previews, and the first is not the biggest: the
+   * committed RAF holds a 160x120 thumbnail at index 0 and a 1920x1280 preview at
+   * index 1. Taking index 0 gave a 160-pixel-wide filmstrip entry from a file that
+   * offered a 1920-pixel one, so the largest is chosen instead.
+   *
+   * A file with no preview is not a failure: the caller re-encodes one from the
+   * developed frame. */
   int count = static_cast<int>(lr->thumbs_list.thumbcount);
   if (count <= 0) {
     count = 1;
@@ -215,24 +219,33 @@ void loadThumbnail(ofxr_image *img) {
     count = LIBRAW_THUMBNAIL_MAXCOUNT;
   }
 
+  // The index of the largest preview, by pixel count. Index 0 is the fallback when
+  // the list carries no sizes.
+  int best = 0;
+  unsigned long long bestPixels = 0;
   for (int i = 0; i < count; ++i) {
-    if (libraw_unpack_thumb_ex(lr, i) != 0) {
-      continue;
-    }
-    int thumbErr = 0;
-    libraw_processed_image_t *thumb = libraw_dcraw_make_mem_thumb(lr, &thumbErr);
-    if (thumb == nullptr) {
-      continue;
-    }
-    if (thumb->type == LIBRAW_IMAGE_JPEG || thumb->type == LIBRAW_IMAGE_JPEGXL) {
-      img->thumbnail.assign(thumb->data, thumb->data + thumb->data_size);
-      img->thumb_ok = !img->thumbnail.empty();
-    }
-    libraw_dcraw_clear_mem(thumb);
-    if (img->thumb_ok) {
-      return;
+    const libraw_thumbnail_item_t &item = lr->thumbs_list.thumblist[i];
+    const unsigned long long pixels =
+        static_cast<unsigned long long>(item.twidth) * static_cast<unsigned long long>(item.theight);
+    if (pixels > bestPixels) {
+      bestPixels = pixels;
+      best = i;
     }
   }
+
+  if (libraw_unpack_thumb_ex(lr, best) != 0) {
+    return;
+  }
+  int thumbErr = 0;
+  libraw_processed_image_t *thumb = libraw_dcraw_make_mem_thumb(lr, &thumbErr);
+  if (thumb == nullptr) {
+    return;
+  }
+  if (thumb->type == LIBRAW_IMAGE_JPEG || thumb->type == LIBRAW_IMAGE_JPEGXL) {
+    img->thumbnail.assign(thumb->data, thumb->data + thumb->data_size);
+    img->thumb_ok = !img->thumbnail.empty();
+  }
+  libraw_dcraw_clear_mem(thumb);
 }
 
 }  // namespace

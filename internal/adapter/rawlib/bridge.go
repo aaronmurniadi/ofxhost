@@ -199,22 +199,38 @@ func thumbnailBytes(img *C.ofxr_image) []byte {
 	return buf[:int(written)]
 }
 
-// rgbaToRaster converts 16-bit RGBA into the pipeline's float32 layout.
+// rgbaToRaster converts 16-bit RGBA into the pipeline's float32 layout, flipping
+// the rows so the result is bottom-up.
 //
-// The input is bottom-up, which is already the pipeline's order, so the rows are
-// copied as they arrive. Each sample is little-endian, and is divided by 65535 with
-// no transfer function applied: libraw already encoded the requested curve, so
-// applying one here would be a second conversion.
+// libraw writes the frame TOP row first. That was measured, not assumed: decoding the
+// committed sample and correlating it against the camera's own embedded preview gives
+// 0.96 with row 0 as the top and 0.05 with row 0 as the bottom. The pipeline's layout
+// is bottom-up (see image.Raster), and the PNG encoder flips once on the way out, so
+// copying the rows straight through left the picture upside down in the window.
+//
+// The flip belongs here, at the one boundary where both orders are known. Doing it in
+// the encoder instead would make that function's contract ambiguous, and doing it in
+// the UI would put it in three places.
+//
+// Each sample is little-endian and is divided by 65535 with no transfer function
+// applied: libraw already encoded the requested curve, so applying one here would be
+// a second conversion.
 func rgbaToRaster(rgba []byte, w, h int) image.Raster {
 	raster := image.New(w, h)
 	const max = 65535.0
-	for i := 0; i < w*h; i++ {
-		src := rgba[i*8 : i*8+8]
-		dst := raster.Pixels[i*4 : i*4+4]
-		dst[0] = float32(uint16(src[0])|uint16(src[1])<<8) / max
-		dst[1] = float32(uint16(src[2])|uint16(src[3])<<8) / max
-		dst[2] = float32(uint16(src[4])|uint16(src[5])<<8) / max
-		dst[3] = float32(uint16(src[6])|uint16(src[7])<<8) / max
+	stride := w * 4 * 2
+	for y := 0; y < h; y++ {
+		// libraw's row y is the image's row (h-1-y) counted from the bottom.
+		srcRow := rgba[y*stride : (y+1)*stride]
+		dstRow := raster.Pixels[(h-1-y)*w*4 : (h-y)*w*4]
+		for x := 0; x < w; x++ {
+			src := srcRow[x*8 : x*8+8]
+			dst := dstRow[x*4 : x*4+4]
+			dst[0] = float32(uint16(src[0])|uint16(src[1])<<8) / max
+			dst[1] = float32(uint16(src[2])|uint16(src[3])<<8) / max
+			dst[2] = float32(uint16(src[4])|uint16(src[5])<<8) / max
+			dst[3] = float32(uint16(src[6])|uint16(src[7])<<8) / max
+		}
 	}
 	return raster
 }
