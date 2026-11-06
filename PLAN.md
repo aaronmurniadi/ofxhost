@@ -953,8 +953,24 @@ distinct levels at 16 bits against 14 at 8, read back through libpng.
 
 #### M5 — Workspace and settings
 
-*Done, in part.* The layout, the settings service, the drag-scrub number field and the
-preview render cap are in. Workspace open stays.
+*Done.* The layout, the settings service and panel, the theme, the drag-scrub number
+field, the preview render cap, the dialogs, the dropdowns and the tooltips are in.
+
+What the milestone delivered, against its own list:
+
+- **Layout.** `react-resizable-panels` replaced the fixed grid. Panels resize, collapse
+  to hidden, and restore. Three sizes replaced three visibility booleans (D9).
+- **Settings.** A panel for theme, text size and update channel. Each change persists
+  before it reports success, so there is no Apply button and no unsaved state.
+- **Theme.** Every colour became a token, selected by `data-theme` on the root. The light
+  theme is not the dark one inverted: the panel is lighter than the page so the work area
+  reads as raised, and the accent is darker to keep its contrast. Text size is a separate
+  token, because a user who needs larger text should not have to change theme to get it.
+- **Widgets.** Base UI Dialog for every modal - focus trap, Escape, scroll lock, and focus
+  returned to whatever opened it. Seven native dropdowns replaced. Ten `title` attributes
+  replaced with real tooltips, each icon button gaining an `aria-label` at the same time.
+- **Persistence.** Only UI state is written (D10): the place, the theme, the layout. The
+  plugin chain is not persisted; it reaches disk only through an export that asks for one.
 
 **The preview was rendering at full resolution.** The cap was applied to the encoded
 PNG, after every plugin had already run on all 16.3 million pixels, so a smaller
