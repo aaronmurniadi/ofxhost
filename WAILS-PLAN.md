@@ -749,6 +749,74 @@ No migration from the old app (D4). OfxHost writes its own state under its own
 config directory. The format is new and gets its own document,
 `docs/state-format.md`, written in milestone E.
 
+### 7.5 Telling plugins which colour space they receive
+
+**Deferred. Not in v1. This section records why, and what to do when it becomes
+worth doing.**
+
+The user picks a working space when the file opens (D8), and that space becomes the
+input to the first plugin. The host never tells the plugin what that space is. A plugin
+that can adapt therefore cannot, and one that assumes sRGB is wrong on three of the four
+spaces.
+
+OFX 1.5 has the mechanism, and it is a negotiation rather than a setting:
+
+- the plugin lists what it prefers per clip in `OfxImageClipPropColourspace` during
+  `kOfxImageEffectActionGetClipPreferences`;
+- the host picks a space it can actually supply and sets
+  `OfxImageClipPropColourspace` on the render in-args to say which;
+- `OfxImageEffectActionGetOutputColourspace` covers the output side;
+- `OfxImageEffectPropColourManagementStyle` declares which naming scheme is in use.
+
+**Our host does none of this today.** `getClipPreferencesAction` is never called, and no
+colour space reaches the render arguments.
+
+**The number that decided the deferral: 4 of 70.** Every installed plugin binary was
+scanned for the property name. Only the four `spektrafilm` editions implement it. The
+other 66 — Bloom, Bulge, Duotone and the rest — do not contain the string at all, and no
+host can tell them anything. This is also why `spektrafilm` carries its own 33-entry
+`quickInputColorSpace` parameter: it has been working around hosts that never negotiate.
+
+Our four spaces do map cleanly onto the standard identifiers, so the mapping is not the
+obstacle:
+
+| Ours | OFX / OCIO identifier |
+|---|---|
+| sRGB | `srgb_display` |
+| Display P3 | `displayp3_display` |
+| Linear Rec.709 | `lin_rec709_srgb` |
+| Linear Rec.2020 | `lin_rec2020` |
+
+#### When it is done, do the small version
+
+**Declare the truth, do not negotiate.** Set `OfxImageClipPropColourspace` on the render
+in-args to the space the pixels are actually in, and set the colour management style to
+Basic. No colour conversion, no change to the pipeline, no change to D8. The
+specification allows this outright: *"The host is free to choose any colourspace from
+this list … and set kOfxImageClipPropColourspace to tell the plug-in which colourspace
+has been selected."* A plugin that understands the property converts internally, which
+is what it is for.
+
+Touches roughly eight files: one field on `port.RenderRequest`, one property in the
+render in-args in `host.cpp`, a name table in `domain/image`, and the working space
+plumbed from `document.Service` through `ChainRunner` into `Graph.ApplyProjected`.
+
+**Do not do the full negotiation.** Asking each plugin for its preference list and then
+converting the frame into it would put a colour conversion between every pair of plugins
+and contradicts D8. That is a large change to the pipeline, bought for four of seventy
+plugins.
+
+#### Measure before keeping it
+
+The reason this is deferred rather than done is that its benefit is unproven.
+`spektrafilm` already has `quickInputColorSpace`, and it may honour that parameter in
+preference to the clip property, or honour neither.
+
+So the acceptance test is a pixel comparison, not the presence of a property: render the
+same frame through `spektrafilm` twice, declaring `Lin Rec.2020` and then `sRGB`, and
+compare the output. **If the pixels do not move, revert the change rather than keep a
+property nothing reads.**
+
 ---
 
 ## Part IV — Milestones
@@ -1031,6 +1099,9 @@ back to `~/Downloads` and `~/Pictures` and finally skip when there is none.
 - Reading the old `ofxrawhost` state files (D4).
 - Video, animation, timelines, batch processing.
 - CPU-GPU hybrid rendering.
+- Negotiating colour spaces with plugins (§7.5). Deferred on evidence: four of the
+  seventy installed plugins implement the property, and the small version's benefit is
+  unproven until measured.
 
 Anything in this list that becomes necessary is a new milestone, added to §8
 first.
