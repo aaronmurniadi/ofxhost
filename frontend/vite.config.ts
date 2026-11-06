@@ -18,7 +18,7 @@ function embedPlaceholder(): Plugin {
     apply: "build",
     closeBundle() {
       writeFileSync(
-        resolve(__dirname, "dist/.gitkeep"),
+        resolve(import.meta.dirname, "dist/.gitkeep"),
         `The built frontend lands here.
 
 This file keeps the directory present so the go:embed directive in embed.go has

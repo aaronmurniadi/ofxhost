@@ -47,6 +47,12 @@ export default function Select({
   return (
     <BaseSelect.Root
       value={value}
+      // The items are declared here as well as rendered below, and that is not
+      // duplication. The rendered items live in a portal that is not mounted while the
+      // popup is closed, so the trigger has nothing to read a label from and falls back
+      // to the raw value - which showed "0" instead of the option's name in every
+      // dropdown.
+      items={options}
       onValueChange={(next) => {
         // Base UI reports null when the selection is cleared, which this control never
         // offers, so it is ignored rather than treated as a choice of "nothing".
