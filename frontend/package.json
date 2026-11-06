@@ -8,8 +8,7 @@
     "build:dev": "tsc && vite build --minify false --mode development",
     "build": "tsc && vite build --mode production",
     "preview": "vite preview",
-    "test": "vitest run",
-    "postbuild": "node ./scripts/postbuild.mjs"
+    "test": "vitest run"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

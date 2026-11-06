@@ -11,6 +11,7 @@
  * implying a live switch.
  */
 
+import Modal from "../widgets/Modal";
 import { useEffect, useState } from "react";
 import { api } from "../api/document";
 
@@ -51,43 +52,40 @@ export default function OpenDialog({ path, onConfirm, onCancel }: Props) {
   const fileName = path.split(/[\\/]/).pop() ?? path;
 
   return (
-    <div className="modal" role="dialog" aria-modal="true" aria-label="Choose a working space">
-      <div className="modal__body">
-        <h2 className="modal__title">Working space</h2>
-        <p className="modal__text">
-          {fileName} is a RAW file, so it declares no colour space. Choose the space to
-          develop it into. This is the space the chain works in and the space the first
-          plugin is given.
-        </p>
-
-        <div className="modal__choices">
-          {spaces.map((name, index) => (
-            <label key={name} className="modal__choice">
-              <input
-                type="radio"
-                name="working-space"
-                checked={choice === index}
-                onChange={() => setChoice(index)}
-              />
-              <span>{name}</span>
-            </label>
-          ))}
-        </div>
-
-        <p className="modal__note">
-          Changing this later means opening the file again: the space is where the decode
-          happens, not a setting applied afterwards.
-        </p>
-
-        <div className="modal__actions">
-          <button className="button" onClick={confirm}>
+    <Modal
+      open
+      onClose={onCancel}
+      title="Working space"
+      description={`${fileName} is a RAW file, so it declares no colour space. Choose the space to develop it into. This is the space the chain works in, and the space the first plugin is given.`}
+      actions={
+        <>
+          <button className="button button--primary" onClick={confirm}>
             Open
           </button>
           <button className="button" onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </>
+      }
+    >
+      <div className="modal__choices">
+        {spaces.map((name, index) => (
+          <label key={name} className="modal__choice">
+            <input
+              type="radio"
+              name="working-space"
+              checked={choice === index}
+              onChange={() => setChoice(index)}
+            />
+            <span>{name}</span>
+          </label>
+        ))}
       </div>
-    </div>
+
+      <p className="modal__note">
+        Changing this later means opening the file again: the space is where the decode
+        happens, not a setting applied afterwards.
+      </p>
+    </Modal>
   );
 }

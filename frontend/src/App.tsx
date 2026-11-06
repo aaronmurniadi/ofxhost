@@ -23,6 +23,7 @@ import OpenDialog from "./panels/OpenDialog";
 import ParametersPanel from "./panels/ParametersPanel";
 import PluginsPanel from "./panels/PluginsPanel";
 import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
+import SettingsDialog from "./panels/SettingsDialog";
 
 /** How often the shell asks whether a decode has landed. */
 const POLL_INTERVAL_MS = 120;
@@ -62,6 +63,23 @@ export default function App() {
   const [settingsReady, setSettingsReady] = useState(false);
   // lastImage is the file that was open last time, offered as a one-click restore.
   const [lastImage, setLastImage] = useState("");
+  // settingsOpen shows the settings dialog.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // applyAppearance repaints the shell.
+  //
+  // The theme is an attribute and the text size is a token, so a change costs one
+  // style recalculation and no React re-render of the panels.
+  const applyAppearance = useCallback((theme: string, fontPt: number) => {
+    const root = document.documentElement;
+    root.dataset.theme = theme.toLowerCase();
+    if (fontPt > 0) {
+      root.style.setProperty("--font-size", `${fontPt}px`);
+    } else {
+      // Zero means follow the system, which is the stylesheet's own default.
+      root.style.removeProperty("--font-size");
+    }
+  }, []);
 
   // Load the stored layout once.
   //
@@ -73,6 +91,9 @@ export default function App() {
         const settings = await sessionApi.settings();
         if (settings?.panels) {
           setPanels(settings.panels);
+        }
+        if (settings?.appearance) {
+          applyAppearance(settings.appearance.theme, settings.appearance.fontPt);
         }
       } catch {
         // Keep the defaults.
@@ -97,7 +118,7 @@ export default function App() {
         // No session to restore.
       }
     })();
-  }, []);
+  }, [applyAppearance]);
 
   // Poll while a decode is in flight.
   //
@@ -243,6 +264,9 @@ export default function App() {
         >
           Export…
         </button>
+        <button className="button" onClick={() => setSettingsOpen(true)}>
+          Settings
+        </button>
         <span className="app__version">{version}</span>
       </header>
 
@@ -280,6 +304,13 @@ export default function App() {
           path={pendingPath}
           onConfirm={(space) => void openWithSpace(space)}
           onCancel={() => setPendingPath("")}
+        />
+      ) : null}
+
+      {settingsOpen ? (
+        <SettingsDialog
+          onClose={() => setSettingsOpen(false)}
+          onAppearanceChange={applyAppearance}
         />
       ) : null}
 

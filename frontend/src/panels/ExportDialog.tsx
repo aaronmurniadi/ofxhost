@@ -11,6 +11,7 @@
  * the format cannot honour — it produces a note instead.
  */
 
+import Modal from "../widgets/Modal";
 import { useEffect, useState } from "react";
 import { exportApi, type ExportOptionsDTO, type ExportResult, type FormatDTO } from "../api/document";
 
@@ -111,9 +112,22 @@ export default function ExportDialog({ onClose, onExported }: Props) {
   };
 
   return (
-    <div className="modal" role="dialog" aria-modal="true" aria-label="Export">
-      <div className="modal__body modal__body--wide">
-        <h2 className="modal__title">Export</h2>
+    <Modal
+      open
+      onClose={onClose}
+      title="Export"
+      wide
+      actions={
+        <>
+          <button className="button button--primary" onClick={() => void run()} disabled={busy}>
+            {busy ? "Exporting…" : "Export"}
+          </button>
+          <button className="button" onClick={onClose} disabled={busy}>
+            Close
+          </button>
+        </>
+      }
+    >
 
         <div className="field">
           <label className="field__label" htmlFor="export-format">
@@ -258,15 +272,6 @@ export default function ExportDialog({ onClose, onExported }: Props) {
           </p>
         ))}
 
-        <div className="modal__actions">
-          <button className="button" onClick={() => void run()} disabled={busy}>
-            {busy ? "Exporting…" : "Export"}
-          </button>
-          <button className="button" onClick={onClose} disabled={busy}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

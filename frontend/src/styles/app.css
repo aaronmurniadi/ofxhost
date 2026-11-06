@@ -1,24 +1,79 @@
 /*
  * Colours and metrics for the shell.
  *
- * The values are deliberately plain and few. A real theme system arrives with the
- * settings panel in M5; until then this file is the one place a colour lives, so
- * nothing has to be found and replaced across components later.
+ * Every colour is a token, and a theme is a set of token values selected by
+ * `data-theme` on the root element. Nothing in the components names a colour
+ * directly, so adding a theme is a block below and nothing else.
+ *
+ * The text size is a separate token because the settings panel changes it on its own,
+ * and a user who needs larger text should not have to switch theme to get it.
  */
 
-:root {
+:root,
+[data-theme="dark"] {
   --bg: #1e1e1e;
   --panel: #252525;
+  --line: #3d3d3d;
   --panel-border: #3d3d3d;
   --text: #e6e6e6;
   --text-dim: #999999;
+  --muted: #9a9aa2;
   --accent: #4772b3;
+  --accent-contrast: #ffffff;
+  --field-bg: #17171a;
+  --step-bg: #232327;
+  --step-bg-hover: #2e2e34;
+  --backdrop: rgba(0, 0, 0, 0.55);
+  --preview-bg: #141414;
+  --danger: #e07a7a;
+  --overlay-bg: rgba(20, 20, 24, 0.85);
+  --status-busy: #6c9cf5;
+  --selected-bg: #2f3a4d;
+  --hover-bg: #1b1b1b;
+  --line-strong: #3d3d3d;
+  --chip-bg: #2f2f2f;
+  color-scheme: dark;
+}
 
+/*
+ * The light theme.
+ *
+ * It is not the dark one inverted: the panel is lighter than the page so the work area
+ * reads as raised, and the accent is darker so it keeps its contrast against a pale
+ * background.
+ */
+[data-theme="light"] {
+  --bg: #f2f2f4;
+  --panel: #ffffff;
+  --line: #d8d8dd;
+  --panel-border: #d0d0d6;
+  --text: #1c1c1e;
+  --text-dim: #5f5f66;
+  --muted: #6a6a72;
+  --accent: #2f5fa8;
+  --accent-contrast: #ffffff;
+  --field-bg: #fbfbfd;
+  --step-bg: #eeeef1;
+  --step-bg-hover: #e3e3e8;
+  --backdrop: rgba(30, 30, 34, 0.35);
+  --preview-bg: #d9d9de;
+  --danger: #b23b3b;
+  --overlay-bg: rgba(255, 255, 255, 0.88);
+  --status-busy: #2f5fa8;
+  --selected-bg: #d7e2f4;
+  --hover-bg: #ebebef;
+  --line-strong: #c4c4cb;
+  --chip-bg: #e8e8ec;
+  color-scheme: light;
+}
+
+:root {
   --panel-gap: 2px;
   --bar-height: 34px;
   --radius: 4px;
+  --font-size: 13px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 13px;
+  font-size: var(--font-size);
   color: var(--text);
   background: var(--bg);
 }
@@ -97,17 +152,17 @@ body,
   content: "";
   position: absolute;
   inset: 0;
-  background: var(--line, #2e2e32);
+  background: var(--line);
   transition: background 120ms ease;
 }
 
 .separator:hover::after,
 .separator:focus-visible::after {
-  background: var(--accent, #6c9cf5);
+  background: var(--accent);
 }
 
 .separator:focus-visible {
-  outline: 2px solid var(--accent, #6c9cf5);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -204,7 +259,7 @@ body,
   overflow: hidden;
   /* A checkerboard would be misleading here: the preview is opaque, so a flat
    * backdrop is what the user expects behind a photograph. */
-  background: #141414;
+  background: var(--preview-bg);
 }
 
 .preview__image {
@@ -258,7 +313,7 @@ body,
 .plugins__picker {
   margin-bottom: 8px;
   padding: 6px;
-  background: #1b1b1b;
+  background: var(--hover-bg);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
 }
@@ -308,7 +363,7 @@ body,
 }
 
 .plugins__node--selected {
-  background: #2f3a4d;
+  background: var(--selected-bg);
 }
 
 .plugins__name {
@@ -325,7 +380,7 @@ body,
 
 .plugins__error {
   margin: 4px 0 8px;
-  color: #e07a7a;
+  color: var(--danger);
   font-size: 11px;
 }
 
@@ -383,7 +438,7 @@ body,
 .button {
   padding: 3px 10px;
   color: var(--text);
-  background: #3d3d3d;
+  background: var(--line-strong);
   border: 0;
   border-radius: 3px;
   cursor: pointer;
@@ -410,7 +465,7 @@ body,
 
 .icon:hover:not(:disabled) {
   color: var(--text);
-  background: #3d3d3d;
+  background: var(--line-strong);
 }
 
 .icon:disabled {
@@ -421,7 +476,7 @@ body,
 .input {
   padding: 3px 6px;
   color: var(--text);
-  background: #1b1b1b;
+  background: var(--hover-bg);
   border: 1px solid var(--panel-border);
   border-radius: 3px;
 }
@@ -434,25 +489,53 @@ body,
 /* The open dialog. It is modal in the sense that it takes the click, but it is a
  * plain element: the window has one, only one, and it is shown while a file waits
  * for its colour space. */
-.modal {
+/*
+ * The modal.
+ *
+ * Base UI renders three elements: a backdrop, a viewport that centres its child, and the
+ * popup. The dim is a backdrop rather than a blur because the preview behind is the thing
+ * being decided about, so it stays visible.
+ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--backdrop);
+  z-index: 10;
+}
+
+.modal-viewport {
   position: fixed;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  /* A dim rather than a blur: the preview behind is the thing being decided about,
-   * so it stays visible. */
-  background: rgba(0, 0, 0, 0.55);
-  z-index: 10;
+  padding: 16px;
+  z-index: 11;
 }
 
-.modal__body {
+.modal {
   width: 420px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
   padding: 16px;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  /* Base UI sets these while the dialog animates in; without a transition they are
+   * simply the final values. */
+  opacity: 1;
+  outline: none;
+}
+
+.modal--wide {
+  width: 640px;
+}
+
+.modal__body {
+  /* The body carries no size of its own: the popup does. */
+  min-width: 0;
 }
 
 .modal__title {
@@ -485,7 +568,7 @@ body,
 }
 
 .modal__choice:hover {
-  background: #2f2f2f;
+  background: var(--chip-bg);
 }
 
 .modal__note {
@@ -547,10 +630,10 @@ body,
 .numfield {
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--line, #2e2e32);
+  border: 1px solid var(--line);
   border-radius: 3px;
   overflow: hidden;
-  background: var(--field-bg, #17171a);
+  background: var(--field-bg);
 }
 
 .numfield__input {
@@ -566,15 +649,15 @@ body,
 
 .numfield__step {
   border: 0;
-  background: var(--step-bg, #232327);
-  color: var(--muted, #9a9aa2);
+  background: var(--step-bg);
+  color: var(--muted);
   padding: 0 6px;
   cursor: pointer;
   line-height: 1;
 }
 
 .numfield__step:hover:not(:disabled) {
-  background: var(--step-bg-hover, #2e2e34);
+  background: var(--step-bg-hover);
   color: inherit;
 }
 
@@ -584,7 +667,7 @@ body,
 }
 
 .numfield:focus-within {
-  border-color: var(--accent, #6c9cf5);
+  border-color: var(--accent);
 }
 
 /* The scrub area is the label. The cursor is the only cue that it is draggable,
@@ -596,7 +679,7 @@ body,
 }
 
 .params__label--scrub:active {
-  color: var(--accent, #6c9cf5);
+  color: var(--accent);
 }
 
 /* While the pointer is locked the cursor sits at the middle of the window, so a
@@ -613,15 +696,15 @@ body,
   gap: var(--panel-gap);
   align-items: center;
   padding: 4px 10px;
-  border-top: 1px solid var(--line, #2e2e32);
-  color: var(--muted, #9a9aa2);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
   font-size: 0.85em;
   min-height: 1.9em;
   flex: 0 0 auto;
 }
 
 .app__status--busy {
-  color: var(--accent, #6c9cf5);
+  color: var(--accent);
 }
 
 /* An element that is read by a screen reader but not drawn. */
@@ -662,9 +745,9 @@ body,
 }
 
 .preview__resolution {
-  background: rgba(20, 20, 24, 0.85);
+  background: var(--overlay-bg);
   color: inherit;
-  border: 1px solid var(--line, #2e2e32);
+  border: 1px solid var(--line);
   border-radius: 3px;
   padding: 2px 4px;
   font-size: 0.85em;
@@ -679,7 +762,7 @@ body,
 
 .params__section > .params__section {
   margin-left: 10px;
-  border-left: 1px solid var(--line, #2e2e32);
+  border-left: 1px solid var(--line);
   padding-left: 8px;
 }
 
@@ -689,7 +772,7 @@ body,
   font-size: 0.85em;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--muted, #9a9aa2);
+  color: var(--muted);
   margin: 6px 0 2px;
   padding: 2px 0;
 }
@@ -700,7 +783,37 @@ body,
 
 .params__hidden {
   font-size: 0.8em;
-  color: var(--muted, #9a9aa2);
+  color: var(--muted);
   margin: 2px 0 6px;
   font-style: italic;
+}
+
+/* A primary action.
+   One per dialog at most, so "the thing you probably want" is unambiguous. */
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.button--primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+/* A row of related controls. */
+.settings__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+/* The chosen one in a set of exclusive buttons.
+   Reads as pressed rather than merely focused, so the current value is obvious at a
+   glance without relying on colour alone. */
+.button--selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
 }
