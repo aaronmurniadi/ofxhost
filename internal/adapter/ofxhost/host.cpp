@@ -1631,6 +1631,36 @@ extern "C" int ofxh_param_get_double(ofxh_instance *handle, const char *name, do
   }
 }
 
+/* notifyParamChanged tells the plugin that the host changed one of its parameters.
+ *
+ * OFX reserves kOfxActionInstanceChanged for exactly this case: a plugin that rebuilds
+ * a menu, enables or disables a control, or recomputes one value from another only does
+ * so when it is told the change happened. Writing the value and stopping there leaves
+ * all of that undone - which is how spektrafilm's preset list stayed at its single
+ * default entry after the category was changed.
+ *
+ * The three calls are one action, in the order the OFX specification gives them. The
+ * reason is kOfxChangeUserEdited because the value came from the user, not from the
+ * plugin itself.
+ */
+int notifyParamChanged(ofxh_instance *handle, const char *name) {
+  if (handle == nullptr || handle->entry == nullptr || handle->entry->instance == nullptr) {
+    return kOfxStatErrBadHandle;
+  }
+  OFX::Host::ImageEffect::Instance *instance = handle->entry->instance.get();
+  OfxPointD renderScale{1.0, 1.0};
+  try {
+    instance->beginInstanceChangedAction(kOfxChangeUserEdited);
+    instance->paramInstanceChangedAction(name, kOfxChangeUserEdited, 0.0, renderScale);
+    instance->endInstanceChangedAction(kOfxChangeUserEdited);
+  } catch (...) {
+    // A plugin that raises here has already been given the change; the value is
+    // written and stays written, so the write is not turned into a failure.
+    return kOfxStatOK;
+  }
+  return kOfxStatOK;
+}
+
 extern "C" int ofxh_param_set_double(ofxh_instance *handle, const char *name, const double *values, int count) {
   if (handle == nullptr || handle->entry == nullptr || name == nullptr || values == nullptr) {
     return kOfxStatErrBadHandle;
@@ -1640,7 +1670,11 @@ extern "C" int ofxh_param_set_double(ofxh_instance *handle, const char *name, co
     if (param == nullptr) {
       return kOfxStatErrBadIndex;
     }
-    return writeNumeric(param, values, count);
+    const int status = writeNumeric(param, values, count);
+    if (status != kOfxStatOK) {
+      return status;
+    }
+    return notifyParamChanged(handle, name);
   } catch (...) {
     return kOfxStatFailed;
   }
@@ -1687,7 +1721,11 @@ extern "C" int ofxh_param_set_string(ofxh_instance *handle, const char *name, co
     if (textParam == nullptr) {
       return kOfxStatErrValue;
     }
-    return textParam->set(value);
+    const int status = textParam->set(value);
+    if (status != kOfxStatOK) {
+      return status;
+    }
+    return notifyParamChanged(handle, name);
   } catch (...) {
     return kOfxStatFailed;
   }

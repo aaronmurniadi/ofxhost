@@ -55,11 +55,27 @@ func (i *Instance) ID() int64 {
 // Label returns the plugin's display name.
 func (i *Instance) Label() string { return i.info.Label }
 
+// refreshParams reloads the parameter metadata from the plugin.
+//
+// A plugin can redraw a parameter's description in response to another parameter: a
+// choice list can be rebuilt, a range can narrow, a control can be disabled. The list
+// is read once at creation because the panel reads it on every draw, but after a change
+// that copy is stale, and a stale copy is what leaves a menu showing one entry while
+// the plugin has twenty.
+//
+// The caller holds mu.
+func (i *Instance) refreshParams() {
+	if i.handle == nil {
+		return
+	}
+	i.params = loadParams(i.handle)
+}
+
 // Params implements port.Instance.
 //
-// The metadata is read once when the instance is created, because a panel reads it
-// every time it is drawn and rebuilding the strings per frame would cost more than
-// the draw.
+// The metadata is read when the instance is created and again after every write,
+// because a panel reads it every time it is drawn and rebuilding the strings per frame
+// would cost more than the draw.
 func (i *Instance) Params() []port.ParamInfo {
 	out := make([]port.ParamInfo, len(i.params))
 	copy(out, i.params)
@@ -131,6 +147,7 @@ func (i *Instance) SetValues(name string, value port.ParamValue) error {
 		if status := C.ofxh_param_set_string(i.handle, cName, cText); status != statusOK {
 			return statusError("write the text parameter "+name, status)
 		}
+		i.refreshParams()
 		return nil
 	}
 
@@ -144,6 +161,7 @@ func (i *Instance) SetValues(name string, value port.ParamValue) error {
 	if status := C.ofxh_param_set_double(i.handle, cName, &buf[0], C.int(len(buf))); status != statusOK {
 		return statusError("write the value of "+name, status)
 	}
+	i.refreshParams()
 	return nil
 }
 
@@ -158,6 +176,9 @@ func (i *Instance) ResetToDefaults() (int, error) {
 	if changed < 0 {
 		return 0, statusError("reset the parameters", C.int(changed))
 	}
+	// A reset changes many values at once, and a plugin that rebuilds a menu in
+	// response leaves the cached copy stale for every one of them.
+	i.refreshParams()
 	return changed, nil
 }
 

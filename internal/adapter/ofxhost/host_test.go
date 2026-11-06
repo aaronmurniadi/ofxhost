@@ -510,3 +510,80 @@ func TestDiscoverRejectsAClosedHost(t *testing.T) {
 		t.Fatal("Create after Close must fail")
 	}
 }
+
+// TestChangingOneParameterRepopulatesAnother is the regression for a menu that never
+// grew past its first entry.
+//
+// Spektrafilm's Quick Access section picks a preset category and then a preset within
+// it. The preset list is a single default entry until the plugin is told the category
+// changed; the plugin rebuilds the list in its instance-changed action. A host that
+// only writes the value never sends that action, so the second menu stays at one item
+// no matter which category is chosen.
+//
+// The host now sends the action after every write and re-reads the metadata, so the
+// panel sees the new list. This test drives the same path a user does.
+func TestChangingOneParameterRepopulatesAnother(t *testing.T) {
+	host, err := New(Options{})
+	if err != nil {
+		t.Skipf("no plugin host: %v", err)
+	}
+	t.Cleanup(func() { _ = host.Close() })
+	if err := host.Discover(nil); err != nil {
+		t.Skipf("the plugin scan failed: %v", err)
+	}
+
+	var instance port.Instance
+	for _, plugin := range host.Plugins() {
+		if plugin.Label != "spektrafilm" {
+			continue
+		}
+		created, createErr := host.Create(plugin.Index)
+		if createErr != nil {
+			t.Fatalf("create: %v", createErr)
+		}
+		t.Cleanup(func() { _ = created.Close() })
+		instance = created
+		break
+	}
+	if instance == nil {
+		t.Skip("spektrafilm is not installed")
+	}
+
+	optionsOf := func(name string) []string {
+		for _, p := range instance.Params() {
+			if p.Name == name {
+				return p.ChoiceLabels
+			}
+		}
+		t.Fatalf("no parameter %q", name)
+		return nil
+	}
+
+	const category = "quickPresetCategory"
+	const selection = "quickPresetSelection"
+
+	if len(optionsOf(category)) < 2 {
+		t.Skip("this build exposes one preset category, so there is nothing to switch to")
+	}
+
+	// The category the plugin starts on may legitimately offer one preset; every other
+	// category must offer its own list.
+	grew := 0
+	for index := range optionsOf(category) {
+		if setErr := instance.SetValues(category, port.ParamValue{Nums: []float64{float64(index)}}); setErr != nil {
+			t.Fatalf("set %s to %d: %v", category, index, setErr)
+		}
+		options := optionsOf(selection)
+		if len(options) == 0 {
+			t.Fatalf("category %d left the preset list empty", index)
+		}
+		if len(options) > 1 {
+			grew++
+		}
+	}
+
+	if grew == 0 {
+		t.Fatal("every category offered one preset, so the list never repopulated")
+	}
+	t.Logf("%d of %d categories offered more than one preset after switching", grew, len(optionsOf(category)))
+}
