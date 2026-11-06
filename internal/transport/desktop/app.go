@@ -28,6 +28,11 @@ import (
 const (
 	defaultWidth  = 1400
 	defaultHeight = 900
+	// A window narrower than this cannot show the preview and a usable chain
+	// column at once, so the resize stops here rather than letting the layout
+	// collapse into something the user cannot recover from by dragging.
+	minimumWidth  = 900
+	minimumHeight = 600
 	maximumWidth  = 4000
 	maximumHeight = 3000
 )
@@ -96,13 +101,18 @@ func New(opts Options) *App {
 		Title:            "OfxHost",
 		Width:            defaultWidth,
 		Height:           defaultHeight,
+		MinWidth:         minimumWidth,
+		MinHeight:        minimumHeight,
 		MaxWidth:         maximumWidth,
 		MaxHeight:        maximumHeight,
 		BackgroundColour: application.NewRGB(30, 30, 30),
 		Mac: application.MacWindow{
-			// The four panels need the full height, so the title bar is inset
-			// rather than stacked above the content.
-			TitleBar: application.MacTitleBarHiddenInset,
+			// The default title bar, not the hidden-inset one. Inset sets
+			// AppearsTransparent and FullSizeContent, which removes the visible
+			// frame macOS normally draws: the window then has no border and no
+			// drag region of its own, and the four panels lose the separation
+			// from the desktop that a border gives them.
+			TitleBar: application.MacTitleBarDefault,
 		},
 		URL: "/",
 	})

@@ -46,71 +46,95 @@ Dependencies point inward. Code below the transport line never imports Wails,
 never imports `"C"`, and never touches the filesystem directly.
 
 ```
-   cmd/ofxhost                    composition root: the only main()
+   cmd/ofxhost        version, logger, exit code — the only main()
         │
-        ├── transport/desktop    Wails app, window, menus, dialogs
-        │        └── transport/frames      pixel delivery to the WebView
-        │
-        ├── transport/binds      DTO in, DTO out, zero logic
-        │
-        ├── service/             use-cases, state ownership, sequencing
-        │
-        ├── port/                interfaces + cross-package value types
-        │
-        ├── domain/              pure values and rules, stdlib only
-        │
-        └── adapter/             ALL CGO LIVES HERE
+        └── internal/app            composition root: builds adapters, injects
+              │                     services, creates the window, owns shutdown
+              ├── transport/desktop        Wails app, window, menus, dialogs
+              │        └── transport/frames      pixel delivery to the WebView
+              ├── transport/binds          DTO in, DTO out, zero logic
+              ├── service/                 use-cases, state ownership, sequencing
+              ├── port/                    interfaces + cross-package value types
+              ├── platform/                OS paths, resources, fatal dialog
+              ├── domain/                  pure values and rules, stdlib only
+              └── adapter/                 ALL CGO LIVES HERE
+
+   cmd/ofxhost ──> internal/cli       subcommands with no window: render, version
 ```
+
+Two packages sit beside the graph and are allowed to reach across it:
+
+- **`internal/app`** is the composition root. It constructs every adapter and
+  service, so it imports every layer by definition. It is also the only package
+  outside `internal/transport/` that may import Wails, because it creates the
+  window. The guard names that single file rather than exempting the directory, so
+  a new file in `internal/app` cannot import Wails by accident.
+- **`internal/cli`** holds the subcommands that run without a window. It may use
+  the adapters and the services directly, because a CLI has no transport layer to
+  give it requests; it may not import Wails or `transport/`. Its reason to exist is
+  that the decode path must be testable from a script.
 
 | Package | May import |
 |---|---|
 | `internal/domain/...` | standard library only |
+| `internal/platform/...` | standard library only |
 | `internal/port/...` | `internal/domain` |
 | `internal/service/...` | `internal/port`, `internal/domain` |
-| `internal/adapter/...` | `internal/port`, `internal/domain`, C libraries |
-| `internal/transport/...` | `internal/service`, `internal/domain`, `github.com/wailsapp/wails/v3` |
-| `cmd/ofxhost` | everything |
+| `internal/adapter/...` | `internal/port`, `internal/domain`, `internal/platform`, C libraries |
+| `internal/transport/...` | `internal/service`, `internal/port`, `internal/domain` |
+| `internal/app` | everything, including Wails |
+| `internal/cli` | `internal/adapter`, `internal/service`, `internal/domain`, `internal/port` |
+| `cmd/ofxhost` | `internal/app`, `internal/cli` |
 
-Two bans, enforced by `tools/layerguard` (a Go program that parses imports, run
-by `go generate` and by a `go test` in `tools/layerguard`):
+Three bans, enforced by `tools/layerguard` (a Go program that parses imports, run
+by `go run ./tools/layerguard` and by a `go test` in `tools/layerguard`, so a
+violation fails `go test ./...`):
 
 1. `import "C"` is legal **only** under `internal/adapter/`.
-2. `wailsapp/wails` is legal **only** under `internal/transport/` and `cmd/ofxhost`.
-
-A third ban, cheap and valuable: `internal/domain` may not import `net`, `os`,
-`time` (except `time.Duration` maths via a local alias), or `image` from stdlib.
+2. `wailsapp/wails` is legal **only** under `internal/transport/`,
+   `internal/app/app.go`, and `cmd/`.
+3. A layer may not import upward. `platform` sits just above `domain` because it
+   is a leaf of standard-library calls that every layer above it needs; putting it
+   higher would make an adapter that wants a directory path import a layer that
+   also owns the window.
 
 ### 2. Tree
 
 ```
 ofxhost/
-  cmd/ofxhost/main.go             composition root
+  cmd/ofxhost/main.go             version, logger, exit code — nothing else
   internal/
+    app/           composition root: builds every adapter and service, wires the
+                   window, owns shutdown. The only place that knows every layer,
+                   and the only non-transport file allowed to import Wails.
+    cli/           subcommands that run without a window: render (decode and
+                   write a PNG) and version. Makes the pipeline scriptable, so a
+                   decoder bug is found by a test and not by a person clicking.
     domain/
       image/       Raster, ColorSpace, RenderIntent, ExportFormat, ExportSettings
       chain/       Node, Chain, parameter values, reorder rules
-      project/     Sidecar, WorkspaceProject, Settings, Appearance, UpdateChannel
+      project/     Sidecar, WorkspaceProject, Settings, Appearance, UpdateChannel,
+                   version ordering
       status/      StatusSink: last message + a bounded history
     port/
       decoder.go   ImageDecoder
-      encoder.go   ImageEncoder
-      color.go     ColorConverter
+      imaging.go   ImageEncoder, ColorConverter, Thumbnailer
       effecthost.go EffectHost, Instance, PluginInfo, ParamInfo, RenderRequest
-      thumbnails.go Thumbnailer
-      store.go     ProjectStore
-      updater.go   UpdateChecker
-      renderer.go  Renderer (CPU + GPU seam)
-      logger.go    Logger, Reporter
+      store.go     ProjectStore, UpdateChecker, GPUBackend, DeviceBuffer
+      frames.go    Frame, FrameSink (how a service publishes a preview without
+                   knowing the window fetches it over HTTP)
+      errors.go    StatusError, ErrNotImplemented, Logger, Reporter
     service/
-      document/    open image, open workspace, sidecar prompt
+      document/    the open frame, the decode goroutine, the three colour spaces
+      preview/     convert to sRGB, scale to the cap, encode the PNG
       chain/       add/move/enable/delete node, edit/reset params, colour space
       render/      coordinator: debounce, proxy scale, preview rebuild, recolor
       export/      encode pipeline, ICC embedding, export sidecar
       session/     settings load/save, update manager, the injected bundle
     adapter/
-      rawlib/      libraw        -> port.ImageDecoder
-      codes/       libpng, libjpeg-turbo, libtiff, libwebp, libjxl, zlib -> port.ImageEncoder
+      rawlib/      libraw        -> port.ImageDecoder, port.Thumbnailer
       lcms/        lcms2         -> port.ColorConverter
+      codes/       libpng, libjpeg-turbo, libtiff, libwebp, libjxl, zlib -> port.ImageEncoder
       ofxhost/     OFX OfxHost   -> port.EffectHost      (C++, the only C++ here)
       statefiles/  encoding/json -> port.ProjectStore
       film/        goroutine pool -> port.Thumbnailer
@@ -121,10 +145,10 @@ ofxhost/
       frames/      loopback http.Handler for preview pixels
       events/      event names and typed payloads in one place
     platform/
-      paths/ resource/ report/   OS paths, embedded fonts, fatal-error dialogs
-    gpu/           colour maths shared by CPU and the Metal stub (pure Go)
+      paths/       config, state and cache directories; sidecar mirroring
+      resource/    embedded fonts and icons (M4)
+      report/      fatal error dialog, parent console attach (M6)
   frontend/        React + TS + Vite (Wails `react` template)
-  cgo/include/     the only hand-written C headers the Go side includes
   tools/layerguard/
   third_party/openfx/    submodule
   third_party/noiseprofiles/
@@ -581,6 +605,11 @@ Greenfield. Nothing is ported. Every milestone ends green before the next starts
 
 **Gate:** the layer guard fails when `domain` imports `os`, and the window opens.
 
+*Done.* 78 files, one commit. Two additions beyond this list: the frontend is
+embedded by `frontend/embed.go` rather than from `cmd/`, because `go:embed` cannot
+reach above its own directory; and a committed `frontend/dist/.gitkeep` keeps the
+embed non-empty before the first `npm run build`.
+
 #### M1 — Domain and cheap adapters
 
 - `domain/image`, `domain/chain`, `domain/project`, `domain/status`.
@@ -590,6 +619,10 @@ Greenfield. Nothing is ported. Every milestone ends green before the next starts
   version ordering, chain reorder.
 
 **Gate:** tests pass with `-race`; no CGO yet.
+
+*Done.* One design finding: the layer guard rejected `adapter` importing
+`platform`, which showed `platform` had been placed above the adapters. It is a leaf
+of standard-library calls, so it now sits just above `domain`.
 
 #### M2 — Load a RAW and see it (the first real milestone)
 
@@ -602,6 +635,22 @@ Greenfield. Nothing is ported. Every milestone ends green before the next starts
 
 **Gate:** open a CR3, NEF and DNG; the preview matches the camera's own JPEG
 preview closely; no blocking of the UI thread; `-race` clean.
+
+*Done.* Two packages that were not in the original plan were added here and are now
+part of it:
+
+- **`internal/app`** — the composition root, moved out of `cmd/` so the wiring can be
+  built and tested without an executable. It is the only non-transport package that
+  imports Wails, and the guard names that one file.
+- **`internal/cli`** — `render` and `version` subcommands that run without a window.
+  `ofxhost render -out x.png -max-edge 1200 -space "Linear Rec.709" photo.cr3` is
+  how the decode path is verified from a script instead of by clicking.
+
+The gate was met with a caveat: the preview was verified by measuring the written
+PNGs (luminance spread, and a linear render measurably darker than the sRGB one),
+not by comparing against the camera's embedded JPEG. That comparison is worth doing
+before M4, because it is the only check that catches a wrong demosaic rather than a
+wrong pipeline.
 
 #### M3 — OpenFX
 
