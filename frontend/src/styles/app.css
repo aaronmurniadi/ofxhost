@@ -89,6 +89,19 @@ body,
   margin: 0;
 }
 
+/*
+ * The application root is its own stacking context.
+ *
+ * Base UI renders dialogs, dropdowns and tooltips into a portal at the end of <body>, and
+ * a portal does not inherit the app's stacking context. Any z-index inside our own layout
+ * would then paint over an open popup. Isolating the root keeps every popup above the
+ * application regardless of the numbers used inside it, which is what the Base UI and Kumo
+ * guidance both say - and better than raising each popup's z-index until it happens to win.
+ */
+#root {
+  isolation: isolate;
+}
+
 .app {
   display: flex;
   flex-direction: column;
@@ -934,4 +947,24 @@ body,
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
   font-size: 0.85em;
   line-height: 1.35;
+}
+
+/* The scrub cursor.
+   Base UI hides the native cursor while a scrub is live and shows this instead. Without
+   it the pointer appears to do nothing until the value moves. */
+.numfield__cursor {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+}
+
+/* The text inside a scrub area. It is a real <label> so it can name the input. */
+.params__label-text {
+  cursor: ew-resize;
+  user-select: none;
 }

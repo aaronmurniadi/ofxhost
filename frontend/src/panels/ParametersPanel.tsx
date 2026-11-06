@@ -258,6 +258,12 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
 
   // The first component drives the draggable label: dragging the name is the quick
   // way to make a small change without aiming at the box.
+  // One id per parameter, shared by the label and the first input, so the label names the
+  // control. Base UI's canonical anatomy puts both inside one NumberField.Root; this row
+  // keeps them apart because a slider sits between them, and aria-labelledby is what makes
+  // that arrangement accessible anyway.
+  const labelId = `param-${param.name}-label`;
+
   const scrubProps = {
     value: values[0],
     min: param.hardMin,
@@ -275,7 +281,9 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
 
   return (
     <div className="params__row">
-      <ParamScrubLabel {...scrubProps}>{param.label}</ParamScrubLabel>
+      <ParamScrubLabel {...scrubProps} labelId={labelId}>
+        {param.label}
+      </ParamScrubLabel>
       <div className="params__controls">
         {single ? (
           <input
@@ -300,6 +308,7 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
             step={step}
             disabled={disabled}
             label={values.length > 1 ? `${param.label} ${component + 1}` : param.label}
+            labelId={component === 0 ? labelId : undefined}
             onCommit={(next) => {
               const updated = values.slice();
               updated[component] = next;

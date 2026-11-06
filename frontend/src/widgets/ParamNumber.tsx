@@ -16,6 +16,7 @@
  */
 
 import { NumberField } from "@base-ui/react/number-field";
+import { useId } from "react";
 
 interface Props {
   /** The value the plugin currently holds. */
@@ -33,6 +34,8 @@ interface Props {
   label: string;
   /** Called once, when the user releases the drag or leaves the field. */
   onCommit: (value: number) => void;
+  /** Id of the label element that names this input, when one is drawn elsewhere. */
+  labelId?: string;
 }
 
 export default function ParamNumber({
@@ -44,9 +47,12 @@ export default function ParamNumber({
   disabled,
   label,
   onCommit,
+  labelId,
 }: Props) {
+  const id = useId();
   return (
     <NumberField.Root
+      id={id}
       value={value}
       min={min}
       max={max}
@@ -68,7 +74,13 @@ export default function ParamNumber({
         <NumberField.Decrement className="numfield__step" aria-label={`Decrease ${label}`}>
           −
         </NumberField.Decrement>
-        <NumberField.Input className="input numfield__input" aria-label={label} />
+        <NumberField.Input
+          className="input numfield__input"
+          // The name comes from the visible label when there is one, and from aria-label
+          // when the row label belongs to a different field.
+          aria-label={labelId === undefined ? label : undefined}
+          aria-labelledby={labelId}
+        />
         <NumberField.Increment className="numfield__step" aria-label={`Increase ${label}`}>
           +
         </NumberField.Increment>
@@ -85,6 +97,7 @@ export default function ParamNumber({
  * precise one by dragging the name, without the two gestures fighting.
  */
 export function ParamScrubLabel({
+  labelId,
   value,
   min,
   max,
@@ -94,7 +107,7 @@ export function ParamScrubLabel({
   label,
   onCommit,
   children,
-}: Props & { children: React.ReactNode }) {
+}: Props & { children: React.ReactNode; labelId?: string }) {
   return (
     <NumberField.Root
       value={value}
@@ -111,7 +124,16 @@ export function ParamScrubLabel({
       }}
     >
       <NumberField.ScrubArea className="params__label params__label--scrub">
-        {children}
+        <label id={labelId} className="params__label-text">
+          {children}
+        </label>
+        {/* The cursor is the only cue that the drag is live; without it the pointer
+            appears to do nothing until the value moves. */}
+        <NumberField.ScrubAreaCursor className="numfield__cursor">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+            <path d="M1 6h10M3 3L1 6l2 3M9 3l2 3-2 3" stroke="currentColor" strokeWidth="1" fill="none" />
+          </svg>
+        </NumberField.ScrubAreaCursor>
       </NumberField.ScrubArea>
     </NumberField.Root>
   );
