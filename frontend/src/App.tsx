@@ -227,7 +227,6 @@ export default function App() {
             <PreviewPanel
               preview={preview}
               fileName={doc?.fileName ?? ""}
-              zoomLabel="100%"
               busy={busy}
               onResize={onResize}
               onChange={requestRender}

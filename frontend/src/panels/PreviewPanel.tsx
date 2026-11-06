@@ -27,7 +27,6 @@ export interface PreviewState {
 interface Props {
   preview: PreviewState | null;
   fileName: string;
-  zoomLabel: string;
   busy: boolean;
   /** Called with the preview area, so "fit" can follow the panel size. */
   onResize: (width: number, height: number) => void;
@@ -35,7 +34,7 @@ interface Props {
   onChange: () => void;
 }
 
-export default function PreviewPanel({ preview, fileName, zoomLabel, busy, onResize, onChange }: Props) {
+export default function PreviewPanel({ preview, fileName, busy, onResize, onChange }: Props) {
   // The render size is a control on the panel because it is the one setting a user
   // reaches for while iterating: a smaller frame makes every parameter edit return
   // sooner. It is persisted by the Go side alongside the other view settings.
@@ -64,13 +63,23 @@ export default function PreviewPanel({ preview, fileName, zoomLabel, busy, onRes
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  // canvasSize is the area the image has to fit into.
+  //
+  // Without it the image is drawn at its own width and height, so a 1920-wide preview
+  // inside a 900-wide panel was simply clipped. Zoom is a multiple of the fit, which
+  // makes "1" mean "the whole frame is visible" at every panel size.
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
-  // A new preview resets the view, so the user sees the whole frame rather than a
+  // A new image resets the view, so the user sees the whole frame rather than a
   // corner of the previous one.
+  //
+  // It keys on the file and not on the preview URL: the URL changes every time a
+  // parameter is edited, and resetting there would throw away the zoom on every
+  // keystroke of a drag.
   useEffect(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
-  }, [preview?.url]);
+  }, [fileName]);
 
   // Report the panel size on every resize. The observer is what makes "fit to
   // preview" follow a dragged panel edge without a resize handler on the window.
@@ -82,7 +91,10 @@ export default function PreviewPanel({ preview, fileName, zoomLabel, busy, onRes
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const box = entry.contentRect;
-        onResize(Math.round(box.width), Math.round(box.height));
+        const width = Math.round(box.width);
+        const height = Math.round(box.height);
+        setCanvasSize({ width, height });
+        onResize(width, height);
       }
     });
     observer.observe(element);
@@ -104,6 +116,14 @@ export default function PreviewPanel({ preview, fileName, zoomLabel, busy, onRes
     setPan({ x: 0, y: 0 });
   }, []);
 
+  // fitScale is the factor that puts the whole frame inside the canvas. Zoom
+  // multiplies it, so wheel and trackpad change the view without ever losing the
+  // frame on the first draw.
+  const fitScale =
+    preview && preview.width > 0 && preview.height > 0 && canvasSize.width > 0 && canvasSize.height > 0
+      ? Math.min(canvasSize.width / preview.width, canvasSize.height / preview.height)
+      : 1;
+
   return (
     <section className="panel panel--preview" aria-label="Preview">
       <div
@@ -123,7 +143,7 @@ export default function PreviewPanel({ preview, fileName, zoomLabel, busy, onRes
             alt={fileName || "Preview"}
             draggable={false}
             style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${fitScale * zoom})`,
             }}
           />
         ) : (
@@ -147,7 +167,11 @@ export default function PreviewPanel({ preview, fileName, zoomLabel, busy, onRes
           </label>
         ) : null}
         {fileName ? <span className="preview__overlay preview__overlay--name">{fileName}</span> : null}
-        {preview ? <span className="preview__overlay preview__overlay--zoom">{zoomLabel}</span> : null}
+        {preview ? (
+          <span className="preview__overlay preview__overlay--zoom">
+            {Math.round(fitScale * zoom * 100)}%
+          </span>
+        ) : null}
       </div>
     </section>
   );

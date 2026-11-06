@@ -149,20 +149,32 @@ body,
   border-radius: var(--radius);
 }
 
+/*
+ * The panel fills the cell the splitter gave it.
+ *
+ * This used to be the grid's job: a grid item is stretched to its track, so the
+ * panels had no height of their own and never needed one. A splitter cell does not
+ * do that, and without this every panel sizes to its content - which for the preview
+ * meant a canvas with nothing definite to be 100% of.
+ */
+.workspace .panel {
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 .panel--preview {
-  grid-area: preview;
   /* The canvas fills the panel and draws its own backdrop, so the panel adds no
    * padding of its own. */
   padding: 0;
   overflow: hidden;
 }
 
-.panel--plugins {
-  grid-area: plugins;
-}
-
+.panel--plugins,
 .panel--parameters {
-  grid-area: parameters;
+  /* Both scroll their own content, so the panel itself must not grow past the cell. */
+  overflow: auto;
 }
 
 .panel__title {
@@ -218,7 +230,9 @@ body,
 .preview__overlay--name {
   top: 8px;
   left: 8px;
-  max-width: calc(100% - 16px);
+  /* Leave room for the render-size control in the other corner, so a long file name
+   * cannot run underneath it. */
+  max-width: calc(100% - 160px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -624,11 +638,27 @@ body,
 }
 
 /* The render-size control, drawn over the preview like the other overlays. */
+/*
+ * The render size sits at the top right.
+ *
+ * It used to be at the bottom left, in the same corner as the zoom label, so the two
+ * were drawn on top of each other.
+ *
+ * The overlay default is pointer-events: none, because the labels must not swallow a
+ * drag meant for the image. A control is the exception: without this the select is
+ * drawn but every click passes through it to the canvas underneath.
+ */
 .preview__overlay--resolution {
-  left: 8px;
-  right: auto;
-  bottom: 8px;
-  top: auto;
+  top: 8px;
+  right: 8px;
+  left: auto;
+  bottom: auto;
+  pointer-events: auto;
+}
+
+.preview__overlay--resolution .preview__resolution {
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .preview__resolution {
