@@ -31,6 +31,7 @@ These are settled. Do not reopen them without a written reason in this file.
 | D6 | **No Metal in the first implementation.** Stubs behind the renderer port | `port.EffectHost` carries a `GPUBackend` seam with a CPU implementation and a no-op stub |
 | D7 | **No golden corpus, no porting from the C++ tree.** The old app is too crude to be a foundation | Requirements come from the OpenFX 1.5 standard and from this document, not from `src/` |
 | D8 | **The working space is the user's choice, asked when the file opens.** It becomes the input space of the first plugin. Nothing is compared against the camera's own JPEG | The decoder develops straight into the chosen space at 16 bits; the previous "matches the camera preview" check is dropped |
+| D9 | **Base UI for components, `react-resizable-panels` for layout.** Panels resize and toggle; **docking is out of scope** | One drag-scrub number field instead of a hand-written one; a splitter library instead of the fixed CSS grid. `project.View` loses its three `show*` booleans and gains per-panel sizes, because a boolean that can disagree with a splitter is two sources of truth for one fact |
 
 D7 has one exception worth naming: the **on-disk formats** (`docs/workspace-format.md`
 in the old repo) are a reasonable starting shape for the sidecar JSON. Read them as
@@ -654,6 +655,64 @@ profile where its format allows it: PNG `iCCP`, TIFF tag 34675, JPEG APP2, WebP
 `ICCP`, JPEG XL colr box. Where a format cannot carry a profile, the export
 dialog says so before the user clicks Export.
 
+### 7.2b Components and layout
+
+Decision D9. Two dependencies, each answering a different question.
+
+**Base UI (`@base-ui/react`, MIT, v1.9) for the widgets that are hard to hand-roll.**
+Dialog, Menu, Select, Tooltip, Slider, and — the reason for the choice —
+`NumberField` with its `ScrubArea`: drag to change the value, wheel to step, shift for
+precision, pointer lock so the drag does not stop at the window edge. That gesture is
+the core of this interface: twelve parameter kinds, and one plugin reports 165
+parameters.
+
+Measured, tree-shaken, with React external: **268 KB minified, 91 KB gzipped** for six
+components. That roughly triples the current 181 KB bundle, which is acceptable for a
+frontend embedded in a 16 MB binary.
+
+Two things were checked rather than assumed:
+
+- Base UI depends on `@floating-ui/react-dom`, so it has a JavaScript positioning
+  fallback. Its CSS anchor positioning is an optimisation, not a requirement, which
+  matters because anchor positioning reaches Safari only at 26.0 and WebKitGTK later
+  still. The Linux target works.
+- Base UI supports React 17, 18 and 19, so the pinned `^18.2.0` is fine.
+
+**One item is unverified and must be settled before the widgets are built.** Pointer
+lock inside an embedded WKWebView or WebView2 is sometimes gated in a way a normal
+browser is not. Twenty minutes in the real window decides it. If it fails, the fallback
+is a custom scrub hook that skips pointer lock and clamps the drag to the window edge,
+about sixty lines.
+
+**`react-resizable-panels` (MIT, v4.19) for the panel layout.** Docking is out of
+scope (D9): no drag-to-rearrange, no floating windows, no tab groups. What is in scope
+is resize and toggle, which this library does directly:
+
+```tsx
+<Group orientation="horizontal" onLayout={persist}>
+  <Panel id="chain"  collapsible collapsedSize={0} minSize={180} defaultSize="22%">
+    <PluginsPanel />
+  </Panel>
+  <Separator />
+  <Panel id="preview">
+    <PreviewPanel />
+  </Panel>
+  ...
+</Group>
+```
+
+- **Resize**: drag a `Separator`.
+- **Hide**: `collapsible` with `collapsedSize={0}`. Collapse to zero is hidden.
+- **Show**: the imperative `expand()`, which restores the size the panel had before it
+  was collapsed.
+- **Persist**: `onLayout` writes the sizes into the settings file under `view`; the
+  `defaultSize` of each panel reads them back at start up.
+- **The View menu** calls `collapse()`/`expand()` through a panel ref, so a panel
+  hidden from the menu and one hidden by dragging its splitter end in the same state.
+
+That last point is what keeps the state honest: there is one source of truth per panel
+rather than a `showPlugins` boolean that can disagree with the splitter.
+
 ### 7.3 Threading
 
 ```
@@ -681,7 +740,8 @@ Rules:
 | Which image of a directory was open | `service/document` | `_directory.json` |
 | Theme, font size, panel visibility, export options | `service/session` | `settings.json` |
 | Window geometry | `transport/desktop` | Wails config |
-| Panel layout | `frontend` | `localStorage` key `ofxhost.layout.v1` |
+| Panel sizes and which panels are shown | `service/session` | `settings.json`, under `view`, so the layout follows the user and not the machine |
+| Which panel was collapsed and to what | `frontend` | not persisted; a hidden panel reopens at its previous size, which `react-resizable-panels` holds for the session |
 
 No migration from the old app (D4). OfxHost writes its own state under its own
 config directory. The format is new and gets its own document,
@@ -822,13 +882,28 @@ distinct levels at 16 bits against 14 at 8, read back through libpng.
 
 #### M5 — Workspace, filmstrip, settings
 
+- **Base UI** replaces the hand-rolled modal, the native `<select>`, and the
+  `title`-attribute tooltips, and provides `NumberField` with drag-scrub for the twelve
+  parameter kinds (§7.2b).
+- **`react-resizable-panels`** replaces the fixed CSS grid: the four panels resize,
+  collapse to hidden, and restore (§7.2b). Docking is out of scope.
 - `service/document` workspace open, `_directory.json`, filmstrip with the
   thumbnail pool.
-- `service/session` settings load and save, theme, font size, update checker.
+- `service/session` settings load and save, theme, font size, update checker, panel
+  layout. `adapter/statefiles` has been waiting for a caller since M1.
+- `project.View` changes shape: `ShowPlugins`, `ShowParameters` and `ShowFilmstrip`
+  become per-panel sizes, where zero means hidden. A settings file from an earlier
+  build reads as "that panel had its default size", which is what the missing key
+  already means to the reader.
 - `docs/state-format.md`.
 
-**Gate:** quit and relaunch restores the chain, the open image, the theme and the
-layout.
+**Gate:** quit and relaunch restores the chain, the open image, the theme, and the
+panel sizes and visibility. Dragging a splitter to zero hides that panel and the View
+menu shows it again at the size it had. A parameter can be changed by dragging its
+number field, in the real window, on macOS.
+
+**Settle first:** the pointer-lock question in §7.2b. It changes how the number field
+is built, so it is the first thing in the milestone, not the last.
 
 #### M6 — Other platforms
 
