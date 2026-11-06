@@ -170,7 +170,7 @@ func New(opts Options) (*App, error) {
 	// exporting a dialog of its own.
 	window.Application().RegisterService(
 		application.NewService(binds.NewDocument(ctx, docs, renderer, graph, pluginHost, window.FilePicker(), docStore)))
-	window.Application().RegisterService(application.NewService(binds.NewChain(graph, pluginHost)))
+	window.Application().RegisterService(application.NewService(binds.NewChain(graph, pluginHost, func() bool { return docs.State().Path != "" })))
 	window.Application().RegisterService(
 		application.NewService(binds.NewExport(ctx, docs, exportService, window.FilePicker(), docStore, graph)))
 

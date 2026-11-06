@@ -284,7 +284,7 @@ export default function App() {
               onChange={requestRender}
             />
           }
-          plugins={<PluginsPanel onChange={requestRender} />}
+          plugins={<PluginsPanel onChange={requestRender} hasDocument={doc?.open === true} />}
           parameters={
             <ParametersPanel selected={chain?.selected ?? -1} onChange={requestRender} />
           }

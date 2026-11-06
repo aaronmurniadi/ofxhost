@@ -15,13 +15,24 @@ import (
 type Chain struct {
 	graph *chainsvc.Graph
 	host  port.EffectHost
+	// hasDocument reports whether an image is open.
+	//
+	// A chain belongs to a document: its first node is applied to that document's
+	// pixels. Adding one before a file is open builds a chain with nothing to run on,
+	// and the renderer would then have to handle a node whose input does not exist.
+	// The frontend hides the button, and this refuses the call, because a hidden button
+	// is not a rule.
+	hasDocument func() bool
 }
 
 // NewChain returns the chain binding. Either argument may be nil on a machine with
 // no plugins.
 // NewChain returns the binding.
-func NewChain(graph *chainsvc.Graph, host port.EffectHost) *Chain {
-	return &Chain{graph: graph, host: host}
+//
+// hasDocument may be nil, which means the check is not configured; only a test passes
+// nil, and it then gets the old behaviour.
+func NewChain(graph *chainsvc.Graph, host port.EffectHost, hasDocument func() bool) *Chain {
+	return &Chain{graph: graph, host: host, hasDocument: hasDocument}
 }
 
 // PluginDTO is one discovered plugin, for the picker.
@@ -149,6 +160,9 @@ func (c *Chain) Current() ChainDTO {
 
 // Add appends a plugin to the chain.
 func (c *Chain) Add(pluginIndex int) AddResult {
+	if c.hasDocument != nil && !c.hasDocument() {
+		return AddResult{Index: -1, Error: "open an image before adding a plugin"}
+	}
 	if c.graph == nil {
 		return AddResult{Index: -1, Error: "no plugin host is available"}
 	}

@@ -15,9 +15,17 @@ import { chainApi, type ChainDTO, type PluginDTO } from "../api/document";
 interface Props {
   /** Bumped by the shell when a render should be redone. */
   onChange: () => void;
+  /**
+   * Whether an image is open.
+   *
+   * A chain belongs to a document, so there is nothing to add a plugin to until one is
+   * open. The Go side refuses the call as well; this hides the control so the rule is
+   * visible rather than only enforced.
+   */
+  hasDocument: boolean;
 }
 
-export default function PluginsPanel({ onChange }: Props) {
+export default function PluginsPanel({ onChange, hasDocument }: Props) {
   const [chain, setChain] = useState<ChainDTO | null>(null);
   const [plugins, setPlugins] = useState<PluginDTO[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -70,12 +78,17 @@ export default function PluginsPanel({ onChange }: Props) {
       <h2 className="panel__title">Plugins</h2>
 
       <div className="plugins__actions">
-        <button className="button" onClick={() => setPickerOpen((open) => !open)}>
+        <button
+          className="button"
+          onClick={() => setPickerOpen((open) => !open)}
+          disabled={!hasDocument}
+          title={hasDocument ? "Add a plugin to the chain" : "Open an image first"}
+        >
           Add plugin
         </button>
       </div>
 
-      {pickerOpen ? (
+      {pickerOpen && hasDocument ? (
         <div className="plugins__picker">
           <input
             className="input"
