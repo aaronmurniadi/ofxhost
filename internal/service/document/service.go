@@ -33,6 +33,20 @@ import (
 	"github.com/aaronmurniadi/ofxhost/internal/port"
 )
 
+// ChainRunner is the live plugin chain a document renders through.
+//
+// It is an interface rather than the concrete graph so this package does not import
+// the chain service: a document needs to run passes, not to edit nodes.
+type ChainRunner interface {
+	// Apply runs the enabled nodes over a frame.
+	Apply(in image.Raster) (image.Raster, error)
+	// ApplyWithGeneration runs the chain with a render generation, so a superseded
+	// pass stops.
+	ApplyWithGeneration(in image.Raster, generation uint64) (image.Raster, error)
+	// Close frees the instances.
+	Close()
+}
+
 // State is the open document.
 //
 // It is a value a caller reads through the accessors below, because the decode
@@ -80,6 +94,10 @@ type Service struct {
 	color   port.ColorConverter
 	status  *status.Sink
 	logger  port.Logger
+	// chain is the live plugin chain of the open document, set by the composition
+	// root once the plugin host exists. It is nil when no plugin host is available,
+	// and every use of it is guarded.
+	chain ChainRunner
 
 	mu    sync.RWMutex
 	state State
@@ -260,6 +278,37 @@ func (s *Service) SetInputSpace(space image.ColorSpace) error {
 	s.state.InputSpace = space
 	s.mu.Unlock()
 	return nil
+}
+
+// SetChain gives the document a plugin chain.
+//
+// A nil runner means the document renders without plugins, which is what happens on
+// a machine that has no OpenFX plugins at all.
+func (s *Service) SetChain(runner ChainRunner) {
+	s.mu.Lock()
+	s.chain = runner
+	s.mu.Unlock()
+}
+
+// Render runs the chain over the full frame.
+//
+// With no chain, or with every node disabled, the frame comes back unchanged. The
+// result is a new raster, so the decoded frame stays available for the next pass.
+func (s *Service) Render(generation uint64) (image.Raster, error) {
+	s.mu.RLock()
+	frame := s.state.Full
+	runner := s.chain
+	s.mu.RUnlock()
+
+	if frame.Empty() {
+		return image.Raster{}, errors.New("document: no image is open")
+	}
+	if runner == nil {
+		out := image.New(frame.W, frame.H)
+		copy(out.Pixels, frame.Pixels)
+		return out, nil
+	}
+	return runner.ApplyWithGeneration(frame, generation)
 }
 
 // Chain returns the open document's chain.

@@ -15,9 +15,12 @@ import (
 	"context"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
+	"github.com/aaronmurniadi/ofxhost/internal/port"
+	chainsvc "github.com/aaronmurniadi/ofxhost/internal/service/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/service/document"
 	"github.com/aaronmurniadi/ofxhost/internal/service/preview"
 )
@@ -26,6 +29,8 @@ import (
 type Document struct {
 	docs    *document.Service
 	preview *preview.Renderer
+	chain   *chainsvc.Graph
+	host    port.EffectHost
 
 	// ctx is the application lifetime, set by the composition root before the
 	// frontend can call anything.
@@ -39,11 +44,17 @@ type Document struct {
 	lastURL string
 	// lastWidth and lastHeight describe that preview.
 	lastWidth, lastHeight int
+	// generation counts renders, so a newer preview aborts an older pass.
+	generation atomic.Uint64
 }
 
 // NewDocument returns the document binding.
-func NewDocument(ctx context.Context, docs *document.Service, renderer *preview.Renderer) *Document {
-	return &Document{ctx: ctx, docs: docs, preview: renderer}
+//
+// Both the chain and the host may be nil: a machine with no OpenFX plugins still
+// opens and shows images, it just has no chain to apply.
+func NewDocument(ctx context.Context, docs *document.Service, renderer *preview.Renderer, chain *chainsvc.Graph,
+	host port.EffectHost) *Document {
+	return &Document{ctx: ctx, docs: docs, preview: renderer, chain: chain, host: host}
 }
 
 // CameraDTO is the capture metadata, flattened for the frontend.
@@ -162,9 +173,20 @@ func (d *Document) PublishPreview() PreviewURLResponse {
 	if id == "" {
 		id = d.mintDocumentIDLocked(state.Path)
 	}
+	// Every publish is a new render generation, which is what makes a superseded
+	// pass abort instead of finishing work nobody will see.
+	generation := d.generation.Add(1)
 	d.mu.Unlock()
 
-	url, err := d.preview.Publish(d.ctx, id, state.Full, state.WorkingSpace, image.Perceptual)
+	// The chain runs over the decoded frame. With no chain, or with every node
+	// disabled, this returns a copy of the decode, so the preview is always the
+	// chain output rather than a special case.
+	frame, renderErr := d.docs.Render(generation)
+	if renderErr != nil {
+		return PreviewURLResponse{Error: renderErr.Error()}
+	}
+
+	url, err := d.preview.Publish(d.ctx, id, frame, state.WorkingSpace, image.Perceptual)
 	if err != nil {
 		return PreviewURLResponse{Error: err.Error()}
 	}

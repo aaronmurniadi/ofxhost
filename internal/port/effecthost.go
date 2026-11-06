@@ -33,6 +33,10 @@ const (
 	ParamPushButton
 	ParamGroup
 	ParamPage
+	// ParamCustom carries an opaque value a plugin defines. The host stores and
+	// returns it, and the panel shows nothing for it: it exists so a plugin that
+	// declares one can instantiate.
+	ParamCustom
 	ParamInteger2D
 	ParamDouble2D
 	ParamInteger3D

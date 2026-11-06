@@ -8,18 +8,19 @@ run as native code and the interface stays easy to change.
 
 ## Status
 
-Early development. The project is at milestone M2 of `WAILS-PLAN.md`: a RAW file
-opens, is developed by libraw, is converted to sRGB by lcms2, and is shown in the
-window. There is no plugin chain yet; OpenFX arrives with M3.
+Early development. The project is at milestone M3 of `WAILS-PLAN.md`.
 
 What works today:
 
 - open a RAW file and see it, with CSS pan and zoom in the preview
+- build a chain of OpenFX filter plugins, edit their parameters, and see the result
 - the preview is always encoded sRGB, so it looks the same in every WebView
-- the command line renders a file to a PNG without a window:
+- the command line works without a window:
 
   ```sh
-  ofxhost render -out preview.png -max-edge 1200 -space "Linear Rec.709" photo.cr3
+  ofxhost plugins                                          # list what the host found
+  ofxhost render -out preview.png -max-edge 1200 photo.cr3  # decode and write a PNG
+  ofxhost version                                          # the native library versions
   ```
 
 ## Architecture
@@ -82,6 +83,20 @@ For the native adapters:
 
 The encoder libraries (`libpng`, `libjpeg-turbo`, `libtiff`, `libwebp`, `libjxl`)
 are needed from M4.
+
+The OpenFX host needs the submodule and one CMake step, because cgo cannot compile
+translation units outside its own package directory and the official host library is
+a separate C++ library:
+
+```sh
+git submodule update --init --recursive
+cmake -S internal/adapter/ofxhost/native -B build/ofxhost-native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/ofxhost-native -j
+```
+
+Run that before `go build` once, and again after changing `host.cpp`. A build that
+skips it fails at link time with a missing `libofxhost`, which is the message a
+reader needs.
 
 Both current adapters are linked statically where the platform allows it. On macOS
 the build uses the Homebrew include and library paths directly rather than

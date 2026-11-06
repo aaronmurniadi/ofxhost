@@ -24,6 +24,7 @@ const Usage = `OfxHost
 
   ofxhost                 open the window
   ofxhost render [flags]  decode a file and write a PNG, without a window
+  ofxhost plugins         list the OpenFX plugins the host found
   ofxhost version         print the build and native library versions
 
 Run "ofxhost render -h" for the render flags.
@@ -50,6 +51,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "render":
 		return runRender(args[1:], stdout, stderr)
+	case "plugins":
+		return runPlugins(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "ofxhost %s\nlibraw %s\nlcms2 %s\n", Version, rawlib.Version(), lcms.Version())
 		return ExitOK

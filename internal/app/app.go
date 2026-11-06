@@ -18,8 +18,11 @@ import (
 
 	"github.com/aaronmurniadi/ofxhost/frontend"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/lcms"
+	"github.com/aaronmurniadi/ofxhost/internal/adapter/ofxhost"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/rawlib"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/status"
+	"github.com/aaronmurniadi/ofxhost/internal/port"
+	chainsvc "github.com/aaronmurniadi/ofxhost/internal/service/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/service/document"
 	"github.com/aaronmurniadi/ofxhost/internal/service/preview"
 	"github.com/aaronmurniadi/ofxhost/internal/transport/binds"
@@ -42,6 +45,7 @@ type App struct {
 	docs    *document.Service
 	preview *preview.Renderer
 	frames  *frames.Server
+	plugins port.EffectHost
 	logger  *slog.Logger
 }
 
@@ -80,10 +84,35 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("app: the preview renderer could not start: %w", err)
 	}
 
+	// The plugin host. A machine with no plugins, or one whose plugin set is broken,
+	// must still open and show images, so a failure here is a warning and not a
+	// startup error: the window opens with an empty chain instead.
+	var pluginHost port.EffectHost
+	var graph *chainsvc.Graph
+	pluginHostConcrete, hostErr := ofxhost.New(ofxhost.Options{Logger: logger, Reporter: sink})
+	if hostErr != nil {
+		logger.Warn("the OpenFX host could not start", "err", hostErr)
+		sink.Report("Plugins are unavailable: " + hostErr.Error())
+	} else {
+		if discoverErr := pluginHostConcrete.Discover(nil); discoverErr != nil {
+			logger.Warn("the plugin scan failed", "err", discoverErr)
+			sink.Report("The plugin scan failed: " + discoverErr.Error())
+		}
+		pluginHost = pluginHostConcrete
+		graph = chainsvc.New(pluginHost)
+		docs.SetChain(graph)
+		if count := len(pluginHost.Plugins()); count > 0 {
+			sink.Report(fmt.Sprintf("%d plugins found", count))
+		} else {
+			sink.Report("No OpenFX plugins found")
+		}
+	}
+
 	// The binding context lives as long as the window. A decode or a render that
 	// outlives it is cancelled rather than writing into a closed application.
 	ctx, cancel := context.WithCancel(context.Background())
-	documentBinds := binds.NewDocument(ctx, docs, renderer)
+	documentBinds := binds.NewDocument(ctx, docs, renderer, graph, pluginHost)
+	chainBinds := binds.NewChain(graph, pluginHost)
 	binds.SetVersion(version)
 
 	window := desktop.New(desktop.Options{
@@ -92,6 +121,7 @@ func New(opts Options) (*App, error) {
 		Logger:  logger,
 		Services: []application.Service{
 			application.NewService(documentBinds),
+			application.NewService(chainBinds),
 		},
 		// The frame server answers first and the static assets answer everything
 		// else, so a preview URL and the frontend share one origin.
@@ -103,6 +133,12 @@ func New(opts Options) (*App, error) {
 		OnShutdown: func() {
 			cancel()
 			docs.Close()
+			if graph != nil {
+				graph.Close()
+			}
+			if pluginHostConcrete != nil {
+				_ = pluginHostConcrete.Close()
+			}
 		},
 	})
 
@@ -111,6 +147,7 @@ func New(opts Options) (*App, error) {
 		docs:    docs,
 		preview: renderer,
 		frames:  server,
+		plugins: pluginHost,
 		logger:  logger,
 	}, nil
 }

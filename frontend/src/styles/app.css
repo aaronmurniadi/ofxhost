@@ -180,3 +180,185 @@ body,
   color: var(--text-dim);
   font-size: 11px;
 }
+
+/* The plugin chain. The list is the processing order, so the buttons are the only
+ * way to reorder it and they sit on the row they act on. */
+.plugins__actions {
+  margin-bottom: 6px;
+}
+
+.plugins__picker {
+  margin-bottom: 8px;
+  padding: 6px;
+  background: #1b1b1b;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+}
+
+.plugins__list {
+  max-height: 220px;
+  margin: 6px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.plugins__choice {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 4px 6px;
+  color: var(--text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.plugins__choice:hover {
+  background: var(--accent);
+}
+
+.plugins__author {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.plugins__chain {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plugins__node {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.plugins__node--selected {
+  background: #2f3a4d;
+}
+
+.plugins__name {
+  flex: 1;
+  overflow: hidden;
+  color: var(--text);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.plugins__error {
+  margin: 4px 0 8px;
+  color: #e07a7a;
+  font-size: 11px;
+}
+
+/* The parameter rows. The label column is fixed so a slider lines up between rows. */
+.params__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.params__group {
+  margin: 10px 0 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.params__row {
+  display: grid;
+  grid-template-columns: 40% 1fr;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.params__label {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.params__controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.params__slider {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+
+.params__number {
+  width: 100%;
+  min-width: 0;
+}
+
+.button {
+  padding: 3px 10px;
+  color: var(--text);
+  background: #3d3d3d;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.icon {
+  min-width: 24px;
+  padding: 1px 4px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.icon:hover:not(:disabled) {
+  color: var(--text);
+  background: #3d3d3d;
+}
+
+.icon:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.input {
+  padding: 3px 6px;
+  color: var(--text);
+  background: #1b1b1b;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+}
+
+.input:focus {
+  border-color: var(--accent);
+  outline: none;
+}

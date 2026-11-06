@@ -13,6 +13,10 @@ type Snapshot struct {
 
 // NodeSnapshot is the persisted form of a Node.
 type NodeSnapshot struct {
+	// ID is the node's identity within its chain. It is not stable across a save
+	// and a load, because a loaded chain is a new chain; it exists so a writer and
+	// a reader agree about which node is which within one file.
+	ID          uint64                   `json:"id,omitempty"`
 	Identifier  string                   `json:"identifier"`
 	Label       string                   `json:"label"`
 	PluginIndex int                      `json:"pluginIndex"`
@@ -42,6 +46,7 @@ func (c *Chain) Snapshot() Snapshot {
 	for i := range c.Nodes {
 		n := &c.Nodes[i]
 		ns := NodeSnapshot{
+			ID:          n.ID,
 			Identifier:  n.Identifier,
 			Label:       n.Label,
 			PluginIndex: n.PluginIndex,
@@ -77,6 +82,7 @@ func Restore(s Snapshot) *Chain {
 	for i := range s.Nodes {
 		ns := &s.Nodes[i]
 		n := Node{
+			ID:          ns.ID,
 			PluginIndex: ns.PluginIndex,
 			Identifier:  ns.Identifier,
 			Label:       ns.Label,
@@ -95,6 +101,9 @@ func Restore(s Snapshot) *Chain {
 			for k, v := range ns.GroupOpen {
 				n.GroupOpen[k] = v
 			}
+		}
+		if n.ID == 0 {
+			n.ID = nextNodeID.Add(1)
 		}
 		c.Nodes = append(c.Nodes, n)
 	}

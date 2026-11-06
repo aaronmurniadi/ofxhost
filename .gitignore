@@ -5,6 +5,10 @@ bin/
 
 # Go
 /ofxhost
+
+# The native OpenFX host library, built by CMake from the submodule. It is an
+# artefact, not source: the build instructions are in README.md.
+/build/
 *.test
 *.out
 

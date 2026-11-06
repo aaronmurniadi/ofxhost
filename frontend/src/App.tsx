@@ -15,7 +15,9 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { api, type DocumentDTO } from "./api/document";
+import { api, chainApi, type ChainDTO, type DocumentDTO } from "./api/document";
+import ParametersPanel from "./panels/ParametersPanel";
+import PluginsPanel from "./panels/PluginsPanel";
 import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
 
 /** How often the shell asks whether a decode has landed. */
@@ -27,6 +29,10 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Open a RAW file to see the preview.");
   const [version, setVersion] = useState("");
+  const [chain, setChain] = useState<ChainDTO | null>(null);
+  // renderTick asks for another preview, which is what every chain and parameter
+  // edit does.
+  const [renderTick, setRenderTick] = useState(0);
 
   // One poll while a decode is in flight. The Go side decodes on its own goroutine
   // and applies the result when the shell asks, so the window never blocks.
@@ -55,7 +61,33 @@ export default function App() {
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => setVersion(""));
+    chainApi.current().then(setChain).catch(() => setChain(null));
   }, []);
+
+  const reloadChain = useCallback(() => {
+    chainApi.current().then(setChain).catch(() => setChain(null));
+  }, []);
+
+  const requestRender = useCallback(() => {
+    setRenderTick((tick) => tick + 1);
+  }, []);
+
+  // A chain or parameter change republishes the preview. The Go side runs the chain
+  // and encodes the frame, so the frontend only swaps the URL.
+  useEffect(() => {
+    if (renderTick === 0) {
+      return;
+    }
+    void (async () => {
+      const published = await api.publishPreview();
+      if (published.error) {
+        setMessage(published.error);
+        return;
+      }
+      setPreview({ url: published.url, width: published.width, height: published.height });
+      reloadChain();
+    })();
+  }, [renderTick, reloadChain]);
 
   const onResize = useCallback((width: number, height: number) => {
     // The Go side stores two numbers and nothing else, so a resize stream is cheap.
@@ -81,17 +113,9 @@ export default function App() {
           onResize={onResize}
         />
 
-        <section className="panel panel--plugins" aria-label="Plugins">
-          <h2 className="panel__title">Plugins</h2>
-          <p className="panel__placeholder">The plugin chain arrives with M3.</p>
-        </section>
+        <PluginsPanel onChange={requestRender} />
 
-        <section className="panel panel--parameters" aria-label="Parameters">
-          <h2 className="panel__title">Parameters</h2>
-          <p className="panel__placeholder">
-            {doc?.open ? "No plugin selected." : "Select a plugin in the chain."}
-          </p>
-        </section>
+        <ParametersPanel selected={chain?.selected ?? -1} onChange={requestRender} />
 
         <section className="panel panel--filmstrip" aria-label="Filmstrip">
           <p className="panel__placeholder">{message}</p>

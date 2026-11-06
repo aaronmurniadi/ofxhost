@@ -87,3 +87,94 @@ export const api = {
   /** The build version. */
   version: () => call<string>("Version"),
 };
+
+/** PluginDTO is one discovered plugin, for the picker. */
+export interface PluginDTO {
+  index: number;
+  identifier: string;
+  label: string;
+  author: string;
+}
+
+/** NodeDTO is one node of the chain. */
+export interface NodeDTO {
+  index: number;
+  label: string;
+  identifier: string;
+  enabled: boolean;
+  selected: boolean;
+}
+
+/** ParamDTO is one parameter, for the panel. */
+export interface ParamDTO {
+  name: string;
+  label: string;
+  hint: string;
+  parent: string;
+  kind: string;
+  dimension: number;
+  nums: number[] | null;
+  text: string;
+  choices: string[] | null;
+  displayMin: number;
+  displayMax: number;
+  hardMin: number;
+  hardMax: number;
+  enabled: boolean;
+}
+
+/** ChainDTO is the whole chain. */
+export interface ChainDTO {
+  nodes: NodeDTO[] | null;
+  selected: number;
+  available: boolean;
+  message: string;
+}
+
+const CHAIN_SERVICE = `${SERVICE}.Chain`;
+
+/** callChain invokes one chain binding method. */
+async function callChain<T>(method: string, ...args: unknown[]): Promise<T> {
+  return (await Call.ByName(`${CHAIN_SERVICE}.${method}`, ...args)) as T;
+}
+
+/** The chain methods the frontend uses. */
+export const chainApi = {
+  /** The discovered plugins. */
+  plugins: () => callChain<PluginDTO[] | null>("Plugins"),
+
+  /** The chain itself. */
+  current: () => callChain<ChainDTO>("Current"),
+
+  /** Appends a plugin. */
+  add: (pluginIndex: number) =>
+    callChain<{ index: number; error: string }>("Add", pluginIndex),
+
+  /** Relocates a node. Returns an empty string on success. */
+  move: (from: number, to: number) => callChain<string>("Move", from, to),
+
+  /** Deletes a node. */
+  remove: (index: number) => callChain<string>("Remove", index),
+
+  /** Turns a node on or off. */
+  setEnabled: (index: number, enabled: boolean) =>
+    callChain<string>("SetEnabled", index, enabled),
+
+  /** Selects the node the parameter panel edits. */
+  select: (index: number) => callChain<void>("Select", index),
+
+  /** The parameters of a node, with their current values. */
+  params: (index: number) => callChain<ParamDTO[] | null>("Params", index),
+
+  /** Writes a numeric parameter. */
+  setParam: (nodeIndex: number, name: string, values: number[]) =>
+    callChain<string>("SetParam", nodeIndex, name, values),
+
+  /** Writes a text parameter. */
+  setParamText: (nodeIndex: number, name: string, value: string) =>
+    callChain<string>("SetParamText", nodeIndex, name, value),
+
+  /** Restores every parameter of a node to its default. */
+  resetParams: (index: number) =>
+    callChain<[number, string]>("ResetParams", index),
+};

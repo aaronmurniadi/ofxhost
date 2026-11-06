@@ -5,7 +5,10 @@
 // handle, so the model can be tested without a plugin library.
 package chain
 
-import "fmt"
+import (
+	"fmt"
+	"sync/atomic"
+)
 
 // ParamValue is one parameter's current value, in the shape the plugin exposes.
 //
@@ -21,6 +24,11 @@ type ParamValue struct {
 
 // Node is one plugin in the chain.
 type Node struct {
+	// ID identifies the node for the life of the chain, so the instances behind it
+	// can be keyed to the node rather than to its position. A position changes on
+	// every move, and keying by position would then pair an instance with the wrong
+	// node.
+	ID uint64
 	// PluginIndex is the position in the host's plugin list at the time the node
 	// was created. It is not stable across a plugin reinstall, which is why
 	// Identifier is recorded beside it.
@@ -57,6 +65,24 @@ func (n Node) Clone() Node {
 	return out
 }
 
+// nextNodeID mints node identities. It is a package counter because a chain is not
+// the only place a node can be created, and an id only has to be unique within the
+// process.
+var nextNodeID atomic.Uint64
+
+// NewNode returns a node with a fresh identity.
+func NewNode(pluginIndex int, identifier, label string) Node {
+	return Node{
+		ID:          nextNodeID.Add(1),
+		PluginIndex: pluginIndex,
+		Identifier:  identifier,
+		Label:       label,
+		Enabled:     true,
+		Params:      map[string]ParamValue{},
+		GroupOpen:   map[string]bool{},
+	}
+}
+
 // Chain is the ordered plugin list of one document.
 //
 // Selected is the index of the node the parameters panel edits, or -1 when
@@ -78,6 +104,19 @@ func (c *Chain) Len() int {
 	return len(c.Nodes)
 }
 
+// IndexOf returns the position of the node with the given identity, or -1.
+func (c *Chain) IndexOf(id uint64) int {
+	if c == nil {
+		return -1
+	}
+	for i := range c.Nodes {
+		if c.Nodes[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
 // Node returns the node at i, or nil when i is out of range.
 func (c *Chain) Node(i int) *Node {
 	if c == nil || i < 0 || i >= len(c.Nodes) {
@@ -95,7 +134,13 @@ func (c *Chain) SelectedNode() *Node {
 }
 
 // Append adds a node at the end and selects it.
+//
+// A node with no identity is given one, so a caller that builds a Node by hand
+// cannot produce two nodes the instances cannot tell apart.
 func (c *Chain) Append(n Node) int {
+	if n.ID == 0 {
+		n.ID = nextNodeID.Add(1)
+	}
 	c.Nodes = append(c.Nodes, n)
 	c.Selected = len(c.Nodes) - 1
 	return c.Selected

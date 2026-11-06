@@ -1,0 +1,78 @@
+# Builds the OpenFX host as one static library for the Go side to link.
+#
+# cgo compiles the Go package's own C++ files, but HostSupport is a separate C++
+# library with its own translation units, and cgo cannot compile files that live
+# outside the package directory. This project produces libofxhost.a from host.cpp
+# plus HostSupport, and the Go build links it.
+#
+# Usage:
+#   cmake -S internal/adapter/ofxhost/native -B build/ofxhost-native -DCMAKE_BUILD_TYPE=Release
+#   cmake --build build/ofxhost-native -j
+#
+# The output is picked up by cgo through the LDFLAGS in the package's darwin and
+# linux files.
+cmake_minimum_required(VERSION 3.20)
+project(ofxhost_native LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
+set(OFX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/openfx")
+set(OFX_INCLUDE "${OFX_ROOT}/include")
+set(OFX_HOST_INCLUDE "${OFX_ROOT}/HostSupport/include")
+set(OFX_HOST_SRC "${OFX_ROOT}/HostSupport/src")
+
+if(NOT EXISTS "${OFX_INCLUDE}/ofxCore.h")
+  message(FATAL_ERROR
+    "The OpenFX submodule is missing at ${OFX_ROOT}.\n"
+    "Run: git submodule update --init --recursive")
+endif()
+
+# expat parses the plugin XML cache. The host does not read or write a cache, but
+# HostSupport links against it and references its symbols from PluginCache, so the
+# library has to be present.
+find_package(EXPAT REQUIRED)
+
+add_library(ofxhost_host STATIC
+  ../host.cpp
+  "${OFX_HOST_SRC}/ofxhBinary.cpp"
+  "${OFX_HOST_SRC}/ofxhClip.cpp"
+  "${OFX_HOST_SRC}/ofxhHost.cpp"
+  "${OFX_HOST_SRC}/ofxhImageEffect.cpp"
+  "${OFX_HOST_SRC}/ofxhImageEffectAPI.cpp"
+  "${OFX_HOST_SRC}/ofxhInteract.cpp"
+  "${OFX_HOST_SRC}/ofxhMemory.cpp"
+  "${OFX_HOST_SRC}/ofxhParam.cpp"
+  "${OFX_HOST_SRC}/ofxhPluginAPICache.cpp"
+  "${OFX_HOST_SRC}/ofxhPluginCache.cpp"
+  "${OFX_HOST_SRC}/ofxhPropertySuite.cpp"
+  "${OFX_HOST_SRC}/ofxhUtilities.cpp"
+)
+
+target_include_directories(ofxhost_host PUBLIC
+  "${OFX_INCLUDE}"
+  "${OFX_HOST_INCLUDE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/.."
+  ${EXPAT_INCLUDE_DIRS}
+)
+
+target_link_libraries(ofxhost_host PUBLIC EXPAT::EXPAT)
+
+# The host library is upstream code; its warnings are not ours to fix, and turning
+# them into errors here would make an upstream change break this build.
+if(MSVC)
+  target_compile_options(ofxhost_host PRIVATE /W1)
+else()
+  target_compile_options(ofxhost_host PRIVATE -Wall -Wno-unused-parameter)
+endif()
+
+set_target_properties(ofxhost_host PROPERTIES OUTPUT_NAME "ofxhost")
+
+# A stable location the Go build can name without knowing the generator.
+set_target_properties(ofxhost_host PROPERTIES
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
