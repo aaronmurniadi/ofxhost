@@ -34,7 +34,7 @@ func newFakeDecoder() *fakeDecoder {
 	}
 }
 
-func (f *fakeDecoder) Decode(path string) (port.Decoded, error) {
+func (f *fakeDecoder) Decode(path string, want image.ColorSpace) (port.Decoded, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, path)
 	frame := f.frames[path]
@@ -52,8 +52,10 @@ func (f *fakeDecoder) Decode(path string) (port.Decoded, error) {
 		frame = image.New(8, 6)
 	}
 	return port.Decoded{
-		Image:     frame,
-		FileSpace: image.SRGB,
+		Image: frame,
+		// A real decoder reports the space it developed into, which is the space it
+		// was asked for.
+		FileSpace: want,
 		Camera:    port.CameraInfo{Make: "Test", Model: "Camera", ISO: 400},
 	}, nil
 }
@@ -115,15 +117,56 @@ func waitFor(t *testing.T, s *Service) {
 
 func TestOpenRequiresAPath(t *testing.T) {
 	s := newService(t, nil)
-	if _, err := s.Open(context.Background(), OpenRequest{}); err == nil {
+	if _, err := s.Open(context.Background(), OpenRequest{Space: image.SRGB}); err == nil {
 		t.Fatal("an empty path must be an error")
+	}
+}
+
+func TestOpenRejectsAnUndefinedSpace(t *testing.T) {
+	// The space comes from a dialog, so it is validated rather than trusted, and the
+	// message must name the setting rather than a native code.
+	s := newService(t, nil)
+	_, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3", Space: image.ColorSpace(9)})
+	if err == nil {
+		t.Fatal("an undefined colour space must be an error")
+	}
+	if !strings.Contains(err.Error(), "colour space") {
+		t.Fatalf("the error does not name the setting: %v", err)
+	}
+}
+
+func TestOpenDevelopsIntoTheRequestedSpace(t *testing.T) {
+	// This is decision D8: the space is an input to the decode, and the document
+	// reports it as both the working and the input space.
+	for _, space := range []image.ColorSpace{image.SRGB, image.DisplayP3, image.LinearRec709, image.LinearRec2020} {
+		t.Run(space.String(), func(t *testing.T) {
+			decoder := newFakeDecoder()
+			decoder.frames["/tmp/a.cr3"] = image.New(8, 6)
+			s := newService(t, decoder)
+
+			if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3", Space: space}); err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			waitFor(t, s)
+
+			state := s.State()
+			if state.WorkingSpace != space {
+				t.Fatalf("WorkingSpace = %v, want %v", state.WorkingSpace, space)
+			}
+			if state.InputSpace != space {
+				t.Fatalf("InputSpace = %v, want %v", state.InputSpace, space)
+			}
+			if state.FileSpace != space {
+				t.Fatalf("FileSpace = %v, want %v", state.FileSpace, space)
+			}
+		})
 	}
 }
 
 func TestOpenRejectsAnUnsupportedExtension(t *testing.T) {
 	// The message must name the file rather than a native code.
 	s := newService(t, nil)
-	_, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/photo.jpg"})
+	_, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/photo.jpg", Space: image.SRGB})
 	if err == nil {
 		t.Fatal("a JPEG must be refused by a RAW-only decoder")
 	}
@@ -137,7 +180,7 @@ func TestOpenDecodesAndPublishes(t *testing.T) {
 	decoder.frames["/tmp/a.cr3"] = image.New(20, 10)
 	s := newService(t, decoder)
 
-	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3"}); err != nil {
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3", Space: image.SRGB}); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	waitFor(t, s)
@@ -169,7 +212,7 @@ func TestOpenReportsThroughTheStatusLine(t *testing.T) {
 	s := New(decoder, fakeColor{}, sink, nil)
 	t.Cleanup(s.Close)
 
-	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3"}); err != nil {
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3", Space: image.SRGB}); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	if got := sink.Text(); !strings.Contains(got, "Opening") {
@@ -198,12 +241,12 @@ func TestAFailedDecodeKeepsThePreviousFrame(t *testing.T) {
 	s := New(decoder, fakeColor{}, sink, nil)
 	t.Cleanup(s.Close)
 
-	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/good.cr3"}); err != nil {
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/good.cr3", Space: image.SRGB}); err != nil {
 		t.Fatalf("Open good: %v", err)
 	}
 	waitFor(t, s)
 
-	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/bad.cr3"}); err != nil {
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/bad.cr3", Space: image.SRGB}); err != nil {
 		t.Fatalf("Open bad: %v", err)
 	}
 	waitFor(t, s)
@@ -229,10 +272,10 @@ func TestANewerRequestSupersedesAnOlderOne(t *testing.T) {
 	decoder.frames["/tmp/fast.cr3"] = image.New(10, 10)
 	s := newService(t, decoder)
 
-	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/slow.cr3"}); err != nil {
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/slow.cr3", Space: image.SRGB}); err != nil {
 		t.Fatalf("Open slow: %v", err)
 	}
-	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/fast.cr3"}); err != nil {
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/fast.cr3", Space: image.SRGB}); err != nil {
 		t.Fatalf("Open fast: %v", err)
 	}
 
@@ -261,22 +304,6 @@ func TestPumpReturnsFalseWithNothingPending(t *testing.T) {
 	}
 }
 
-func TestSetInputSpaceValidates(t *testing.T) {
-	s := newService(t, nil)
-	if err := s.SetInputSpace(image.LinearRec709); err != nil {
-		t.Fatalf("SetInputSpace: %v", err)
-	}
-	if got := s.State().InputSpace; got != image.LinearRec709 {
-		t.Fatalf("InputSpace = %v", got)
-	}
-	if err := s.SetInputSpace(image.ColorSpace(9)); err == nil {
-		t.Fatal("an undefined space must be an error")
-	}
-	if got := s.State().InputSpace; got != image.LinearRec709 {
-		t.Fatalf("a rejected space changed the state to %v", got)
-	}
-}
-
 func TestStateIsNotRacedByTheDecodeGoroutine(t *testing.T) {
 	// The decode goroutine writes while a panel reads, so this runs both under the
 	// race detector.
@@ -296,7 +323,7 @@ func TestStateIsNotRacedByTheDecodeGoroutine(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		path := filepath.Join("/tmp", "a"+string(rune('0'+i))+".cr3")
-		if _, err := s.Open(context.Background(), OpenRequest{Path: path}); err != nil {
+		if _, err := s.Open(context.Background(), OpenRequest{Path: path, Space: image.SRGB}); err != nil {
 			t.Fatalf("Open: %v", err)
 		}
 		s.Pump()
@@ -313,7 +340,7 @@ func TestCloseIsIdempotentAndRejectsNewWork(t *testing.T) {
 	s.Close()
 	s.Close() // must not panic on a double close
 
-	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3"}); err == nil {
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3", Space: image.SRGB}); err == nil {
 		t.Fatal("Open after Close must fail")
 	}
 }
@@ -323,7 +350,7 @@ func TestCloseWaitsForARunningDecode(t *testing.T) {
 	decoder.delay = 50 * time.Millisecond
 	s := New(decoder, fakeColor{}, nil, nil)
 
-	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3"}); err != nil {
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3", Space: image.SRGB}); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	time.Sleep(5 * time.Millisecond)
@@ -361,7 +388,7 @@ func TestOpenUsesTheRealFilesystemNotADirectory(t *testing.T) {
 	decoder := newFakeDecoder()
 	s := newService(t, decoder)
 
-	if _, err := s.Open(context.Background(), OpenRequest{Path: img}); err != nil {
+	if _, err := s.Open(context.Background(), OpenRequest{Path: img, Space: image.SRGB}); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	waitFor(t, s)

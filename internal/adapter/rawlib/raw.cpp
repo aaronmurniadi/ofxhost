@@ -52,6 +52,7 @@ const char *const kProcessFailed = "the camera data could not be developed";
 const char *const kMemoryFailed = "the developed image could not be allocated";
 const char *const kBadFormat = "the developed image has an unexpected pixel format";
 const char *const kNoImage = "the image handle is not valid";
+const char *const kUnknownSpace = "the requested colour space is not supported";
 const char *const kNullPath = "no file path was given";
 
 /* libraw returns a negative code, and sometimes zero with no data. The message
@@ -103,25 +104,87 @@ bool expandToRGBA(libraw_processed_image_t *processed, std::vector<unsigned char
   if (processed == nullptr) {
     return false;
   }
-  if (processed->type != LIBRAW_IMAGE_BITMAP || processed->bits != 8 || processed->colors != 3) {
+  if (processed->type != LIBRAW_IMAGE_BITMAP || processed->bits != 16 || processed->colors != 3) {
     return false;
   }
   const size_t pixels = static_cast<size_t>(processed->width) * processed->height;
   if (pixels == 0) {
     return false;
   }
-  out.resize(pixels * 4);
+  // Eight bytes per pixel: four 16-bit components. The resize must match what the
+  // loop below writes, or the expansion runs off the end of its own buffer.
+  out.resize(pixels * 8);
+  // libraw writes 16-bit samples little-endian, three per pixel, bottom-up.
   const unsigned char *src = processed->data;
   unsigned char *dst = out.data();
   for (size_t i = 0; i < pixels; ++i) {
     dst[0] = src[0];
     dst[1] = src[1];
     dst[2] = src[2];
-    dst[3] = 255;
-    src += 3;
-    dst += 4;
+    dst[3] = src[3];
+    dst[4] = src[4];
+    dst[5] = src[5];
+    dst[6] = 0xFF;
+    dst[7] = 0xFF;
+    src += 6;
+    dst += 8;
   }
   return true;
+}
+
+/* applySpace asks libraw for the colour space and transfer curve of `space`.
+ *
+ * libraw does the conversion from the camera's own space itself, so a frame
+ * developed into Rec2020 carries values sRGB cannot hold. Converting after the
+ * fact could not recover them: the gamut would already be gone.
+ *
+ * The gamma pair is the transfer curve libraw applies at the end of the develop.
+ *
+ * gamm[0] is the INVERSE of the encoding power, which is the one detail here that
+ * is easy to get backwards: libraw raises the sample to gamm[0], so the sRGB curve
+ * is 1/2.4, not 2.4. Passing 2.4 produces a nearly black frame with no error, which
+ * is exactly the kind of bug a picture shows and a status code does not. gamm[1] is
+ * the linear toe, 12.92 for sRGB and 1.0 for linear light.
+ *
+ * The two encoded spaces use the sRGB curve, and the two linear spaces use linear
+ * light, which is what makes the "linear" in their names true.
+ *
+ * Returns false when the space is not one this shim can produce, so a caller
+ * learns immediately instead of receiving a frame in the wrong space.
+ */
+bool applySpace(libraw_data_t *lr, int space) {
+  if (lr == nullptr) {
+    return false;
+  }
+  switch (space) {
+    case OFXR_SPACE_SRGB:
+      lr->params.output_color = 1; /* sRGB */
+      lr->params.gamm[0] = 1.0f / 2.4f;
+      lr->params.gamm[1] = 12.92f;
+      return true;
+    case OFXR_SPACE_DISPLAY_P3:
+      /* libraw's 7 is DCI-P3, which shares the primaries of Display P3. Setting
+       * the sRGB transfer curve on those primaries is what makes it Display P3
+       * rather than DCI-P3. */
+      lr->params.output_color = 7;
+      lr->params.gamm[0] = 1.0f / 2.4f;
+      lr->params.gamm[1] = 12.92f;
+      return true;
+    case OFXR_SPACE_LINEAR_REC709:
+      /* Rec.709 and sRGB share their primaries, so the linear space is the sRGB
+       * one with linear light. */
+      lr->params.output_color = 1;
+      lr->params.gamm[0] = 1.0f;
+      lr->params.gamm[1] = 1.0f;
+      return true;
+    case OFXR_SPACE_LINEAR_REC2020:
+      lr->params.output_color = 8; /* Rec2020 */
+      lr->params.gamm[0] = 1.0f;
+      lr->params.gamm[1] = 1.0f;
+      return true;
+    default:
+      return false;
+  }
 }
 
 /* loadThumbnail copies the file's own preview, once.
@@ -204,11 +267,9 @@ extern "C" ofxr_image *ofxr_identify(const char *path, ofxr_info *info, const ch
     return nullptr;
   }
 
-  /* A camera image is developed to 8 bits because the preview is 8 bits and the
-   * chain works in float; asking libraw for 16 would double the memory for a
-   * precision the preview cannot show. */
-  img->lr->params.output_bps = 8;
-  img->lr->params.output_color = 1; /* sRGB */
+  /* The output colour space and bit depth are chosen per develop, because the
+   * space is the user's decision and not a property of the file. See
+   * ofxr_develop below. */
   /* The host applies no automatic brightness: a finishing tool must show the
    * frame the way the camera recorded it, and the user decides the exposure. */
   img->lr->params.no_auto_bright = 1;
@@ -237,7 +298,8 @@ extern "C" ofxr_image *ofxr_identify(const char *path, ofxr_info *info, const ch
   return img;
 }
 
-extern "C" const unsigned char *ofxr_develop(ofxr_image *img, int half_size, ofxr_info *info, const char **err) {
+extern "C" const unsigned char *ofxr_develop(ofxr_image *img, int space, int half_size, ofxr_info *info,
+                                            const char **err) {
   if (err != nullptr) {
     *err = nullptr;
   }
@@ -249,6 +311,16 @@ extern "C" const unsigned char *ofxr_develop(ofxr_image *img, int half_size, ofx
   }
 
   libraw_data_t *lr = img->lr;
+  if (!applySpace(lr, space)) {
+    if (err != nullptr) {
+      *err = kUnknownSpace;
+    }
+    return nullptr;
+  }
+  /* 16 bits for every space. An 8-bit linear develop bands in the shadows, and a
+   * precision that depends on the chosen space is how a "works in sRGB, broken in
+   * Rec2020" bug ships. */
+  lr->params.output_bps = 16;
   lr->params.half_size = half_size ? 1 : 0;
 
   int rc = libraw_unpack(lr);
@@ -297,7 +369,7 @@ extern "C" const unsigned char *ofxr_develop(ofxr_image *img, int half_size, ofx
     info->width = img->developed_w;
     info->height = img->developed_h;
     info->channels = 4;
-    info->bits = 8;
+    info->bits = 16;
     info->has_thumb = img->thumb_ok ? 1 : 0;
     info->error = nullptr;
   }

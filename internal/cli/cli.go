@@ -74,8 +74,13 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 
 	var (
 		output  = flags.String("out", "", "the PNG to write (required)")
-		maxEdge = flags.Int("max-edge", 0, "cap the long edge of the output, in pixels (0 keeps the full size)")
-		space   = flags.String("space", "sRGB", "the colour space to convert into")
+		maxEdge = flags.Int("max-edge", 0,
+			"cap the long edge of the output, in pixels (0 keeps the full size)")
+		// -space is the working space, not an output setting: the develop happens
+		// in it, so it decides what the chain sees. The PNG is always written in
+		// sRGB because that is what a viewer will assume.
+		space = flags.String("space", "sRGB",
+			"the colour space the file is developed into: sRGB, Display P3, Linear Rec.709, Linear Rec.2020")
 	)
 	if err := flags.Parse(args); err != nil {
 		return ExitUsage
@@ -89,7 +94,7 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		return ExitUsage
 	}
 
-	target, ok := spaceByName(*space)
+	workingSpace, ok := spaceByName(*space)
 	if !ok {
 		fmt.Fprintf(stderr, "render: unknown colour space %q\n", *space)
 		return ExitUsage
@@ -99,7 +104,7 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 	started := time.Now()
 
 	decoder := rawlib.New()
-	decoded, err := decoder.Decode(input)
+	decoded, err := decoder.Decode(input, workingSpace)
 	if err != nil {
 		fmt.Fprintf(stderr, "render: %v\n", err)
 		return ExitFailed
@@ -108,12 +113,13 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		input, decoded.Image.W, decoded.Image.H, decoded.FileSpace,
 		decoded.Camera.ISO, decoded.Camera.Make, decoded.Camera.Model)
 
-	// The preview path is the same one the window uses, so converting to sRGB
-	// before encoding is what makes this a real test and not a shortcut.
+	// The PNG is written in sRGB, because that is what a viewer assumes a PNG is.
+	// The convert is from the working space the file was developed into, which is
+	// the same path the window takes for its preview (decision D2).
 	frame := decoded.Image
-	if target != decoded.FileSpace {
+	if frameSpace := decoded.FileSpace; frameSpace != image.SRGB {
 		converter := lcms.New()
-		converted, convertErr := converter.Convert(decoded.Image, decoded.FileSpace, target, image.Perceptual)
+		converted, convertErr := converter.Convert(frame, frameSpace, image.SRGB, image.Perceptual)
 		if convertErr != nil {
 			fmt.Fprintf(stderr, "render: %v\n", convertErr)
 			return ExitFailed

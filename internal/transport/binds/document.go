@@ -31,6 +31,7 @@ type Document struct {
 	preview *preview.Renderer
 	chain   *chainsvc.Graph
 	host    port.EffectHost
+	picker  Picker
 
 	// ctx is the application lifetime, set by the composition root before the
 	// frontend can call anything.
@@ -48,13 +49,38 @@ type Document struct {
 	generation atomic.Uint64
 }
 
+// Picker asks the user for a file path.
+//
+// It is an interface here so this package does not import Wails: the window supplies
+// the implementation, and a test supplies its own.
+type Picker interface {
+	// PickImage returns a chosen image path, or an empty string when cancelled.
+	PickImage() (string, error)
+}
+
 // NewDocument returns the document binding.
 //
 // Both the chain and the host may be nil: a machine with no OpenFX plugins still
 // opens and shows images, it just has no chain to apply.
 func NewDocument(ctx context.Context, docs *document.Service, renderer *preview.Renderer, chain *chainsvc.Graph,
-	host port.EffectHost) *Document {
-	return &Document{ctx: ctx, docs: docs, preview: renderer, chain: chain, host: host}
+	host port.EffectHost, picker Picker) *Document {
+	return &Document{ctx: ctx, docs: docs, preview: renderer, chain: chain, host: host, picker: picker}
+}
+
+// PickFile asks the user for a file and returns its path, or an empty string.
+//
+// The choice of the colour space happens after this, in the dialog the frontend
+// shows: a RAW file declares no space, so the space is a decision about how to
+// interpret the sensor and not something this call can know.
+func (d *Document) PickFile() string {
+	if d.picker == nil {
+		return ""
+	}
+	path, err := d.picker.PickImage()
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // CameraDTO is the capture metadata, flattened for the frontend.
@@ -90,6 +116,12 @@ type DocumentDTO struct {
 // OpenRequest asks to open a file.
 type OpenRequest struct {
 	Path string `json:"path"`
+	// Space is the index of the colour space to develop into, from ColorSpaces().
+	//
+	// The frontend asks the user before it calls this, because a RAW file declares
+	// no space of its own: the choice is how the sensor is interpreted, and it is
+	// the space the chain then works in.
+	Space int `json:"space"`
 }
 
 // OpenResult reports whether the open started.
@@ -108,7 +140,10 @@ func (d *Document) Open(req OpenRequest) OpenResult {
 	if d.docs == nil {
 		return OpenResult{Error: "the document service is not available"}
 	}
-	if _, err := d.docs.Open(d.ctx, document.OpenRequest{Path: req.Path}); err != nil {
+	if _, err := d.docs.Open(d.ctx, document.OpenRequest{
+		Path:  req.Path,
+		Space: image.ColorSpace(req.Space),
+	}); err != nil {
 		return OpenResult{Error: err.Error()}
 	}
 	return OpenResult{Started: true}
@@ -236,17 +271,6 @@ func (d *Document) ColorSpaces() []string { return image.ColorSpaceNames() }
 
 // PreviewResolutions returns the preview size names, for a combo box.
 func (d *Document) PreviewResolutions() []string { return preview.ResolutionNames() }
-
-// SetInputSpace records the space handed to the first plugin.
-func (d *Document) SetInputSpace(index int) string {
-	if d.docs == nil {
-		return "the document service is not available"
-	}
-	if err := d.docs.SetInputSpace(image.ColorSpace(index)); err != nil {
-		return err.Error()
-	}
-	return ""
-}
 
 // Version is the application version, read by the About panel.
 func (d *Document) Version() string {

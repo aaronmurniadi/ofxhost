@@ -362,3 +362,77 @@ body,
   border-color: var(--accent);
   outline: none;
 }
+
+/* The open dialog. It is modal in the sense that it takes the click, but it is a
+ * plain element: the window has one, only one, and it is shown while a file waits
+ * for its colour space. */
+.modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* A dim rather than a blur: the preview behind is the thing being decided about,
+   * so it stays visible. */
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 10;
+}
+
+.modal__body {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+}
+
+.modal__title {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.modal__text {
+  margin: 0 0 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.modal__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.modal__choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.modal__choice:hover {
+  background: #2f2f2f;
+}
+
+.modal__note {
+  margin: 0 0 12px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.app__bar .button {
+  margin-left: 8px;
+}

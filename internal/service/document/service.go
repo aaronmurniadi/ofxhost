@@ -73,6 +73,13 @@ type State struct {
 // OpenRequest asks to open a file.
 type OpenRequest struct {
 	Path string
+	// Space is the colour space the file is developed into. It becomes the space
+	// the chain works in and the space the first plugin is told.
+	//
+	// The value is chosen by the user when the file opens, because a RAW file
+	// declares no space of its own and two users can reasonably want two different
+	// answers from the same file.
+	Space image.ColorSpace
 }
 
 // OpenResult reports what happened.
@@ -185,11 +192,18 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 		return OpenResult{}, fmt.Errorf("document: %s is not a supported image", filepath.Base(req.Path))
 	}
 
+	// A space the pipeline does not define is refused here rather than inside the
+	// decoder, so the message names the setting and not a native code.
+	space := req.Space
+	if !space.Valid() {
+		return OpenResult{}, fmt.Errorf("document: %d is not a colour space", int(space))
+	}
+
 	generation := s.generation.Add(1)
-	s.status.Report("Opening " + filepath.Base(req.Path) + "...")
+	s.status.Report("Opening " + filepath.Base(req.Path) + " in " + space.String() + "...")
 
 	s.wg.Add(1)
-	go s.decode(ctx, generation, req.Path)
+	go s.decode(ctx, generation, req.Path, space)
 
 	return OpenResult{}, nil
 }
@@ -213,10 +227,10 @@ func (s *Service) Pump() bool {
 }
 
 // decode runs on its own goroutine.
-func (s *Service) decode(ctx context.Context, generation uint64, path string) {
+func (s *Service) decode(ctx context.Context, generation uint64, path string, space image.ColorSpace) {
 	defer s.wg.Done()
 
-	decoded, err := s.decoder.Decode(path)
+	decoded, err := s.decoder.Decode(path, space)
 
 	// A newer request has started, so this work is already stale. Dropping it is
 	// what keeps a slow file from replacing a fast one that followed it.
@@ -251,9 +265,10 @@ func (s *Service) apply(outcome Outcome) {
 	s.state.FileSpace = outcome.decoded.FileSpace
 	s.state.Thumbnail = outcome.decoded.Thumbnail
 
-	// libraw develops into sRGB, so that is the working space of a decoded RAW.
-	// The input space follows the working space until the user overrides it, which
-	// is what makes the first plugin get what it expects.
+	// The working space is what the decoder developed into, which is what the user
+	// asked for. The input space is the same value: the first plugin is told the
+	// space the pixels are actually in. They stay separate fields because an
+	// imported chain could later want to declare a different input space.
 	s.state.WorkingSpace = outcome.decoded.FileSpace
 	s.state.InputSpace = outcome.decoded.FileSpace
 
@@ -262,23 +277,16 @@ func (s *Service) apply(outcome Outcome) {
 	s.state.Chain = chain.New()
 	s.mu.Unlock()
 
-	s.status.Report(fmt.Sprintf("Opened %s (%dx%d)", filepath.Base(outcome.Path),
-		outcome.decoded.Image.W, outcome.decoded.Image.H))
+	s.status.Report(fmt.Sprintf("Opened %s (%dx%d, %s)", filepath.Base(outcome.Path),
+		outcome.decoded.Image.W, outcome.decoded.Image.H, outcome.decoded.FileSpace))
 }
 
-// SetInputSpace records the space handed to the first plugin.
+// The input space is not settable, and that is deliberate.
 //
-// The value comes from a panel, so it is validated rather than trusted: an index
-// outside the defined spaces is ignored instead of being stored.
-func (s *Service) SetInputSpace(space image.ColorSpace) error {
-	if !space.Valid() {
-		return fmt.Errorf("document: colour space %d is not defined", int(space))
-	}
-	s.mu.Lock()
-	s.state.InputSpace = space
-	s.mu.Unlock()
-	return nil
-}
+// Decision D8 makes the working space an input to the decode: the pixels are
+// developed into it, so relabelling them afterwards would tell the first plugin a
+// space the pixels are not in. Changing the space means opening the file again,
+// which is what the open dialog does.
 
 // SetChain gives the document a plugin chain.
 //

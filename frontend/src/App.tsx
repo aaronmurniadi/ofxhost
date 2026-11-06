@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, chainApi, type ChainDTO, type DocumentDTO } from "./api/document";
+import OpenDialog from "./panels/OpenDialog";
 import ParametersPanel from "./panels/ParametersPanel";
 import PluginsPanel from "./panels/PluginsPanel";
 import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
@@ -33,6 +34,9 @@ export default function App() {
   // renderTick asks for another preview, which is what every chain and parameter
   // edit does.
   const [renderTick, setRenderTick] = useState(0);
+  // pendingPath is the file waiting for a colour space. Decision D8: the space is an
+  // input to the decode, so it is asked before the file opens.
+  const [pendingPath, setPendingPath] = useState("");
 
   // One poll while a decode is in flight. The Go side decodes on its own goroutine
   // and applies the result when the shell asks, so the window never blocks.
@@ -89,6 +93,31 @@ export default function App() {
     })();
   }, [renderTick, reloadChain]);
 
+  // chooseFile asks the user for a file and then for the space to develop it into.
+  const chooseFile = useCallback(async () => {
+    const path = await api.pickFile();
+    if (path === "") {
+      return;
+    }
+    setPendingPath(path);
+  }, []);
+
+  // openWithSpace starts the decode once the space is known.
+  const openWithSpace = useCallback(async (space: number) => {
+    const path = pendingPath;
+    setPendingPath("");
+    if (path === "") {
+      return;
+    }
+    setBusy(true);
+    setMessage(`Opening ${path}…`);
+    const result = await api.open(path, space);
+    if (result.error !== "") {
+      setMessage(result.error);
+      setBusy(false);
+    }
+  }, [pendingPath]);
+
   const onResize = useCallback((width: number, height: number) => {
     // The Go side stores two numbers and nothing else, so a resize stream is cheap.
     void api.setPreviewPanelSize(width, height);
@@ -101,6 +130,9 @@ export default function App() {
         <span className="app__hint">
           {doc?.open ? `${doc.fileName} — ${doc.width}×${doc.height}` : "No image open"}
         </span>
+        <button className="button" onClick={() => void chooseFile()}>
+          Open…
+        </button>
         <span className="app__version">{version}</span>
       </header>
 
@@ -121,6 +153,14 @@ export default function App() {
           <p className="panel__placeholder">{message}</p>
         </section>
       </main>
+
+      {pendingPath !== "" ? (
+        <OpenDialog
+          path={pendingPath}
+          onConfirm={(space) => void openWithSpace(space)}
+          onCancel={() => setPendingPath("")}
+        />
+      ) : null}
     </div>
   );
 }

@@ -14,8 +14,12 @@ import (
 type Decoded struct {
 	// Image is the developed frame in the layout the pipeline uses.
 	Image image.Raster
-	// FileSpace is the space the file declared. An image that carried no profile
-	// reports sRGB, which is the web default and the least surprising guess.
+	// FileSpace is the space the pixels are in, which is the space the caller
+	// asked for.
+	//
+	// For a camera RAW there is nothing else it could be: the sensor records a
+	// mosaic of intensities and every space is a choice about interpreting them, so
+	// the field reports the choice and not a property of the file.
 	FileSpace image.ColorSpace
 	// Camera describes the capture, so the host can seed a noise model. A file
 	// with no sensor data, such as a JPEG, reports the zero value.
@@ -40,8 +44,14 @@ type CameraInfo struct {
 // Decode is called from several goroutines at once by the thumbnail pool, so an
 // implementation must not share mutable state between calls.
 type ImageDecoder interface {
-	// Decode reads one file. An error wraps the native library's own code.
-	Decode(path string) (Decoded, error)
+	// Decode reads one file and develops it into `want`.
+	//
+	// The space is an argument rather than a post-processing step because a decoder
+	// that can develop straight into the target produces values a later conversion
+	// cannot: gamut the develop never produced is gone, and an 8-bit intermediate
+	// would have quantised it away first. A decoder that cannot produce a space
+	// returns an error instead of silently returning another one.
+	Decode(path string, want image.ColorSpace) (Decoded, error)
 	// Extensions lists the supported lowercase extensions with a leading dot.
 	Extensions() []string
 	// IsRAW reports whether an extension needs a full develop rather than a

@@ -111,18 +111,13 @@ func New(opts Options) (*App, error) {
 	// The binding context lives as long as the window. A decode or a render that
 	// outlives it is cancelled rather than writing into a closed application.
 	ctx, cancel := context.WithCancel(context.Background())
-	documentBinds := binds.NewDocument(ctx, docs, renderer, graph, pluginHost)
-	chainBinds := binds.NewChain(graph, pluginHost)
-	binds.SetVersion(version)
 
+	// The window comes first, because the file picker the bindings need belongs to
+	// it. The services are registered once it exists.
 	window := desktop.New(desktop.Options{
 		Assets:  frontend.Dist,
 		Version: version,
 		Logger:  logger,
-		Services: []application.Service{
-			application.NewService(documentBinds),
-			application.NewService(chainBinds),
-		},
 		// The frame server answers first and the static assets answer everything
 		// else, so a preview URL and the frontend share one origin.
 		AssetMiddleware: func(static application.AssetOptions) application.AssetOptions {
@@ -141,6 +136,14 @@ func New(opts Options) (*App, error) {
 			}
 		},
 	})
+
+	binds.SetVersion(version)
+	// Registering after the window exists is what lets the document binding hold the
+	// window's file picker, so the frontend can ask for a file without this package
+	// exporting a dialog of its own.
+	window.Application().RegisterService(
+		application.NewService(binds.NewDocument(ctx, docs, renderer, graph, pluginHost, window.FilePicker())))
+	window.Application().RegisterService(application.NewService(binds.NewChain(graph, pluginHost)))
 
 	return &App{
 		window:  window,

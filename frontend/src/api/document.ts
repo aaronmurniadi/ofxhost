@@ -59,8 +59,13 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
 
 /** The methods the frontend uses. */
 export const api = {
-  /** Starts decoding a file. The decode runs on its own goroutine. */
-  open: (path: string) => call<OpenResult>("Open", { path }),
+  /**
+   * Starts decoding a file into a colour space.
+   *
+   * The space is the user's choice, taken before the call: a RAW file declares no
+   * space of its own, and the choice is what the chain then works in.
+   */
+  open: (path: string, space: number) => call<OpenResult>("Open", { path, space }),
 
   /** Reads the open document. */
   current: () => call<DocumentDTO>("Current"),
@@ -75,9 +80,6 @@ export const api = {
   setPreviewPanelSize: (width: number, height: number) =>
     call<void>("SetPreviewPanelSize", width, height),
 
-  /** Records the space handed to the first plugin. */
-  setInputSpace: (index: number) => call<string>("SetInputSpace", index),
-
   /** The colour space names, in enum order. */
   colorSpaces: () => call<string[]>("ColorSpaces"),
 
@@ -86,6 +88,9 @@ export const api = {
 
   /** The build version. */
   version: () => call<string>("Version"),
+
+  /** Asks the user for a file and returns its path, or an empty string. */
+  pickFile: () => call<string>("PickFile"),
 };
 
 /** PluginDTO is one discovered plugin, for the picker. */

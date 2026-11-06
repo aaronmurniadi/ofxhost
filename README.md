@@ -12,17 +12,16 @@ Early development. The project is at milestone M3 of `WAILS-PLAN.md`.
 
 What works today:
 
-- open a RAW file and see it, with CSS pan and zoom in the preview
+- open a RAW file and choose the colour space it develops into: sRGB, Display P3,
+  Linear Rec.709 or Linear Rec.2020
 - build a chain of OpenFX filter plugins, edit their parameters, and see the result
-- the decode develops into sRGB. Choosing the working space at open time
-  (sRGB, Display P3, Linear Rec.709, Linear Rec.2020) is designed in
-  `WAILS-PLAN.md` §7.0 and not built yet
 - the preview is always encoded sRGB, so it looks the same in every WebView
 - the command line works without a window:
 
   ```sh
   ofxhost plugins                                          # list what the host found
-  ofxhost render -out preview.png -max-edge 1200 photo.cr3  # decode and write a PNG
+  ofxhost render -out preview.png -max-edge 1200 \
+      -space "Linear Rec.2020" photo.cr3                  # develop in a space, write a PNG
   ofxhost version                                          # the native library versions
   ```
 

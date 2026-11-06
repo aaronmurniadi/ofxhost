@@ -25,6 +25,21 @@ extern "C" {
 /* One opened and developed image, owned by the shim until ofxr_free is called. */
 typedef struct ofxr_image ofxr_image;
 
+/*
+ * The colour spaces the develop can target. The values match the Go enum, so the
+ * caller passes its own value through without a translation table on the Go side.
+ *
+ * A RAW file declares no colour space at all: the sensor sees a mosaic of
+ * intensities and every space is a choice about how to interpret them. That is why
+ * the space is an input to the develop rather than an output of the open.
+ */
+enum {
+  OFXR_SPACE_SRGB = 0,
+  OFXR_SPACE_DISPLAY_P3 = 1,
+  OFXR_SPACE_LINEAR_REC709 = 2,
+  OFXR_SPACE_LINEAR_REC2020 = 3
+};
+
 /* What a develop produced, in the layout the Go side copies out. */
 typedef struct {
   int width;
@@ -55,16 +70,24 @@ typedef struct {
 ofxr_image *ofxr_identify(const char *path, ofxr_info *info, const char **err);
 
 /*
- * Develops the opened file into an 8-bit RGBA buffer.
+ * Develops the opened file into a 16-bit RGBA buffer in the requested space.
  *
  * The buffer belongs to the image and stays valid until ofxr_free. On failure it
  * returns NULL and stores a static error string in *err.
  *
+ * `space` is one of OFXR_SPACE_*. libraw does the colour conversion itself, so a
+ * frame developed into Rec2020 carries values sRGB cannot hold; converting after
+ * the fact could not recover them.
+ *
  * `half_size` asks libraw for a half-resolution develop, which is what a preview
  * uses: it is roughly four times faster and needs a quarter of the memory, and
  * the preview is capped in size anyway.
+ *
+ * 16 bits is used for every space, not only the linear ones. An 8-bit linear
+ * develop bands badly in the shadows, and making the precision depend on the
+ * chosen space is how a "works in sRGB, broken in Rec2020" bug ships.
  */
-const unsigned char *ofxr_develop(ofxr_image *img, int half_size, ofxr_info *info, const char **err);
+const unsigned char *ofxr_develop(ofxr_image *img, int space, int half_size, ofxr_info *info, const char **err);
 
 /*
  * Copies the file's own embedded preview into `dst`, up to `cap` bytes.

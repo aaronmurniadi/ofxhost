@@ -87,10 +87,14 @@ func (d *Decoder) IsRAW(ext string) bool {
 
 // Decode implements port.ImageDecoder.
 //
-// The frame is developed at full resolution. A caller that only needs a preview
-// calls Preview instead, which asks libraw for a half-size develop.
-func (d *Decoder) Decode(path string) (port.Decoded, error) {
-	return d.decode(path, false)
+// The frame is developed at full resolution into the space the caller asks for.
+// libraw does the colour conversion itself, so a frame developed into Rec2020
+// carries values sRGB cannot hold; converting afterwards could not recover them.
+//
+// A space this decoder cannot produce is an error rather than a silent sRGB frame,
+// so a wrong mapping is caught at the call instead of in the picture.
+func (d *Decoder) Decode(path string, want image.ColorSpace) (port.Decoded, error) {
+	return d.decode(path, want, false)
 }
 
 // Preview implements port.Thumbnailer.
@@ -102,7 +106,10 @@ func (d *Decoder) Preview(path string, maxEdge int) (image.Raster, error) {
 	if maxEdge <= 0 {
 		return image.Raster{}, errors.New("rawlib: a preview needs a positive maximum edge")
 	}
-	decoded, err := d.decode(path, true)
+	// A thumbnail is displayed as sRGB in the filmstrip, so there is no reason to
+	// develop it in the working space: the working space is the document's choice
+	// and the filmstrip is not the document.
+	decoded, err := d.decode(path, image.SRGB, true)
 	if err != nil {
 		return image.Raster{}, err
 	}
@@ -112,8 +119,8 @@ func (d *Decoder) Preview(path string, maxEdge int) (image.Raster, error) {
 	return scaleDown(decoded.Image, maxEdge), nil
 }
 
-// decode opens, optionally develops at half size, and copies the result out.
-func (d *Decoder) decode(path string, halfSize bool) (port.Decoded, error) {
+// decode opens, develops into the requested space, and copies the result out.
+func (d *Decoder) decode(path string, want image.ColorSpace, halfSize bool) (port.Decoded, error) {
 	if path == "" {
 		return port.Decoded{}, errors.New("rawlib: no path given")
 	}
@@ -135,7 +142,7 @@ func (d *Decoder) decode(path string, halfSize bool) (port.Decoded, error) {
 	}
 
 	var developed C.ofxr_info
-	pixels := C.ofxr_develop(img, half, &developed, &cErr)
+	pixels := C.ofxr_develop(img, C.int(want), half, &developed, &cErr)
 	if pixels == nil {
 		return port.Decoded{}, fmt.Errorf("rawlib: %s: %s", filepath.Base(path), cErrorText(cErr))
 	}
@@ -148,7 +155,10 @@ func (d *Decoder) decode(path string, halfSize bool) (port.Decoded, error) {
 
 	// Copy out of C. The buffer belongs to the image handle, which the deferred
 	// ofxr_free releases; nothing on the Go side may keep a pointer into it.
-	count := w * h * 4
+	//
+	// Four components per pixel at 16 bits each: the develop is 16 bits for every
+	// space, so the byte count is eight per pixel.
+	count := w * h * 4 * 2
 	src := unsafe.Slice((*byte)(unsafe.Pointer(pixels)), count)
 	rgba := make([]byte, count)
 	copy(rgba, src)
@@ -157,8 +167,10 @@ func (d *Decoder) decode(path string, halfSize bool) (port.Decoded, error) {
 	applyFlip(&raster, int(developed.flip))
 
 	decoded := port.Decoded{
-		Image:     raster,
-		FileSpace: image.SRGB, // libraw develops into sRGB
+		Image: raster,
+		// FileSpace is the space the pixels are in. A RAW file declares no colour
+		// space at all, so there is nothing else it could be.
+		FileSpace: want,
 		Camera: port.CameraInfo{
 			Make:     cString(developed.make[:]),
 			Model:    cString(developed.model[:]),
@@ -187,21 +199,22 @@ func thumbnailBytes(img *C.ofxr_image) []byte {
 	return buf[:int(written)]
 }
 
-// rgbaToRaster converts 8-bit RGBA into the pipeline's float32 layout.
+// rgbaToRaster converts 16-bit RGBA into the pipeline's float32 layout.
 //
 // The input is bottom-up, which is already the pipeline's order, so the rows are
-// copied as they arrive. The values are divided by 255 without a gamma transform:
-// libraw's output is sRGB-encoded, and the colour converter is what linearises it
-// when a linear working space is asked for.
+// copied as they arrive. Each sample is little-endian, and is divided by 65535 with
+// no transfer function applied: libraw already encoded the requested curve, so
+// applying one here would be a second conversion.
 func rgbaToRaster(rgba []byte, w, h int) image.Raster {
 	raster := image.New(w, h)
+	const max = 65535.0
 	for i := 0; i < w*h; i++ {
-		src := rgba[i*4 : i*4+4]
+		src := rgba[i*8 : i*8+8]
 		dst := raster.Pixels[i*4 : i*4+4]
-		dst[0] = float32(src[0]) / 255
-		dst[1] = float32(src[1]) / 255
-		dst[2] = float32(src[2]) / 255
-		dst[3] = float32(src[3]) / 255
+		dst[0] = float32(uint16(src[0])|uint16(src[1])<<8) / max
+		dst[1] = float32(uint16(src[2])|uint16(src[3])<<8) / max
+		dst[2] = float32(uint16(src[4])|uint16(src[5])<<8) / max
+		dst[3] = float32(uint16(src[6])|uint16(src[7])<<8) / max
 	}
 	return raster
 }

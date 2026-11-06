@@ -562,11 +562,15 @@ quantised it away first. Developing into the target is the only order that is co
 | Linear Rec.709 | 1 | 1.0, 1.0 |
 | Linear Rec.2020 | 8 | 1.0, 1.0 |
 
-**One row needs verification during implementation.** libraw's 7 is DCI-P3, and
-Display P3 and DCI-P3 share primaries but not a transfer curve. Setting the sRGB
-curve on DCI-P3 primaries is the definition of Display P3, so the row should be
-right — but it is the one entry here that has not been measured against an
-independent conversion, and it must be before the export dialog offers Display P3.
+*Implemented.* Two findings from doing it:
+
+- **`gamm[0]` is the inverse power.** libraw raises the sample to `gamm[0]`, so the
+  sRGB curve is `1/2.4`, not `2.4`. Passing `2.4` produced a nearly black frame and
+  reported success, which is the kind of bug a status code cannot show.
+- **The Display P3 row is verified.** Developing straight into Display P3 and
+  converting sRGB into Display P3 with lcms2 agree to a mean delta of 0.014 in 0..1
+  (about 3.5 of 255 levels). They agree closely and not exactly, which is expected:
+  libraw works from the sensor data and lcms2 from an sRGB intermediate.
 
 #### 16 bits is not optional
 
@@ -587,20 +591,21 @@ pipeline's precision depend on a setting, which is how a "works in sRGB" bug shi
   space at all. The field now means "the space the pixels are in", and every reader
   already treats it that way, so the name can stay.
 
-#### What changes in code
+#### What changed in code
 
-1. `port.ImageDecoder.Decode(path)` becomes `Decode(path string, want image.ColorSpace)`.
-   A decoder that cannot develop into a space returns an error rather than silently
-   producing sRGB, so a wrong mapping is caught at the call.
-2. `rawlib` sets `output_color`, `gamm` and `output_bps = 16` from the requested space,
-   and `rgbaToRaster` reads 16-bit samples.
-3. `service/document.Open` takes the requested space, and a re-open is how a user
-   changes it. `State.WorkingSpace` and `State.InputSpace` both become that space; they
-   stay separate fields because an import path could later want them to differ.
-4. `transport/binds` gains the prompt's answer in `OpenRequest`, and the frontend shows
-   the dialog before calling Open.
-5. `internal/cli render` gains `-space` as the **working** space rather than only the
-   export target, which makes the choice scriptable.
+1. `port.ImageDecoder.Decode(path, want image.ColorSpace)`. A space the decoder cannot
+   produce is an error, not a silent sRGB frame.
+2. `rawlib` maps the space to `output_color` and `gamm`, always at `output_bps = 16`,
+   and `rgbaToRaster` reads 16-bit little-endian samples.
+3. `service/document.OpenRequest` carries the space. `WorkingSpace`, `InputSpace` and
+   `FileSpace` all report it.
+4. `SetInputSpace` was **removed**. It would have relabelled pixels that are still in
+   the developed space, telling the chain a space the pixels are not in. Changing the
+   space means opening the file again.
+5. `transport/binds` carries the space in `OpenRequest` and gained `PickFile`, backed by
+   a `desktop.FilePicker`. The frontend shows `OpenDialog` between the two calls.
+6. `internal/cli render -space` is now the **working** space; the PNG is always written
+   in sRGB.
 
 ### 7.1 Preview: always sRGB
 

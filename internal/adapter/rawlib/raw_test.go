@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aaronmurniadi/ofxhost/internal/adapter/lcms"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
 )
 
@@ -107,13 +108,13 @@ func TestIsRAW(t *testing.T) {
 }
 
 func TestDecodeRejectsAMissingFile(t *testing.T) {
-	if _, err := New().Decode(filepath.Join(t.TempDir(), "nothing.cr3")); err == nil {
+	if _, err := New().Decode(filepath.Join(t.TempDir(), "nothing.cr3"), image.SRGB); err == nil {
 		t.Fatal("a missing file must be an error")
 	}
 }
 
 func TestDecodeRejectsNoPath(t *testing.T) {
-	if _, err := New().Decode(""); err == nil {
+	if _, err := New().Decode("", image.SRGB); err == nil {
 		t.Fatal("an empty path must be an error")
 	}
 }
@@ -125,7 +126,7 @@ func TestDecodeRejectsANonRAWFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("this is not a raw file"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := New().Decode(path); err == nil {
+	if _, err := New().Decode(path, image.SRGB); err == nil {
 		t.Fatal("a non-RAW file must be an error")
 	}
 }
@@ -143,7 +144,7 @@ func TestDecodeARealFile(t *testing.T) {
 	for _, path := range paths {
 		name := filepath.Base(path)
 		t.Run(name, func(t *testing.T) {
-			decoded, err := decoder.Decode(path)
+			decoded, err := decoder.Decode(path, image.SRGB)
 			if err != nil {
 				t.Fatalf("Decode: %v", err)
 			}
@@ -177,7 +178,7 @@ func TestEmbeddedPreviewIsKept(t *testing.T) {
 	// back of the camera, so it is worth keeping when the file carries one.
 	found := false
 	for _, path := range samplePaths(t) {
-		decoded, err := New().Decode(path)
+		decoded, err := New().Decode(path, image.SRGB)
 		if err != nil {
 			continue
 		}
@@ -218,7 +219,7 @@ func TestDecodeTwiceIsIndependent(t *testing.T) {
 	done := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			decoded, err := New().Decode(path)
+			decoded, err := New().Decode(path, image.SRGB)
 			if err != nil {
 				done <- err
 				return
@@ -243,3 +244,133 @@ var errNoPixels = &decodeError{"the decoded image has no pixels"}
 type decodeError struct{ text string }
 
 func (e *decodeError) Error() string { return e.text }
+
+// TestDevelopHonoursTheRequestedSpace checks decision D8: the space is an input to
+// the develop, so four requests must produce four different frames.
+func TestDevelopHonoursTheRequestedSpace(t *testing.T) {
+	paths := samplePaths(t)
+	path := paths[0]
+
+	spaces := []image.ColorSpace{image.SRGB, image.DisplayP3, image.LinearRec709, image.LinearRec2020}
+	frames := make([]image.Raster, len(spaces))
+	for i, space := range spaces {
+		decoded, err := New().Decode(path, space)
+		if err != nil {
+			t.Fatalf("Decode(%v): %v", space, err)
+		}
+		if decoded.FileSpace != space {
+			t.Fatalf("Decode(%v) reported FileSpace %v", space, decoded.FileSpace)
+		}
+		frames[i] = decoded.Image
+	}
+
+	// A linear develop of the same frame is far darker than the encoded one, because
+	// the encoding curve is what lifts the midtones. That is the property that proves
+	// the transfer curve was honoured rather than relabelled.
+	encodedLum := meanLuminance(frames[0])
+	linearLum := meanLuminance(frames[2])
+	if linearLum >= encodedLum {
+		t.Fatalf("the linear develop (%.5f) is not darker than the encoded one (%.5f)", linearLum, encodedLum)
+	}
+
+	// Rec709 and Rec2020 are different primaries, so the same pixel must not land on
+	// exactly the same value.
+	if identicalPixels(frames[2], frames[3]) {
+		t.Fatal("Linear Rec.709 and Linear Rec.2020 produced identical frames")
+	}
+	// sRGB and Display P3 share a transfer curve but not primaries.
+	if identicalPixels(frames[0], frames[1]) {
+		t.Fatal("sRGB and Display P3 produced identical frames")
+	}
+}
+
+// TestDisplayP3MatchesAnIndependentConversion checks the one row of the space
+// mapping the plan flagged as unverified.
+//
+// libraw's output_color 7 is DCI-P3, and Display P3 is DCI-P3 primaries with the
+// sRGB transfer curve. If that mapping is right, developing straight into Display P3
+// and converting sRGB into Display P3 with lcms2 must agree closely.
+//
+// They agree closely and not exactly, and that is expected: the two do the conversion
+// with different matrices, and libraw works from the sensor data while lcms2 works
+// from an sRGB intermediate. The tolerance below is what was measured, with room for
+// a different camera.
+func TestDisplayP3MatchesAnIndependentConversion(t *testing.T) {
+	paths := samplePaths(t)
+	path := paths[0]
+
+	direct, err := New().Decode(path, image.DisplayP3)
+	if err != nil {
+		t.Fatalf("Decode DisplayP3: %v", err)
+	}
+	viaSRGBDecoded, err := New().Decode(path, image.SRGB)
+	if err != nil {
+		t.Fatalf("Decode sRGB: %v", err)
+	}
+	viaLCMS, err := lcms.New().Convert(viaSRGBDecoded.Image, image.SRGB, image.DisplayP3, image.Perceptual)
+	if err != nil {
+		t.Fatalf("lcms convert: %v", err)
+	}
+	if direct.Image.W != viaLCMS.W || direct.Image.H != viaLCMS.H {
+		t.Fatalf("sizes differ: %dx%d vs %dx%d", direct.Image.W, direct.Image.H, viaLCMS.W, viaLCMS.H)
+	}
+
+	// Saturated values are skipped: a clipped pixel is clipped in both paths and says
+	// nothing about the mapping.
+	var sum float64
+	var n int
+	for i := 0; i*4+3 < len(direct.Image.Pixels); i += 97 {
+		p := i * 4
+		for c := 0; c < 3; c++ {
+			a := float64(direct.Image.Pixels[p+c])
+			b := float64(viaLCMS.Pixels[p+c])
+			if a >= 0.999 || b >= 0.999 || a <= 0.001 || b <= 0.001 {
+				continue
+			}
+			sum += mathAbs(a - b)
+			n++
+		}
+	}
+	if n == 0 {
+		t.Skip("no usable sample pixels")
+	}
+	mean := sum / float64(n)
+	// 0.03 in 0..1 is under eight of 255 levels, which is about the precision of the
+	// 8-bit sRGB intermediate the lcms path goes through.
+	if mean > 0.03 {
+		t.Fatalf("the direct Display P3 develop disagrees with an lcms conversion by %.5f on average", mean)
+	}
+}
+
+// meanLuminance returns the average Rec.709 luminance of a frame.
+func meanLuminance(r image.Raster) float64 {
+	if r.Empty() {
+		return 0
+	}
+	var sum float64
+	for i := 0; i < len(r.Pixels); i += 4 {
+		sum += 0.2126*float64(r.Pixels[i]) + 0.7152*float64(r.Pixels[i+1]) + 0.0722*float64(r.Pixels[i+2])
+	}
+	return sum / float64(r.W*r.H)
+}
+
+// identicalPixels reports whether two frames of the same size hold the same values.
+func identicalPixels(a, b image.Raster) bool {
+	if a.W != b.W || a.H != b.H || len(a.Pixels) != len(b.Pixels) {
+		return false
+	}
+	for i := range a.Pixels {
+		if a.Pixels[i] != b.Pixels[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// mathAbs is the absolute value of a float64.
+func mathAbs(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
