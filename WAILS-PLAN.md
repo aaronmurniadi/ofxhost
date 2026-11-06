@@ -665,6 +665,29 @@ wrong pipeline.
 loads, lists its parameters of every kind, renders at preview and full
 resolution, and aborts a stale generation.
 
+*Done.* Verified against 70 plugins installed on the development machine: all 7
+filter-context plugins instantiate, report every parameter of every kind, and render.
+Driving Threshold's `level` to 0 gives a mean of 0.94 and to 1 gives 0.002, which is
+the check that the parameter path reaches the render rather than only storing a value.
+
+Three findings worth recording:
+
+- The host library keeps one plugin cache per process, and it holds a pointer to the
+  host's image-effect cache. Freeing a host without clearing it leaves a dangling
+  pointer that the next discovery walks into. `ofxh_host_free` clears it.
+- cgo cannot compile translation units outside its package directory, so
+  HostSupport is built by `internal/adapter/ofxhost/native/CMakeLists.txt` into
+  `libofxhost.a` and the cgo link line names it. One CMake command precedes the first
+  build; README documents it.
+- Instances are keyed by node identity, not position. Keying by position pairs an
+  instance with the wrong plugin after a reorder, so `domain/chain.Node` gained an
+  `ID` and a move became a pure model edit.
+
+Still open from M2: the preview has never been compared against a camera's own
+embedded JPEG. That comparison is the only check that catches a wrong demosaic rather
+than a wrong pipeline, and it is now cheap to add because `Decoded.Thumbnail` carries
+the camera preview.
+
 #### M4 — Export with wide gamut
 
 - `adapter/codes`: PNG and TIFF first (they carry ICC and 16-bit), then JPEG,
