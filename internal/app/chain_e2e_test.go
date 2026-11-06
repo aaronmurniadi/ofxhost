@@ -2,6 +2,7 @@ package app
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,6 +23,7 @@ import (
 // It is skipped when the machine has no plugins, because the host is tested against
 // what a user actually installs.
 func TestChainChangesThePreview(t *testing.T) {
+	t.Setenv("OFXHOST_OFX_DIRS", fixtureDir(t))
 	dirs := os.Getenv("OFXHOST_OFX_DIRS")
 	if dirs == "" {
 		dirs = strings.Join(ofxhost.PluginDirs(), string(os.PathListSeparator))
@@ -164,33 +166,49 @@ func samePixels(a, b image.Raster) bool {
 	return true
 }
 
-// firstRenderablePlugin returns the index of a plugin that actually renders a small
-// frame, or -1.
+// fixtureIdentifier is the identifier the fixture plugin registers.
+const fixtureIdentifier = "org.ofxhost.fixture"
+
+// fixtureDir makes the fixture plugin discoverable, and returns its directory.
 //
-// Instantiating is not proof that a plugin will run. Several refuse a frame this small,
-// and some need a parameter set first. A test that stopped at "it instantiated" passed on
-// one machine and failed on another, which is what happened when the installed plugin set
-// changed and the first entry became a film emulation.
+// The plugin is built by the same CMake project as the host, so it exists on any machine
+// that can build this repository - unlike a vendor plugin, which may or may not be
+// installed. Tests then select it by identifier, so what else is installed cannot change
+// the outcome.
+func fixtureDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("working directory: %v", err)
+	}
+	for {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Skip("the repository root could not be found")
+		}
+		dir = parent
+	}
+	bundle := filepath.Join(dir, "build", "ofxhost-native", "fixture")
+	if _, statErr := os.Stat(filepath.Join(bundle, "HostFixture.ofx.bundle", "Contents", "MacOS")); statErr != nil {
+		t.Skipf("the fixture plugin is not built (%v); run the cmake step from AGENTS.md", statErr)
+	}
+	return bundle
+}
+
+// firstRenderablePlugin returns the fixture plugin's index, or -1 when it is absent.
+//
+// It used to probe whatever was installed for one that rendered a small frame. That made
+// the suite depend on the machine: it passed while a simple effect happened to be first in
+// the list, and failed when the first entry became a film emulation that refuses one.
 func firstRenderablePlugin(t *testing.T, host *ofxhost.Host) int {
 	t.Helper()
-	probe := image.New(32, 32)
-	for i := range host.Plugins() {
-		instance, err := host.Create(i)
-		if err != nil {
-			continue
+	for _, plugin := range host.Plugins() {
+		if plugin.Identifier == fixtureIdentifier {
+			return plugin.Index
 		}
-		w, h, sizeErr := instance.OutputSize(probe.W, probe.H)
-		if sizeErr == nil && w > 0 && h > 0 {
-			_, status, renderErr := instance.Render(port.RenderRequest{
-				In: probe, OutW: w, OutH: h, ProxyScale: 1.0, Generation: 1,
-			})
-			_ = instance.Close()
-			if renderErr == nil && status == port.RenderOK {
-				return i
-			}
-			continue
-		}
-		_ = instance.Close()
 	}
 	return -1
 }

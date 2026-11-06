@@ -209,17 +209,43 @@ pointer, a missing action. Every crash so far was host-side.
 
 - Logic tests live beside the code with fakes. Adapter-crossing tests live in
   `internal/app`.
+- **Never make a test depend on a vendor plugin.** This machine once had 70 plugins and
+  now has 6; two tests that had been green started failing for reasons unrelated to the
+  change being made. Use the fixture instead.
 - Frontend logic is tested with `vitest` (`npm test` in `frontend/`). Pure modules only;
   there is no DOM test environment.
 - Prefer a test that fails without the fix. Verify it fails, then fix.
 - Measure rather than assume. Claimed speedups, bit depths and colour behaviour in
   `PLAN.md` all carry numbers from the real sample file.
 
-Useful fixtures:
+### The fixture plugin
+
+`internal/adapter/ofxhost/testdata/fixture/plugin.cpp` is an OpenFX plugin **this
+repository owns and builds**. The CMake step already in §3 produces it at
+`build/ofxhost-native/fixture/HostFixture.ofx.bundle`. Tests find it by its identifier,
+`org.ofxhost.fixture`, so whatever else is installed cannot change the result.
+
+It deliberately covers the awkward cases, so a test can describe behaviour instead of
+describing a vendor:
+
+| It declares | To test |
+|---|---|
+| a group holding a group | that the panel builds a tree, not a flat list |
+| a group marked secret, with a member | that the flag does not replace the kind |
+| double, integer, boolean, choice, string | the OFX type → kind mapping |
+| a `category` choice that rebuilds a `preset` choice | that the host sends `kOfxActionInstanceChanged` |
+| an `inputColorSpace` choice using the host's own space names | that the chain can initialise it |
+| a gain render | that a render produces pixels |
+
+Add a parameter to the fixture rather than to a test's expectations of a vendor. If a test
+needs behaviour the fixture does not have, extend the fixture.
+
+A note on choice parameters: an OFX choice cannot drop an option, only relabel it. A test
+that expects a list to shrink is testing something no host can observe. Compare labels.
+
+### Other fixtures
 
 - `samples/DSCF0209.RAF` — committed, 25 MB, Fujifilm X-M1, 4952×3288.
-- `/Library/OFX/Plugins` — 70 plugins on this machine. `spektrafilm` is the demanding
-  one: 830 parameters, 49 groups, colour space aware.
 - `codes.DistinctLevels`, `codes.JXLProfile` — readback helpers for encoder tests.
 
 ---

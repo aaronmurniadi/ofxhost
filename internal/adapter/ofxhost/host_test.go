@@ -57,37 +57,19 @@ func findPlugin(host *Host, identifier string) int {
 
 // firstUsable returns the index of the first plugin that instantiates, so a test
 // does not depend on one particular vendor being installed.
-// firstUsable returns a plugin that can actually render a small frame.
+// firstUsable returns the fixture plugin, which the tests own and which always renders.
 //
-// Creating an instance is not enough to prove that. Some plugins refuse a frame this
-// small, and some need a parameter set before they will run, so a test that stopped at
-// "it instantiated" picked a plugin that then failed - which is what happened when the
-// installed set changed and the first plugin became a film emulation.
-//
-// A render is the only honest check, so it is the check.
+// It used to scan for a plugin that happened to work, which made the suite depend on the
+// installed set: it passed while a simple effect was first in the list and failed when the
+// first entry became a film emulation that refuses a small frame.
 func firstUsable(t *testing.T, host *Host) int {
 	t.Helper()
-	probe := image.New(32, 32)
-	for i := range host.Plugins() {
-		instance, err := host.Create(i)
-		if err != nil {
-			continue
+	for _, plugin := range host.Plugins() {
+		if plugin.Identifier == fixtureIdentifier {
+			return plugin.Index
 		}
-		w, h, sizeErr := instance.OutputSize(probe.W, probe.H)
-		if sizeErr != nil || w <= 0 || h <= 0 {
-			_ = instance.Close()
-			continue
-		}
-		_, status, renderErr := instance.Render(port.RenderRequest{
-			In: probe, OutW: w, OutH: h, ProxyScale: 1.0, Generation: 1,
-		})
-		_ = instance.Close()
-		if renderErr != nil || status != port.RenderOK {
-			continue
-		}
-		return i
 	}
-	t.Skip("no installed plugin could render a probe frame")
+	t.Skip("the fixture plugin is not available")
 	return -1
 }
 
@@ -531,79 +513,60 @@ func TestDiscoverRejectsAClosedHost(t *testing.T) {
 	}
 }
 
-// TestChangingOneParameterRepopulatesAnother is the regression for a menu that never
-// grew past its first entry.
+// fixtureDir returns the directory holding the fixture plugin bundle.
 //
-// Spektrafilm's Quick Access section picks a preset category and then a preset within
-// it. The preset list is a single default entry until the plugin is told the category
-// changed; the plugin rebuilds the list in its instance-changed action. A host that
-// only writes the value never sends that action, so the second menu stays at one item
-// no matter which category is chosen.
+// The fixture is built by the same CMake project as the host, so a machine with no
+// third-party plugins still has one that the tests own. Walking up to go.mod rather than
+// counting directories keeps this correct if the package moves.
+func fixtureDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("working directory: %v", err)
+	}
+	for {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Skip("the repository root could not be found")
+		}
+		dir = parent
+	}
+	dirs := filepath.Join(dir, "build", "ofxhost-native", "fixture")
+	entry := filepath.Join(dirs, "HostFixture.ofx.bundle", "Contents", "MacOS")
+	if _, statErr := os.Stat(entry); statErr != nil {
+		t.Skipf("the fixture plugin is not built (%v); run the cmake step from AGENTS.md", statErr)
+	}
+	return dirs
+}
+
+// fixtureIdentifier is the identifier the fixture plugin registers.
+const fixtureIdentifier = "org.ofxhost.fixture"
+
+// fixtureHost returns a host with the fixture plugin discovered, and the fixture's index.
 //
-// The host now sends the action after every write and re-reads the metadata, so the
-// panel sees the new list. This test drives the same path a user does.
-func TestChangingOneParameterRepopulatesAnother(t *testing.T) {
+// It finds the plugin by identifier rather than by position, which is what makes the test
+// independent of what else is installed: a machine with seventy plugins and a machine with
+// none both produce the same index for this one. Discovery still walks the platform
+// directories, so no production behaviour has to exist only for tests.
+func fixtureHost(t *testing.T) (*Host, int) {
+	t.Helper()
 	host, err := New(Options{})
 	if err != nil {
-		t.Skipf("no plugin host: %v", err)
+		t.Fatalf("create the plugin host: %v", err)
 	}
 	t.Cleanup(func() { _ = host.Close() })
-	if err := host.Discover(nil); err != nil {
-		t.Skipf("the plugin scan failed: %v", err)
-	}
 
-	var instance port.Instance
+	if err := host.Discover([]string{fixtureDir(t)}); err != nil {
+		t.Fatalf("discover plugins: %v", err)
+	}
 	for _, plugin := range host.Plugins() {
-		if plugin.Label != "spektrafilm" {
-			continue
-		}
-		created, createErr := host.Create(plugin.Index)
-		if createErr != nil {
-			t.Fatalf("create: %v", createErr)
-		}
-		t.Cleanup(func() { _ = created.Close() })
-		instance = created
-		break
-	}
-	if instance == nil {
-		t.Skip("spektrafilm is not installed")
-	}
-
-	optionsOf := func(name string) []string {
-		for _, p := range instance.Params() {
-			if p.Name == name {
-				return p.ChoiceLabels
-			}
-		}
-		t.Fatalf("no parameter %q", name)
-		return nil
-	}
-
-	const category = "quickPresetCategory"
-	const selection = "quickPresetSelection"
-
-	if len(optionsOf(category)) < 2 {
-		t.Skip("this build exposes one preset category, so there is nothing to switch to")
-	}
-
-	// The category the plugin starts on may legitimately offer one preset; every other
-	// category must offer its own list.
-	grew := 0
-	for index := range optionsOf(category) {
-		if setErr := instance.SetValues(category, port.ParamValue{Nums: []float64{float64(index)}}); setErr != nil {
-			t.Fatalf("set %s to %d: %v", category, index, setErr)
-		}
-		options := optionsOf(selection)
-		if len(options) == 0 {
-			t.Fatalf("category %d left the preset list empty", index)
-		}
-		if len(options) > 1 {
-			grew++
+		if plugin.Identifier == fixtureIdentifier {
+			return host, plugin.Index
 		}
 	}
-
-	if grew == 0 {
-		t.Fatal("every category offered one preset, so the list never repopulated")
-	}
-	t.Logf("%d of %d categories offered more than one preset after switching", grew, len(optionsOf(category)))
+	t.Fatalf("the fixture plugin %q was not discovered in %s", fixtureIdentifier, fixtureDir(t))
+	return nil, -1
 }

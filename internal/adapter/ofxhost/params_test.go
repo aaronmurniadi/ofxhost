@@ -4,209 +4,222 @@ import (
 	"testing"
 
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
+	"github.com/aaronmurniadi/ofxhost/internal/port"
 )
 
-// pluginParams returns the parameters of the first plugin whose label matches.
-func pluginParams(t *testing.T, label string) []ParamSummary {
+// These tests describe the host's behaviour and use the fixture plugin that this
+// repository builds, not a vendor's. They used to name spektrafilm, which meant they
+// passed on a machine with it installed and skipped everywhere else - and when the
+// installed set changed mid-development, the ones that did not skip started failing for
+// reasons that had nothing to do with the change being made.
+
+// fixtureParams reads the fixture's parameters, failing if it is not built.
+func fixtureParams(t *testing.T, check func(*testing.T, []port.ParamInfo)) {
 	t.Helper()
-	host, err := New(Options{})
+	host, index := fixtureHost(t)
+	instance, err := host.Create(index)
 	if err != nil {
-		t.Skipf("no plugin host: %v", err)
+		t.Fatalf("create the fixture: %v", err)
 	}
-	t.Cleanup(func() { _ = host.Close() })
-	if err := host.Discover(nil); err != nil {
-		t.Skipf("the plugin scan failed: %v", err)
-	}
-	for _, plugin := range host.Plugins() {
-		if plugin.Label != label {
-			continue
-		}
-		instance, createErr := host.Create(plugin.Index)
-		if createErr != nil {
-			t.Fatalf("create %s: %v", label, createErr)
-		}
-		t.Cleanup(func() { _ = instance.Close() })
-
-		params := instance.Params()
-		out := make([]ParamSummary, 0, len(params))
-		for _, p := range params {
-			out = append(out, ParamSummary{
-				Name: p.Name, Parent: p.Parent, Kind: int(p.Kind),
-				Secret: p.Secret, RawType: p.RawType,
-			})
-		}
-		return out
-	}
-	t.Skipf("%q is not installed", label)
-	return nil
+	t.Cleanup(func() { _ = instance.Close() })
+	check(t, instance.Params())
 }
 
-// ParamSummary is the part of a parameter these tests read.
-type ParamSummary struct {
-	Name    string
-	Parent  string
-	Kind    int
-	Secret  bool
-	RawType string
-}
-
-func isGroupType(rawType string) bool {
-	return rawType == "OfxParamTypeGroup" || rawType == "OfxParamTypePage"
-}
-
-// TestSecretKeepsTheDeclaredKind is the regression this test exists for.
+// TestSecretIsAFlagNotAKind is the regression for a group that turned into a text box.
 //
-// The host used to write the secret flag into the parameter kind, which replaced the
-// real type. A group became "secret", the panel stopped seeing a group, and every
-// advanced section of the plugin collapsed into a text box. Spektrafilm marks a whole
-// feature area that way, so one flag blanked 390 parameters.
-func TestSecretKeepsTheDeclaredKind(t *testing.T) {
-	params := pluginParams(t, "spektrafilm")
-
-	secret := 0
-	for _, p := range params {
-		if !p.Secret {
-			continue
-		}
-		secret++
-		if p.Kind == 0 {
-			t.Fatalf("%s is marked secret and lost its kind entirely (declared %q)", p.Name, p.RawType)
-		}
-		if isGroupType(p.RawType) && p.Kind != 7 && p.Kind != 8 {
-			t.Fatalf("%s is declared %q but resolved to kind %d", p.Name, p.RawType, p.Kind)
-		}
-	}
-	if secret == 0 {
-		t.Skip("this build of the plugin marks nothing secret")
-	}
-	t.Logf("%d of %d parameters are secret, and every one kept its declared kind", secret, len(params))
-}
-
-// TestEveryParentNamesAGroup checks the nesting data the panel builds its tree from.
-//
-// A parameter that names a parent which does not exist, or which is not a group,
-// would be promoted to the top level by the panel. That is a safe fallback, but it
-// hides a real defect, so the plugin's own declaration is checked here instead.
-func TestEveryParentNamesAGroup(t *testing.T) {
-	params := pluginParams(t, "spektrafilm")
-
-	kindOf := make(map[string]string, len(params))
-	for _, p := range params {
-		kindOf[p.Name] = p.RawType
-	}
-
-	broken := 0
-	for _, p := range params {
-		if p.Parent == "" {
-			continue
-		}
-		raw, ok := kindOf[p.Parent]
-		if !ok {
-			t.Logf("%s names the missing parent %q", p.Name, p.Parent)
-			broken++
-			continue
-		}
-		if !isGroupType(raw) {
-			t.Logf("%s names %q, which is declared %q", p.Name, p.Parent, raw)
-			broken++
-		}
-	}
-	if broken > 0 {
-		t.Fatalf("%d parameters name a parent that cannot hold them", broken)
-	}
-}
-
-// TestSpektrafilmNestsGroups guards the shape the panel draws.
-//
-// A flat list of 46 group headings is what made this plugin unreadable; the fix is
-// only real if the groups actually nest.
-func TestSpektrafilmNestsGroups(t *testing.T) {
-	params := pluginParams(t, "spektrafilm")
-
-	secret := make(map[string]bool)
-	for _, p := range params {
-		if p.Secret {
-			secret[p.Name] = true
-		}
-	}
-	// A parameter is hidden when anything above it is secret.
-	for changed := true; changed; {
-		changed = false
-		for _, p := range params {
-			if !secret[p.Name] && secret[p.Parent] {
-				secret[p.Name] = true
-				changed = true
+// The host used to write the secret property into the parameter kind. A group then
+// stopped being a group, the panel drew a password field where a heading belonged, and
+// the whole subtree disappeared.
+func TestSecretIsAFlagNotAKind(t *testing.T) {
+	fixtureParams(t, func(t *testing.T, params []port.ParamInfo) {
+		var hidden *port.ParamInfo
+		var member *port.ParamInfo
+		for i := range params {
+			switch params[i].Name {
+			case "hiddenGroup":
+				hidden = &params[i]
+			case "hiddenValue":
+				member = &params[i]
 			}
 		}
-	}
-
-	nestedUnder := make(map[string]int)
-	for _, p := range params {
-		if secret[p.Name] || !isGroupType(p.RawType) {
-			continue
+		if hidden == nil || member == nil {
+			t.Fatal("the fixture did not declare its secret group or its member")
 		}
-		if p.Parent != "" {
-			nestedUnder[p.Parent]++
+
+		if !hidden.Secret {
+			t.Fatal("the secret group is not marked secret")
 		}
-	}
-
-	// effectsGroup is declared by the plugin as holding the lens, vignette and dust
-	// sections. If the nesting were ignored this count would be zero.
-	if nestedUnder["effectsGroup"] == 0 {
-		t.Fatal("effectsGroup holds no nested groups, so the tree is still flat")
-	}
-	t.Logf("effectsGroup holds %d nested groups", nestedUnder["effectsGroup"])
-
+		// The flag must not replace the type.
+		if hidden.Kind != port.ParamGroup {
+			t.Fatalf("the secret group resolved to kind %d, want ParamGroup", int(hidden.Kind))
+		}
+		if hidden.RawType != "OfxParamTypeGroup" {
+			t.Fatalf("the secret group reports declared type %q", hidden.RawType)
+		}
+		// The member inherits the hiding through its parent, and keeps its own kind.
+		if member.Kind != port.ParamDouble {
+			t.Fatalf("the member of a secret group resolved to kind %d, want ParamDouble", int(member.Kind))
+		}
+		if member.Parent != "hiddenGroup" {
+			t.Fatalf("the member's parent is %q, want hiddenGroup", member.Parent)
+		}
+	})
 }
 
-// TestEveryHostSpaceHasAPluginOption checks the mapping the chain relies on.
+// TestEveryParentNamesAGroup checks the data the panel builds its tree from.
+//
+// A parameter naming a parent that does not exist, or that is not a group, is promoted to
+// the top level by the panel. That is a safe fallback, but it hides a defect, so the
+// declaration itself is checked here.
+func TestEveryParentNamesAGroup(t *testing.T) {
+	fixtureParams(t, func(t *testing.T, params []port.ParamInfo) {
+		kindOf := make(map[string]port.ParamKind, len(params))
+		for _, p := range params {
+			kindOf[p.Name] = p.Kind
+		}
+		broken := 0
+		for _, p := range params {
+			if p.Parent == "" {
+				continue
+			}
+			kind, ok := kindOf[p.Parent]
+			if !ok {
+				t.Errorf("%s names the missing parent %q", p.Name, p.Parent)
+				broken++
+				continue
+			}
+			if kind != port.ParamGroup && kind != port.ParamPage {
+				t.Errorf("%s names %q, which is kind %d and cannot hold it", p.Name, p.Parent, int(kind))
+				broken++
+			}
+		}
+		if broken > 0 {
+			t.Fatalf("%d parameters name a parent that cannot hold them", broken)
+		}
+	})
+}
+
+// TestGroupsNest guards the shape the panel draws: a group inside a group, not a flat row
+// of headings with every control underneath.
+func TestGroupsNest(t *testing.T) {
+	fixtureParams(t, func(t *testing.T, params []port.ParamInfo) {
+		parentOf := make(map[string]string, len(params))
+		kindOf := make(map[string]port.ParamKind, len(params))
+		for _, p := range params {
+			parentOf[p.Name] = p.Parent
+			kindOf[p.Name] = p.Kind
+		}
+		if kindOf["innerGroup"] != port.ParamGroup {
+			t.Fatal("the fixture's inner group is not a group")
+		}
+		if parentOf["innerGroup"] != "outerGroup" {
+			t.Fatalf("innerGroup is parented to %q, want outerGroup", parentOf["innerGroup"])
+		}
+		if parentOf["gain"] != "outerGroup" {
+			t.Fatalf("gain is parented to %q, want outerGroup", parentOf["gain"])
+		}
+		if parentOf["count"] != "innerGroup" {
+			t.Fatalf("count is parented to %q, want innerGroup", parentOf["count"])
+		}
+	})
+}
+
+// TestChangingOneParameterRepopulatesAnother is the regression for a menu that never grew.
+//
+// OFX puts this in kOfxActionInstanceChanged, and a host that only writes the value never
+// sends it, so the plugin never rebuilds the list.
+func TestChangingOneParameterRepopulatesAnother(t *testing.T) {
+	host, index := fixtureHost(t)
+	instance, err := host.Create(index)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer func() { _ = instance.Close() }()
+
+	optionsOf := func(name string) []string {
+		for _, p := range instance.Params() {
+			if p.Name == name {
+				return p.ChoiceLabels
+			}
+		}
+		t.Fatalf("no parameter %q", name)
+		return nil
+	}
+
+	// The list is compared by content, not by length: an OFX choice cannot drop an
+	// option, only relabel it, so a shrink is not something a host could observe.
+	if first := optionsOf("preset")[0]; first != "Clean Slate" {
+		t.Fatalf("the preset list starts on %q, want Clean Slate", first)
+	}
+
+	if setErr := instance.SetValues("category", port.ParamValue{Nums: []float64{1}}); setErr != nil {
+		t.Fatalf("set the category: %v", setErr)
+	}
+	after := optionsOf("preset")
+	if len(after) < 3 {
+		t.Fatalf("after choosing category 1 the preset list has %d options, want at least 3", len(after))
+	}
+	if after[0] != "Warm" || after[1] != "Cool" || after[2] != "Neutral" {
+		t.Fatalf("the preset list is %v, want the second category's presets", after[:3])
+	}
+
+	if setErr := instance.SetValues("category", port.ParamValue{Nums: []float64{0}}); setErr != nil {
+		t.Fatalf("set the category back: %v", setErr)
+	}
+	if back := optionsOf("preset"); back[0] != "Clean Slate" {
+		t.Fatalf("after returning to category 0 the preset list starts on %q, want Clean Slate", back[0])
+	}
+}
+
+// TestEveryHostSpaceHasAPluginOption protects the mapping the chain relies on.
 //
 // The host cannot negotiate a colour space: the vendored HostSupport predates OFX 1.5
-// colour management entirely, so there is no clip colour space model to declare through.
-// These plugins carry their own input colour space parameter for that reason, and the
-// chain initialises it by matching the option's label to the working space's name. That
-// only works while the names agree, so the agreement is asserted rather than assumed.
+// colour management, so the chain initialises a plugin's own input colour space parameter
+// instead. That works by matching an option's label to the working space's name, so the
+// two must agree.
 func TestEveryHostSpaceHasAPluginOption(t *testing.T) {
-	host, err := New(Options{})
-	if err != nil {
-		t.Skipf("host: %v", err)
-	}
-	defer host.Close()
-	if err := host.Discover(nil); err != nil {
-		t.Skipf("scan: %v", err)
-	}
-
-	for _, plugin := range host.Plugins() {
-		if plugin.Label != "spektrafilm" {
-			continue
-		}
-		instance, createErr := host.Create(plugin.Index)
-		if createErr != nil {
-			t.Fatalf("create: %v", createErr)
-		}
-		defer instance.Close()
-
+	fixtureParams(t, func(t *testing.T, params []port.ParamInfo) {
 		var options []string
-		for _, p := range instance.Params() {
-			if p.Name == "quickInputColorSpace" {
+		for _, p := range params {
+			if p.Name == "inputColorSpace" {
 				options = p.ChoiceLabels
-				break
 			}
 		}
 		if len(options) == 0 {
-			t.Skip("this build exposes no input colour space parameter")
+			t.Fatal("the fixture declared no input colour space parameter")
 		}
-
 		have := make(map[string]bool, len(options))
 		for _, label := range options {
 			have[label] = true
 		}
 		for _, space := range image.ColorSpaceNames() {
 			if !have[space] {
-				t.Errorf("the plugin offers no option named %q, so the chain cannot set it", space)
+				t.Errorf("the fixture offers no option named %q, so the chain cannot set it", space)
 			}
 		}
-		return
+	})
+}
+
+// TestOneParameterOfEachKindKeepsItsType guards the mapping from OFX type to kind across
+// every shape the panel draws.
+func TestOneParameterOfEachKindKeepsItsType(t *testing.T) {
+	want := map[string]port.ParamKind{
+		"gain":       port.ParamDouble,
+		"count":      port.ParamInteger,
+		"toggle":     port.ParamBoolean,
+		"text":       port.ParamString,
+		"preset":     port.ParamChoice,
+		"outerGroup": port.ParamGroup,
 	}
-	t.Skip("spektrafilm is not installed")
+	fixtureParams(t, func(t *testing.T, params []port.ParamInfo) {
+		got := make(map[string]port.ParamKind, len(params))
+		for _, p := range params {
+			got[p.Name] = p.Kind
+		}
+		for name, kind := range want {
+			if got[name] != kind {
+				t.Errorf("%s resolved to kind %d, want %d", name, int(got[name]), int(kind))
+			}
+		}
+	})
 }

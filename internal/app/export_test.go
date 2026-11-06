@@ -359,6 +359,8 @@ func TestExportTheRealSample(t *testing.T) {
 // TestPreviewResolutionIsFaster measures what the preview cap is for: the chain runs
 // on fewer pixels, so an edit comes back sooner.
 func TestPreviewResolutionIsFaster(t *testing.T) {
+	bundle := fixtureDir(t)
+	t.Setenv("OFXHOST_OFX_DIRS", bundle)
 	root := repoRoot(t)
 	sample := filepath.Join(root, "samples", "DSCF0209.RAF")
 	if _, err := os.Stat(sample); err != nil {
@@ -376,25 +378,20 @@ func TestPreviewResolutionIsFaster(t *testing.T) {
 		t.Skipf("no ofx host: %v", err)
 	}
 	defer host.Close()
-	if err := host.Discover(nil); err != nil {
+	if err := host.Discover([]string{bundle}); err != nil {
 		t.Skipf("scan: %v", err)
 	}
 	graph := chainsvc.New(host)
 	defer graph.Close()
 
-	added := false
-	for _, p := range host.Plugins() {
-		if p.Label != "Glyph Blocks" {
-			continue
-		}
-		if _, addErr := graph.Add(p.Index); addErr == nil {
-			t.Logf("using plugin %q", p.Label)
-			added = true
-		}
-		break
+	// The fixture, so the measurement is of this host rather than of one vendor's
+	// optimizer settings.
+	index := firstRenderablePlugin(t, host)
+	if index < 0 {
+		t.Skip("the fixture plugin is not installed")
 	}
-	if !added {
-		t.Skip("the measurement needs Glyph Blocks")
+	if _, addErr := graph.Add(index); addErr != nil {
+		t.Fatalf("add the fixture: %v", addErr)
 	}
 
 	for _, limit := range []int{0, 2560, 1920, 1280} {
@@ -431,12 +428,14 @@ func TestPreviewResolutionIsFaster(t *testing.T) {
 // Any plugin that reports a region of definition could hit it, so this asks for one
 // filter and does not care which.
 func TestARenderAtOneSizeDoesNotBreakTheNext(t *testing.T) {
+	bundle := fixtureDir(t)
+	t.Setenv("OFXHOST_OFX_DIRS", bundle)
 	host, err := ofxhost.New(ofxhost.Options{})
 	if err != nil {
 		t.Skipf("no plugin host: %v", err)
 	}
 	defer host.Close()
-	if err := host.Discover(nil); err != nil {
+	if err := host.Discover([]string{bundle}); err != nil {
 		t.Skipf("the plugin scan failed: %v", err)
 	}
 	graph := chainsvc.New(host)
@@ -498,24 +497,20 @@ func TestARenderAtOneSizeDoesNotBreakTheNext(t *testing.T) {
 // Adding a node now initialises that parameter from the document's space. It runs once,
 // at add time, so a user who chooses something else afterwards keeps their choice.
 func TestAddingAPluginSetsItsInputColourSpace(t *testing.T) {
+	bundle := fixtureDir(t)
+	t.Setenv("OFXHOST_OFX_DIRS", bundle)
 	host, err := ofxhost.New(ofxhost.Options{})
 	if err != nil {
 		t.Skipf("no plugin host: %v", err)
 	}
 	defer host.Close()
-	if err := host.Discover(nil); err != nil {
+	if err := host.Discover([]string{bundle}); err != nil {
 		t.Skipf("the plugin scan failed: %v", err)
 	}
 
-	index := -1
-	for _, plugin := range host.Plugins() {
-		if plugin.Label == "spektrafilm" {
-			index = plugin.Index
-			break
-		}
-	}
+	index := firstRenderablePlugin(t, host)
 	if index < 0 {
-		t.Skip("spektrafilm is not installed")
+		t.Skip("the fixture plugin is not installed")
 	}
 
 	graph := chainsvc.New(host)
@@ -527,7 +522,7 @@ func TestAddingAPluginSetsItsInputColourSpace(t *testing.T) {
 		t.Fatalf("add: %v", addErr)
 	}
 	if got := inputColourSpaceOf(t, graph, before); got != 0 {
-		t.Logf("the plugin starts on option %d, so it has a non-zero default", got)
+		t.Logf("the fixture starts on option %d, so it has a non-zero default", got)
 	}
 
 	// The fix: adding with a space initialises the parameter to match.
@@ -538,7 +533,7 @@ func TestAddingAPluginSetsItsInputColourSpace(t *testing.T) {
 	params := graph.Params(after)
 	var labels []string
 	for _, p := range params {
-		if p.Name == "quickInputColorSpace" {
+		if p.Name == "inputColorSpace" {
 			labels = p.ChoiceLabels
 		}
 	}
@@ -566,7 +561,7 @@ func inputColourSpaceOf(t *testing.T, graph *chainsvc.Graph, node int) int {
 	if instance == nil {
 		t.Fatalf("node %d has no instance", node)
 	}
-	value, err := instance.Values("quickInputColorSpace")
+	value, err := instance.Values("inputColorSpace")
 	if err != nil {
 		t.Fatalf("read the input colour space: %v", err)
 	}

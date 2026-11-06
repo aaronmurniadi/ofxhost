@@ -76,3 +76,55 @@ set_target_properties(ofxhost_host PROPERTIES OUTPUT_NAME "ofxhost")
 # A stable location the Go build can name without knowing the generator.
 set_target_properties(ofxhost_host PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+
+# --- The test fixture plugin -------------------------------------------------
+#
+# The host's tests used to depend on whichever plugins happened to be installed. That made
+# them pass on one machine and fail on another, which is exactly what happened when the
+# installed set changed from seventy plugins to six.
+#
+# This target builds a plugin this repository owns, so the tests describe behaviour rather
+# than describe a vendor. It is built here rather than in a separate project so the one
+# documented CMake step produces everything the Go build and its tests need.
+#
+# It is a MODULE library because a plugin is loaded, not linked. The .ofx bundle layout is
+# what OFX discovery expects: <Name>.ofx.bundle/Contents/MacOS/<Name>.ofx on macOS and
+# Contents/<arch>-<os>/ on Linux.
+
+set(OFX_SUPPORT_LIB "${OFX_ROOT}/Support/Library")
+set(OFX_SUPPORT_INCLUDE "${OFX_ROOT}/Support/include")
+
+if(EXISTS "${OFX_SUPPORT_LIB}/ofxsImageEffect.cpp")
+  add_library(ofxhost_fixture MODULE
+    ../testdata/fixture/plugin.cpp
+    "${OFX_SUPPORT_LIB}/ofxsCore.cpp"
+    "${OFX_SUPPORT_LIB}/ofxsImageEffect.cpp"
+    "${OFX_SUPPORT_LIB}/ofxsInteract.cpp"
+    "${OFX_SUPPORT_LIB}/ofxsLog.cpp"
+    "${OFX_SUPPORT_LIB}/ofxsMultiThread.cpp"
+    "${OFX_SUPPORT_LIB}/ofxsParams.cpp"
+    "${OFX_SUPPORT_LIB}/ofxsProperty.cpp"
+    "${OFX_SUPPORT_LIB}/ofxsPropertyValidation.cpp"
+  )
+
+  target_include_directories(ofxhost_fixture PRIVATE
+    "${OFX_INCLUDE}"
+    "${OFX_SUPPORT_INCLUDE}"
+  )
+  target_compile_options(ofxhost_fixture PRIVATE -Wall -Wno-unused-parameter)
+
+  # A plugin entry point is resolved by name at load time, so the symbol has to stay.
+  set_target_properties(ofxhost_fixture PROPERTIES
+    PREFIX ""
+    SUFFIX ".ofx"
+    OUTPUT_NAME "HostFixture"
+    LIBRARY_OUTPUT_DIRECTORY
+      "${CMAKE_BINARY_DIR}/fixture/HostFixture.ofx.bundle/Contents/MacOS")
+
+  add_custom_command(TARGET ofxhost_fixture POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/fixture/HostFixture.ofx.bundle/Contents/Resources"
+    COMMENT "Placing the fixture plugin in its OFX bundle")
+else()
+  message(WARNING "OpenFX Support sources not found; the fixture plugin will not be built")
+endif()
