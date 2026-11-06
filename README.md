@@ -1,7 +1,7 @@
 # OfxHost
 
-An OpenFX host for still images. Open a RAW file, build a chain of OFX plugins,
-and export in a wide-gamut colour space.
+An OpenFX host for still images. Open a RAW file in the colour space you want to
+work in, build a chain of OFX plugins, and export in a wide-gamut colour space.
 
 Written in Go with a web interface, so the plugin engine and the export pipeline
 run as native code and the interface stays easy to change.
@@ -14,6 +14,9 @@ What works today:
 
 - open a RAW file and see it, with CSS pan and zoom in the preview
 - build a chain of OpenFX filter plugins, edit their parameters, and see the result
+- the decode develops into sRGB. Choosing the working space at open time
+  (sRGB, Display P3, Linear Rec.709, Linear Rec.2020) is designed in
+  `WAILS-PLAN.md` §7.0 and not built yet
 - the preview is always encoded sRGB, so it looks the same in every WebView
 - the command line works without a window:
 

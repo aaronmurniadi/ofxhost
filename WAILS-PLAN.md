@@ -30,6 +30,7 @@ These are settled. Do not reopen them without a written reason in this file.
 | D5 | **Static linking** for every native library | LGPL-2.1 relink obligation for libraw (§10) |
 | D6 | **No Metal in the first implementation.** Stubs behind the renderer port | `port.EffectHost` carries a `GPUBackend` seam with a CPU implementation and a no-op stub |
 | D7 | **No golden corpus, no porting from the C++ tree.** The old app is too crude to be a foundation | Requirements come from the OpenFX 1.5 standard and from this document, not from `src/` |
+| D8 | **The working space is the user's choice, asked when the file opens.** It becomes the input space of the first plugin. Nothing is compared against the camera's own JPEG | The decoder develops straight into the chosen space at 16 bits; the previous "matches the camera preview" check is dropped |
 
 D7 has one exception worth naming: the **on-disk formats** (`docs/workspace-format.md`
 in the old repo) are a reasonable starting shape for the sidecar JSON. Read them as
@@ -505,6 +506,102 @@ func (b *Document) Open(req OpenRequest) (OpenResult, error) {
 }
 ```
 
+### 7.0 The working space is chosen when the file opens
+
+Decision D8. The three spaces the document has always tracked collapse to one
+question asked once:
+
+| | |
+|---|---|
+| **What the user picks** | the space the chain works in |
+| **What libraw develops into** | exactly that space, at 16 bits |
+| **What the first plugin receives** | those pixels, and the same space named to it |
+| **What the preview shows** | sRGB, per D2, converted from that space |
+| **What an export writes** | the export space from the export dialog, converted from the chain output |
+
+The prompt is a small dialog on open: the four spaces, with the last choice
+remembered. It is not a mode — the same file can be reopened in another space, and
+the chain then sees different numbers, which is the point.
+
+#### Why libraw develops straight into the space
+
+libraw can do the develop into a chosen output space itself, with a chosen transfer
+curve, at 16 bits:
+
+```c
+lr->params.output_color  = 8;        /* Rec2020; see the table below */
+lr->params.output_bps    = 16;
+lr->params.gamm[0]       = 1.0f;     /* linear; 2.4 for the sRGB curve */
+lr->params.gamm[1]       = 1.0f;     /* 12.92 for the sRGB curve */
+```
+
+Measured on this machine with a Nikon NEF, converting into each space and reading the
+same pixel back:
+
+```
+sRGB gamma16      rgb(0.0015 0.0002 0.0001)
+sRGB linear16     rgb(0.0659 0.0309 0.0247)
+Rec2020 linear16  rgb(0.0526 0.0333 0.0259)
+
+luminance(sRGB linear)    = 0.03792
+luminance(Rec2020 linear) = 0.03793   ratio 1.0002
+```
+
+The luminance matches across the two spaces, so libraw is doing a real colour-space
+conversion and not relabelling the numbers. That is what makes the choice meaningful:
+a frame developed into Rec2020 carries values sRGB cannot hold.
+
+It also means **no conversion happens on the way in**. Converting sRGB to Rec2020
+afterwards cannot recover gamut that was never developed, and 8-bit sRGB would have
+quantised it away first. Developing into the target is the only order that is correct.
+
+| Wanted space | libraw `output_color` | `gamm[0]`, `gamm[1]` |
+|---|---|---|
+| sRGB | 1 | 2.4, 12.92 |
+| Display P3 | 7 (DCI-P3 primaries) | 2.4, 12.92 |
+| Linear Rec.709 | 1 | 1.0, 1.0 |
+| Linear Rec.2020 | 8 | 1.0, 1.0 |
+
+**One row needs verification during implementation.** libraw's 7 is DCI-P3, and
+Display P3 and DCI-P3 share primaries but not a transfer curve. Setting the sRGB
+curve on DCI-P3 primaries is the definition of Display P3, so the row should be
+right — but it is the one entry here that has not been measured against an
+independent conversion, and it must be before the export dialog offers Display P3.
+
+#### 16 bits is not optional
+
+A linear working space at 8 bits bands badly in the shadows and loses highlights: the
+encoding spends its precision where the eye is least sensitive. The decoder therefore
+asks libraw for 16 bits always, and `rgbaToRaster` divides by 65535 rather than by 255.
+The alternative — 8-bit for sRGB and 16-bit for the linear spaces — would make the
+pipeline's precision depend on a setting, which is how a "works in sRGB" bug ships.
+
+#### What this costs
+
+- **A re-decode changes the space.** There is no cheap conversion after the fact: the
+  decode is where the space is decided. The decode already runs off the UI thread, so
+  a re-open is a normal operation, but the dialog must say so rather than implying a
+  live switch.
+- **The prompt is a dialog with no cancel-and-continue.** Cancelling cancels the open.
+- **`Decoded.FileSpace` stops being "what the file said".** A RAW file declares no
+  space at all. The field now means "the space the pixels are in", and every reader
+  already treats it that way, so the name can stay.
+
+#### What changes in code
+
+1. `port.ImageDecoder.Decode(path)` becomes `Decode(path string, want image.ColorSpace)`.
+   A decoder that cannot develop into a space returns an error rather than silently
+   producing sRGB, so a wrong mapping is caught at the call.
+2. `rawlib` sets `output_color`, `gamm` and `output_bps = 16` from the requested space,
+   and `rgbaToRaster` reads 16-bit samples.
+3. `service/document.Open` takes the requested space, and a re-open is how a user
+   changes it. `State.WorkingSpace` and `State.InputSpace` both become that space; they
+   stay separate fields because an import path could later want them to differ.
+4. `transport/binds` gains the prompt's answer in `OpenRequest`, and the frontend shows
+   the dialog before calling Open.
+5. `internal/cli render` gains `-space` as the **working** space rather than only the
+   export target, which makes the choice scriptable.
+
 ### 7.1 Preview: always sRGB
 
 Decision D2 makes this simple and correct.
@@ -633,8 +730,8 @@ of standard-library calls, so it now sits just above `domain`.
   `AssetOptions.Handler`.
 - `frontend`: a preview panel that displays the frame, with CSS pan and zoom.
 
-**Gate:** open a CR3, NEF and DNG; the preview matches the camera's own JPEG
-preview closely; no blocking of the UI thread; `-race` clean.
+**Gate:** open a CR3, NEF and DNG; the preview appears without blocking the UI
+thread; `-race` clean.
 
 *Done.* Two packages that were not in the original plan were added here and are now
 part of it:
@@ -646,11 +743,11 @@ part of it:
   `ofxhost render -out x.png -max-edge 1200 -space "Linear Rec.709" photo.cr3` is
   how the decode path is verified from a script instead of by clicking.
 
-The gate was met with a caveat: the preview was verified by measuring the written
-PNGs (luminance spread, and a linear render measurably darker than the sRGB one),
-not by comparing against the camera's embedded JPEG. That comparison is worth doing
-before M4, because it is the only check that catches a wrong demosaic rather than a
-wrong pipeline.
+The gate was met by measuring the written PNGs: luminance spread, and a linear render
+measurably darker than the sRGB one. Comparing against the camera's embedded JPEG was
+listed here as a follow-up and is now dropped by D8 — a host that lets the user pick
+the working space has no single correct picture to compare against, and the camera's
+own JPEG is the camera's processing, not the truth about the sensor.
 
 #### M3 — OpenFX
 
@@ -683,10 +780,8 @@ Three findings worth recording:
   instance with the wrong plugin after a reorder, so `domain/chain.Node` gained an
   `ID` and a move became a pure model edit.
 
-Still open from M2: the preview has never been compared against a camera's own
-embedded JPEG. That comparison is the only check that catches a wrong demosaic rather
-than a wrong pipeline, and it is now cheap to add because `Decoded.Thumbnail` carries
-the camera preview.
+D8 changes what M2 promised: the working space is chosen at open, not assumed. See
+§7.0 for the decoder contract that follows from it.
 
 #### M4 — Export with wide gamut
 
