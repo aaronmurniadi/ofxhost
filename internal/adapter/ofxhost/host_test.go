@@ -57,17 +57,37 @@ func findPlugin(host *Host, identifier string) int {
 
 // firstUsable returns the index of the first plugin that instantiates, so a test
 // does not depend on one particular vendor being installed.
+// firstUsable returns a plugin that can actually render a small frame.
+//
+// Creating an instance is not enough to prove that. Some plugins refuse a frame this
+// small, and some need a parameter set before they will run, so a test that stopped at
+// "it instantiated" picked a plugin that then failed - which is what happened when the
+// installed set changed and the first plugin became a film emulation.
+//
+// A render is the only honest check, so it is the check.
 func firstUsable(t *testing.T, host *Host) int {
 	t.Helper()
+	probe := image.New(32, 32)
 	for i := range host.Plugins() {
 		instance, err := host.Create(i)
 		if err != nil {
 			continue
 		}
+		w, h, sizeErr := instance.OutputSize(probe.W, probe.H)
+		if sizeErr != nil || w <= 0 || h <= 0 {
+			_ = instance.Close()
+			continue
+		}
+		_, status, renderErr := instance.Render(port.RenderRequest{
+			In: probe, OutW: w, OutH: h, ProxyScale: 1.0, Generation: 1,
+		})
 		_ = instance.Close()
+		if renderErr != nil || status != port.RenderOK {
+			continue
+		}
 		return i
 	}
-	t.Skip("no plugin could be instantiated")
+	t.Skip("no installed plugin could render a probe frame")
 	return -1
 }
 

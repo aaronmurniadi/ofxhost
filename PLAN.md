@@ -31,6 +31,7 @@ These are settled. Do not reopen them without a written reason in this file.
 | D6 | **No Metal in the first implementation.** Stubs behind the renderer port | `port.EffectHost` carries a `GPUBackend` seam with a CPU implementation and a no-op stub |
 | D7 | **No golden corpus, no porting from the C++ tree.** The old app is too crude to be a foundation | Requirements come from the OpenFX 1.5 standard and from this document, not from `src/` |
 | D8 | **The working space is the user's choice, asked when the file opens.** It becomes the input space of the first plugin. Nothing is compared against the camera's own JPEG | The decoder develops straight into the chosen space at 16 bits; the previous "matches the camera preview" check is dropped |
+| D11 | **A plugin's own input colour space parameter is initialised from the document, once, at add time** | The OFX route is blocked by a support library that predates OFX 1.5 colour. These plugins carry a parameter for exactly that reason, and leaving a Rec.2020 image to be processed as ARRI LogC4 is a wrong render, not a missing nicety. Adding it once initialises the control instead of overriding the user |
 | D10 | **Only UI state is persisted. A chain reaches disk only through an export, and only on request** | A chain is a processing decision, not a place the user was, and it is only meaningful with the exact plugin versions that built it. Writing one beside every image leaves files the user never asked for. An export records how the file was produced, which is the question a sidecar should answer |
 | D9 | **Base UI for components, `react-resizable-panels` for layout.** Panels resize and toggle; **docking is out of scope** | One drag-scrub number field instead of a hand-written one; a splitter library instead of the fixed CSS grid. `project.View` loses its three `show*` booleans and gains per-panel sizes, because a boolean that can disagree with a splitter is two sources of truth for one fact |
 
@@ -752,8 +753,34 @@ config directory. The format is new and gets its own document,
 
 ### 7.5 Telling plugins which colour space they receive
 
-**Deferred. Not in v1. This section records why, and what to do when it becomes
-worth doing.**
+**Partially done.** The OFX route is blocked; a plugin-parameter route now covers the
+case that actually occurs. The rest of this section is the evidence.
+
+#### What is implemented
+
+A node's own input colour space parameter is set from the document's space when the node
+is added. It runs once, at add time, so it initialises a control rather than overriding
+the user: anyone who picks a different value afterwards keeps it.
+
+That matters because spektrafilm defaults to **ARRI LogC4**, a log space for ARRI camera
+footage. An image developed into Linear Rec.2020 was therefore being processed as camera
+log, which is not a small error - it is the wrong transfer function and the wrong gamut.
+
+The parameter names are an explicit list (`quickInputColorSpace`, `inputColorSpace`,
+`rcmInputColorSpace`) and the match is on the option's label, which equals this host's own
+space names exactly. A test asserts that agreement for every space the host offers, so a
+plugin update that renames an option fails the suite rather than silently reverting to the
+default.
+
+#### Why the OFX route is blocked
+
+`OfxImageClipPropColourspace` is the correct mechanism and the vendored **HostSupport
+does not implement it**. The library contains no reference to `Colourspace` at all: it
+predates OFX 1.5 colour management, so there is no clip colour space model to declare
+through and `getClipPreferences` cannot negotiate one. Adding it means patching or
+replacing the support library, which is a milestone of its own rather than a task.
+
+The rest of this section records the original analysis.
 
 The user picks a working space when the file opens (D8), and that space becomes the
 input to the first plugin. The host never tells the plugin what that space is. A plugin
@@ -1128,9 +1155,10 @@ back to `~/Downloads` and `~/Pictures` and finally skip when there is none.
 - Reading the old `ofxrawhost` state files (D4).
 - Video, animation, timelines, batch processing.
 - CPU-GPU hybrid rendering.
-- Negotiating colour spaces with plugins (§7.5). Deferred on evidence: four of the
-  seventy installed plugins implement the property, and the small version's benefit is
-  unproven until measured.
+- Full colour space **negotiation** with plugins (§7.5). The practical case is covered:
+  a node's own input colour space is initialised from the document at add time. Asking
+  each plugin what it prefers, and converting the frame into that, is not done, and cannot
+  be until the vendored HostSupport gains OFX 1.5 colour.
 
 Anything in this list that becomes necessary is a new milestone, added to §8
 first.

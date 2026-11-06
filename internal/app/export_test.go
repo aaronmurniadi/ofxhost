@@ -442,15 +442,12 @@ func TestARenderAtOneSizeDoesNotBreakTheNext(t *testing.T) {
 	graph := chainsvc.New(host)
 	defer graph.Close()
 
-	added := false
-	for _, plugin := range host.Plugins() {
-		if _, addErr := graph.Add(plugin.Index); addErr == nil {
-			added = true
-			break
-		}
+	index := firstRenderablePlugin(t, host)
+	if index < 0 {
+		t.Skip("no installed plugin could render a probe frame")
 	}
-	if !added {
-		t.Skip("no filter plugin is installed")
+	if _, addErr := graph.Add(index); addErr != nil {
+		t.Skipf("could not add the probe plugin: %v", addErr)
 	}
 
 	render := func(edge int) (image.Raster, error) {
@@ -489,4 +486,92 @@ func TestARenderAtOneSizeDoesNotBreakTheNext(t *testing.T) {
 	if back.W != 256 {
 		t.Fatalf("the third render is %dx%d, want 256x256", back.W, back.H)
 	}
+}
+
+// TestAddingAPluginSetsItsInputColourSpace is the fix for a wrong-looking render.
+//
+// The host cannot negotiate a colour space: the vendored HostSupport predates OFX 1.5
+// colour management, so there is no clip property to declare through. Plugins that care
+// carry their own parameter, and spektrafilm's defaults to ARRI LogC4 - a log space - so
+// an image developed into Linear Rec.2020 was being processed as camera log footage.
+//
+// Adding a node now initialises that parameter from the document's space. It runs once,
+// at add time, so a user who chooses something else afterwards keeps their choice.
+func TestAddingAPluginSetsItsInputColourSpace(t *testing.T) {
+	host, err := ofxhost.New(ofxhost.Options{})
+	if err != nil {
+		t.Skipf("no plugin host: %v", err)
+	}
+	defer host.Close()
+	if err := host.Discover(nil); err != nil {
+		t.Skipf("the plugin scan failed: %v", err)
+	}
+
+	index := -1
+	for _, plugin := range host.Plugins() {
+		if plugin.Label == "spektrafilm" {
+			index = plugin.Index
+			break
+		}
+	}
+	if index < 0 {
+		t.Skip("spektrafilm is not installed")
+	}
+
+	graph := chainsvc.New(host)
+	defer graph.Close()
+
+	// The default, before anything is set.
+	before, addErr := graph.Add(index)
+	if addErr != nil {
+		t.Fatalf("add: %v", addErr)
+	}
+	if got := inputColourSpaceOf(t, graph, before); got != 0 {
+		t.Logf("the plugin starts on option %d, so it has a non-zero default", got)
+	}
+
+	// The fix: adding with a space initialises the parameter to match.
+	after, addErr := graph.AddWithInputSpace(index, "Linear Rec.2020")
+	if addErr != nil {
+		t.Fatalf("add with space: %v", addErr)
+	}
+	params := graph.Params(after)
+	var labels []string
+	for _, p := range params {
+		if p.Name == "quickInputColorSpace" {
+			labels = p.ChoiceLabels
+		}
+	}
+	want := -1
+	for i, label := range labels {
+		if label == "Linear Rec.2020" {
+			want = i
+		}
+	}
+	if want < 0 {
+		t.Skip("this build has no Linear Rec.2020 option")
+	}
+	if got := inputColourSpaceOf(t, graph, after); got != want {
+		t.Fatalf("input colour space is option %d, want %d (Linear Rec.2020)", got, want)
+	}
+	if got := inputColourSpaceOf(t, graph, before); got == want {
+		t.Fatal("the unchanged node already had the space, so the test proved nothing")
+	}
+}
+
+// inputColourSpaceOf reads the current choice index of the input colour space parameter.
+func inputColourSpaceOf(t *testing.T, graph *chainsvc.Graph, node int) int {
+	t.Helper()
+	instance := graph.Instance(node)
+	if instance == nil {
+		t.Fatalf("node %d has no instance", node)
+	}
+	value, err := instance.Values("quickInputColorSpace")
+	if err != nil {
+		t.Fatalf("read the input colour space: %v", err)
+	}
+	if len(value.Nums) == 0 {
+		t.Fatal("the input colour space has no value")
+	}
+	return int(value.Nums[0])
 }

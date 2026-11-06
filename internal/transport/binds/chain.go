@@ -23,6 +23,9 @@ type Chain struct {
 	// The frontend hides the button, and this refuses the call, because a hidden button
 	// is not a rule.
 	hasDocument func() bool
+	// inputSpace reports the colour space of the open document, which a newly added
+	// plugin is told it is being given.
+	inputSpace func() string
 }
 
 // NewChain returns the chain binding. Either argument may be nil on a machine with
@@ -31,8 +34,8 @@ type Chain struct {
 //
 // hasDocument may be nil, which means the check is not configured; only a test passes
 // nil, and it then gets the old behaviour.
-func NewChain(graph *chainsvc.Graph, host port.EffectHost, hasDocument func() bool) *Chain {
-	return &Chain{graph: graph, host: host, hasDocument: hasDocument}
+func NewChain(graph *chainsvc.Graph, host port.EffectHost, hasDocument func() bool, inputSpace func() string) *Chain {
+	return &Chain{graph: graph, host: host, hasDocument: hasDocument, inputSpace: inputSpace}
 }
 
 // PluginDTO is one discovered plugin, for the picker.
@@ -166,7 +169,11 @@ func (c *Chain) Add(pluginIndex int) AddResult {
 	if c.graph == nil {
 		return AddResult{Index: -1, Error: "no plugin host is available"}
 	}
-	position, err := c.graph.Add(pluginIndex)
+	space := ""
+	if c.inputSpace != nil {
+		space = c.inputSpace()
+	}
+	position, err := c.graph.AddWithInputSpace(pluginIndex, space)
 	if err != nil {
 		return AddResult{Index: -1, Error: err.Error()}
 	}

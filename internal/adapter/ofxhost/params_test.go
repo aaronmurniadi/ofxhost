@@ -2,6 +2,8 @@ package ofxhost
 
 import (
 	"testing"
+
+	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
 )
 
 // pluginParams returns the parameters of the first plugin whose label matches.
@@ -155,4 +157,56 @@ func TestSpektrafilmNestsGroups(t *testing.T) {
 	}
 	t.Logf("effectsGroup holds %d nested groups", nestedUnder["effectsGroup"])
 
+}
+
+// TestEveryHostSpaceHasAPluginOption checks the mapping the chain relies on.
+//
+// The host cannot negotiate a colour space: the vendored HostSupport predates OFX 1.5
+// colour management entirely, so there is no clip colour space model to declare through.
+// These plugins carry their own input colour space parameter for that reason, and the
+// chain initialises it by matching the option's label to the working space's name. That
+// only works while the names agree, so the agreement is asserted rather than assumed.
+func TestEveryHostSpaceHasAPluginOption(t *testing.T) {
+	host, err := New(Options{})
+	if err != nil {
+		t.Skipf("host: %v", err)
+	}
+	defer host.Close()
+	if err := host.Discover(nil); err != nil {
+		t.Skipf("scan: %v", err)
+	}
+
+	for _, plugin := range host.Plugins() {
+		if plugin.Label != "spektrafilm" {
+			continue
+		}
+		instance, createErr := host.Create(plugin.Index)
+		if createErr != nil {
+			t.Fatalf("create: %v", createErr)
+		}
+		defer instance.Close()
+
+		var options []string
+		for _, p := range instance.Params() {
+			if p.Name == "quickInputColorSpace" {
+				options = p.ChoiceLabels
+				break
+			}
+		}
+		if len(options) == 0 {
+			t.Skip("this build exposes no input colour space parameter")
+		}
+
+		have := make(map[string]bool, len(options))
+		for _, label := range options {
+			have[label] = true
+		}
+		for _, space := range image.ColorSpaceNames() {
+			if !have[space] {
+				t.Errorf("the plugin offers no option named %q, so the chain cannot set it", space)
+			}
+		}
+		return
+	}
+	t.Skip("spektrafilm is not installed")
 }

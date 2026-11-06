@@ -70,6 +70,16 @@ func (g *Graph) LastError() error {
 // A plugin that cannot be instantiated is not added, so the chain never holds a
 // node that cannot render. The error names the plugin.
 func (g *Graph) Add(pluginIndex int) (int, error) {
+	return g.AddWithInputSpace(pluginIndex, "")
+}
+
+// AddWithInputSpace adds a node and initialises the plugin's own idea of the space it is
+// being given.
+//
+// The space is that of the open document, so a plugin starts correct for the image rather
+// than on the default its vendor picked. It is applied once, at add time: a user who
+// chooses something else afterwards keeps their choice.
+func (g *Graph) AddWithInputSpace(pluginIndex int, space string) (int, error) {
 	if g.host == nil {
 		return -1, errors.New("chain: no plugin host is configured")
 	}
@@ -90,6 +100,8 @@ func (g *Graph) Add(pluginIndex int) (int, error) {
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
+
+	initialiseInputSpace(instance, space)
 
 	node := chain.NewNode(pluginIndex, info.Identifier, info.Label)
 	position := g.chain.Append(node)

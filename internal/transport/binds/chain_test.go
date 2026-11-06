@@ -11,7 +11,7 @@ func TestAddRefusesBeforeAnImageIsOpen(t *testing.T) {
 	open := false
 	// No graph: if the guard were missing, this would report the host error instead and
 	// the test would fail on the message rather than on the rule.
-	binding := NewChain(nil, nil, func() bool { return open })
+	binding := NewChain(nil, nil, func() bool { return open }, nil)
 
 	result := binding.Add(0)
 	if result.Error == "" {
@@ -35,7 +35,7 @@ func TestAddRefusesBeforeAnImageIsOpen(t *testing.T) {
 
 // TestAddWithoutAConfiguredGuard keeps a test that does not care about documents working.
 func TestAddWithoutAConfiguredGuard(t *testing.T) {
-	binding := NewChain(nil, nil, nil)
+	binding := NewChain(nil, nil, nil, nil)
 	result := binding.Add(0)
 	if result.Error == "open an image before adding a plugin" {
 		t.Fatal("a nil guard must not refuse")

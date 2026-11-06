@@ -42,19 +42,15 @@ func TestChainChangesThePreview(t *testing.T) {
 	graph := chainsvc.New(host)
 	defer graph.Close()
 
-	// Add the first plugin that instantiates, so the test does not depend on one
-	// vendor being installed.
-	added := -1
-	for i := range host.Plugins() {
-		position, addErr := graph.Add(i)
-		if addErr != nil {
-			continue
-		}
-		added = position
-		break
+	// A plugin that actually renders, so the test does not depend on which vendors are
+	// installed or on the order they are found.
+	index := firstRenderablePlugin(t, host)
+	if index < 0 {
+		t.Skip("no installed plugin could render a probe frame")
 	}
-	if added < 0 {
-		t.Skip("no plugin could be instantiated")
+	added, addErr := graph.Add(index)
+	if addErr != nil {
+		t.Skipf("could not add the probe plugin: %v", addErr)
 	}
 
 	server, err := frames.New()
@@ -166,4 +162,35 @@ func samePixels(a, b image.Raster) bool {
 		}
 	}
 	return true
+}
+
+// firstRenderablePlugin returns the index of a plugin that actually renders a small
+// frame, or -1.
+//
+// Instantiating is not proof that a plugin will run. Several refuse a frame this small,
+// and some need a parameter set first. A test that stopped at "it instantiated" passed on
+// one machine and failed on another, which is what happened when the installed plugin set
+// changed and the first entry became a film emulation.
+func firstRenderablePlugin(t *testing.T, host *ofxhost.Host) int {
+	t.Helper()
+	probe := image.New(32, 32)
+	for i := range host.Plugins() {
+		instance, err := host.Create(i)
+		if err != nil {
+			continue
+		}
+		w, h, sizeErr := instance.OutputSize(probe.W, probe.H)
+		if sizeErr == nil && w > 0 && h > 0 {
+			_, status, renderErr := instance.Render(port.RenderRequest{
+				In: probe, OutW: w, OutH: h, ProxyScale: 1.0, Generation: 1,
+			})
+			_ = instance.Close()
+			if renderErr == nil && status == port.RenderOK {
+				return i
+			}
+			continue
+		}
+		_ = instance.Close()
+	}
+	return -1
 }
