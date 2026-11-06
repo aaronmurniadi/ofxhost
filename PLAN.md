@@ -1,4 +1,4 @@
-# WAILS-PLAN.md — OfxHost: a Go + CGO + Wails v3 OpenFX host
+# PLAN.md — OfxHost: a Go + CGO + Wails v3 OpenFX host
 
 Source of truth for `github.com/aaronmurniadi/ofxhost`. Read this before any code.
 

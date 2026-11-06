@@ -8,7 +8,7 @@ run as native code and the interface stays easy to change.
 
 ## Status
 
-Early development. The project is at milestone M3 of `WAILS-PLAN.md`.
+Early development. The project is at milestone M5 of `PLAN.md`.
 
 What works today:
 
@@ -51,7 +51,7 @@ The point of the rules is that the domain and the ports can be tested without a
 decoder, a plugin or a window, and that replacing the window framework would
 touch one directory.
 
-`WAILS-PLAN.md` is the source of truth for the design and the milestone order.
+`PLAN.md` is the source of truth for the design, the decisions and the milestone order.
 
 ### The CGO boundary
 
