@@ -678,11 +678,13 @@ Two things were checked rather than assumed:
   still. The Linux target works.
 - Base UI supports React 17, 18 and 19, so the pinned `^18.2.0` is fine.
 
-**One item is unverified and must be settled before the widgets are built.** Pointer
-lock inside an embedded WKWebView or WebView2 is sometimes gated in a way a normal
-browser is not. Twenty minutes in the real window decides it. If it fails, the fallback
-is a custom scrub hook that skips pointer lock and clamps the drag to the window edge,
-about sixty lines.
+**The pointer-lock question is closed, and it needed no test.** Base UI checks the
+engine and skips `requestPointerLock` on WebKit on purpose: the comment in its source
+says "WebKit causes significant layout shift with the native message". So on macOS the
+scrub is plain pointer events with the drag clamped to the window edge, and pointer
+lock is never requested. On WebView2 the call is wrapped in a try/catch that sets a
+"denied" flag and scrubs the same way. Both paths already degrade, so the custom hook
+this milestone was going to need is not needed.
 
 **`react-resizable-panels` (MIT, v4.19) for the panel layout.** Docking is out of
 scope (D9): no drag-to-rearrange, no floating windows, no tab groups. What is in scope
@@ -902,8 +904,8 @@ panel sizes and visibility. Dragging a splitter to zero hides that panel and the
 menu shows it again at the size it had. A parameter can be changed by dragging its
 number field, in the real window, on macOS.
 
-**Settle first:** the pointer-lock question in §7.2b. It changes how the number field
-is built, so it is the first thing in the milestone, not the last.
+**Settled:** the pointer-lock question in §7.2b, by reading the library rather than by
+testing. No custom hook is needed.
 
 #### M6 — Other platforms
 

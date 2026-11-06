@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { chainApi, type ParamDTO } from "../api/document";
+import ParamNumber, { ParamScrubLabel } from "../widgets/ParamNumber";
 
 interface Props {
   /** Bumped by the shell when a render should be redone. */
@@ -193,11 +194,31 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
   const isInt = param.kind.startsWith("integer");
   const single = values.length === 1;
 
+  // The step is derived from the range the plugin advertises, so a drag moves a
+  // useful distance on a 0..1 parameter and on a 0..65535 one alike.
+  const span = Math.abs(param.displayMax - param.displayMin);
+  const step = isInt ? 1 : span > 0 ? Math.max(span / 200, 1e-6) : 0.01;
+
+  // The first component drives the draggable label: dragging the name is the quick
+  // way to make a small change without aiming at the box.
+  const scrubProps = {
+    value: values[0],
+    min: param.hardMin,
+    max: param.hardMax,
+    integer: isInt,
+    step,
+    disabled,
+    label: param.label,
+    onCommit: (next: number) => {
+      const updated = values.slice();
+      updated[0] = next;
+      onEdit(updated);
+    },
+  };
+
   return (
     <div className="params__row">
-      <span className="params__label" title={param.hint}>
-        {param.label}
-      </span>
+      <ParamScrubLabel {...scrubProps}>{param.label}</ParamScrubLabel>
       <div className="params__controls">
         {single ? (
           <input
@@ -208,23 +229,24 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
             step={isInt ? 1 : "any"}
             value={values[0]}
             disabled={disabled}
+            aria-label={`${param.label} slider`}
             onChange={(event) => onEdit([Number(event.target.value)])}
           />
         ) : null}
         {values.map((value, component) => (
-          <input
+          <ParamNumber
             key={component}
-            className="input params__number"
-            type="number"
+            value={value}
             min={param.hardMin}
             max={param.hardMax}
-            step={isInt ? 1 : "any"}
-            value={value}
+            integer={isInt}
+            step={step}
             disabled={disabled}
-            onChange={(event) => {
-              const next = values.slice();
-              next[component] = Number(event.target.value);
-              onEdit(next);
+            label={values.length > 1 ? `${param.label} ${component + 1}` : param.label}
+            onCommit={(next) => {
+              const updated = values.slice();
+              updated[component] = next;
+              onEdit(updated);
             }}
           />
         ))}
