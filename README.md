@@ -8,9 +8,10 @@ run as native code and the interface stays easy to change.
 
 ## Status
 
-Early development. The project is at milestone M0 of `WAILS-PLAN.md`: the
-skeleton builds, the layer rules are enforced, and the window opens. There is no
-image loading yet.
+Early development. The project is at milestone M1 of `WAILS-PLAN.md`: the
+skeleton builds, the layer rules are enforced, the window opens, and the state
+files, the update check and the thumbnail pool work. There is no image loading
+yet; that arrives with the codec adapters in M2.
 
 ## Architecture
 

@@ -20,12 +20,16 @@ const ModulePath = "github.com/aaronmurniadi/ofxhost"
 // A layer may import itself and every layer below it in this list, and nothing
 // above it. The transport layer sits at the top because it is the only layer that
 // is allowed to depend on a UI framework.
+// platform sits just above domain rather than at the top: it is a leaf of
+// standard library calls with no dependency on anything else in the program, and
+// every layer above it needs its directory lookups. Placing it high would force an
+// adapter that wants a path to import a layer that also owns the window.
 var layerOrder = []string{
 	"domain",
+	"platform",
 	"port",
 	"service",
 	"adapter",
-	"platform",
 	"transport",
 }
 

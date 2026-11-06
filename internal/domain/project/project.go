@@ -132,3 +132,12 @@ func ParseUpdateChannel(name string) UpdateChannel {
 	}
 	return c
 }
+
+// IsKnownUpdateChannel reports whether name is a channel the program defines.
+//
+// It exists beside ParseUpdateChannel because the two questions are different: a
+// reader that wants a usable value calls Parse, and one that wants to know whether
+// a file was written by a version it understands calls IsKnown.
+func IsKnownUpdateChannel(name string) bool {
+	return UpdateChannel(name).Valid()
+}

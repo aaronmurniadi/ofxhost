@@ -39,9 +39,10 @@ func main() {
 
 // run wires the program and blocks on the window.
 //
-// The adapters and services are not built yet (milestone M1 onward), so the first
-// milestone opens the window with the frontend alone. Each milestone adds one line
-// here and nothing else: the composition root is where a dependency becomes real.
+// The state files, the update checker and the thumbnail pool exist as adapters
+// (milestone M1) but no service consumes them yet, so they are not built here. The
+// codec and OpenFX adapters arrive in M2 and M3. Each milestone adds the lines that
+// make a dependency real, and nothing else changes in this function.
 func run(logger *slog.Logger) error {
 	app := desktop.New(desktop.Options{
 		Assets:  frontend.Dist,
