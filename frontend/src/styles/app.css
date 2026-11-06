@@ -436,3 +436,39 @@ body,
 .app__bar .button {
   margin-left: 8px;
 }
+
+/* The export dialog. Wider than the open dialog because it holds a column of
+ * labelled selects, and a label above its control reads better than beside it. */
+.modal__body--wide {
+  width: 480px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+}
+
+.field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.field__label {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.field__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field__value {
+  min-width: 28px;
+  font-size: 12px;
+  text-align: right;
+}

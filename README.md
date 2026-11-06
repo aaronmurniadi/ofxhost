@@ -15,6 +15,8 @@ What works today:
 - open a RAW file and choose the colour space it develops into: sRGB, Display P3,
   Linear Rec.709 or Linear Rec.2020
 - build a chain of OpenFX filter plugins, edit their parameters, and see the result
+- export in PNG, TIFF, JPEG, WebP or JPEG XL, at 8 or 16 bits, into any of the four
+  spaces, with the ICC profile embedded so a viewer knows what the pixels mean
 - the preview is always encoded sRGB, so it looks the same in every WebView
 - the command line works without a window:
 
@@ -82,9 +84,8 @@ For the native adapters:
 |---|---|---|
 | libraw | RAW decode | `brew install libraw` |
 | lcms2 | ICC colour conversion | `brew install little-cms2` |
-
-The encoder libraries (`libpng`, `libjpeg-turbo`, `libtiff`, `libwebp`, `libjxl`)
-are needed from M4.
+| libpng, libtiff, libjpeg, libwebp | PNG, TIFF, JPEG, WebP export | `brew install libpng libtiff jpeg webp` |
+| libjxl | JPEG XL export | `brew install jpeg-xl` |
 
 The OpenFX host needs the submodule and one CMake step, because cgo cannot compile
 translation units outside its own package directory and the official host library is

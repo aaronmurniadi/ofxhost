@@ -56,6 +56,8 @@ type Document struct {
 type Picker interface {
 	// PickImage returns a chosen image path, or an empty string when cancelled.
 	PickImage() (string, error)
+	// PickSave returns a destination path for an export, or an empty string.
+	PickSave(suggested string) (string, error)
 }
 
 // NewDocument returns the document binding.

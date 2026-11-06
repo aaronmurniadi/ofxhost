@@ -183,3 +183,70 @@ export const chainApi = {
   resetParams: (index: number) =>
     callChain<[number, string]>("ResetParams", index),
 };
+
+/** FormatDTO describes one export format and what it can do. */
+export interface FormatDTO {
+  index: number;
+  name: string;
+  extension: string;
+  bitDepths: number[] | null;
+  quality: boolean;
+  lossless: boolean;
+  carriesICC: boolean;
+  carriesAlpha: boolean;
+}
+
+/** ExportOptionsDTO is everything the export dialog draws itself from. */
+export interface ExportOptionsDTO {
+  formats: FormatDTO[] | null;
+  colorSpaces: string[] | null;
+  intents: string[] | null;
+  workingSpace: string;
+  defaultName: string;
+  defaultFormat: number;
+  defaultSpace: number;
+  defaultIntent: number;
+  defaultDepth: number;
+  defaultQuality: number;
+  suggestedFolder: string;
+}
+
+/** ExportRequest is one export, as the dialog describes it. */
+export interface ExportRequest {
+  format: number;
+  space: number;
+  intent: number;
+  depth: number;
+  quality: number;
+  lossless: boolean;
+  path: string;
+}
+
+/** ExportResult is the outcome. */
+export interface ExportResult {
+  ok: boolean;
+  path: string;
+  width: number;
+  height: number;
+  notes: string[] | null;
+  error: string;
+}
+
+const EXPORT_SERVICE = `${SERVICE}.Export`;
+
+/** callExport invokes one export binding method. */
+async function callExport<T>(method: string, ...args: unknown[]): Promise<T> {
+  return (await Call.ByName(`${EXPORT_SERVICE}.${method}`, ...args)) as T;
+}
+
+/** The export methods the frontend uses. */
+export const exportApi = {
+  /** What the dialog draws itself from. */
+  options: () => callExport<ExportOptionsDTO>("Options"),
+
+  /** Asks where to write the file and returns the chosen path, or "". */
+  save: (suggested: string) => callExport<string>("Save", suggested),
+
+  /** Writes the file. */
+  run: (req: ExportRequest) => callExport<ExportResult>("Run", req),
+};

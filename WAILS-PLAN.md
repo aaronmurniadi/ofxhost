@@ -799,6 +799,27 @@ D8 changes what M2 promised: the working space is chosen at open, not assumed. S
 **Gate:** export to each of the four spaces; the written file opens in Preview and
 in darktable with the expected profile; 16-bit round-trips without banding.
 
+*Done.* Verified on the committed RAF: all 20 combinations of four spaces and five
+formats write a real file, and macOS `sips` reads back the expected profile name from
+every one. JPEG XL is decoded by `djxl`, which is not the library that wrote it.
+
+Three findings worth recording:
+
+- **JPEG XL needs `JxlEncoderCloseInput`.** Without it the codestream is never
+  terminated: the file has every byte, its header parses, `jxlinfo` reports a valid
+  image and reads the profile, and a decoder refuses with "input file is truncated".
+  Nothing in the API reports the omission, so the file looks right until something
+  tries to decode it.
+- **JPEG XL needs the basic info before the profile.** `JxlEncoderSetICCProfile`
+  called first returns `JXL_ENC_ERROR` with no detail, which reads as a broken profile
+  rather than a broken sequence.
+- **The profiles needed names.** All four were structurally valid but carried no
+  description, so every wide-gamut file showed as "RGB built-in" and a user could not
+  tell a Display P3 export from a Rec2020 one. They now name themselves.
+
+16-bit is measured, not assumed: a shallow gradient over 4096 pixels keeps 2,915
+distinct levels at 16 bits against 14 at 8, read back through libpng.
+
 #### M5 — Workspace, filmstrip, settings
 
 - `service/document` workspace open, `_directory.json`, filmstrip with the

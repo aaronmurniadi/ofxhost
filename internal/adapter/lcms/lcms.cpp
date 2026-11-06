@@ -79,6 +79,31 @@ const Primaries kRec2020Primaries = {
  *
  * A null curve asks lcms2 for the sRGB curve, which is what the two encoded spaces
  * want. A linear curve is built explicitly for the two linear spaces. */
+/* nameProfile sets the description tag, which is what a person sees in a viewer and
+ * what distinguishes four profiles that are otherwise structurally identical.
+ *
+ * Without it every wide-gamut export reads as "RGB built-in", so a user cannot tell
+ * a Display P3 file from a Rec2020 one by inspecting it. */
+void nameProfile(cmsHPROFILE profile, const char *name) {
+  if (profile == nullptr || name == nullptr) {
+    return;
+  }
+  const cmsMLU *mlu = nullptr;
+  cmsMLU *created = cmsMLUalloc(nullptr, 1);
+  if (created == nullptr) {
+    return;
+  }
+  if (cmsMLUsetASCII(created, "en", "US", name) == 0) {
+    cmsMLUfree(created);
+    return;
+  }
+  // cmsWriteTag copies the string, so the MLU is freed either way.
+  cmsWriteTag(profile, cmsSigProfileDescriptionTag, created);
+  cmsWriteTag(profile, cmsSigDeviceMfgDescTag, created);
+  cmsMLUfree(created);
+  (void)mlu;
+}
+
 cmsHPROFILE buildProfile(const Primaries &p, bool linear) {
   cmsCIExyYTRIPLE triple;
   triple.Red = p.red;
@@ -117,15 +142,19 @@ cmsHPROFILE profileFor(int space) {
   switch (space) {
     case OFXL_SRGB:
       built = cmsCreate_sRGBProfile();
+      nameProfile(built, "sRGB (OfxHost)");
       break;
     case OFXL_DISPLAY_P3:
       built = buildProfile(kDisplayP3Primaries, false);
+      nameProfile(built, "Display P3 (OfxHost)");
       break;
     case OFXL_LINEAR_REC709:
       built = buildProfile(kSRGBPrimaries, true);
+      nameProfile(built, "Linear Rec.709 (OfxHost)");
       break;
     case OFXL_LINEAR_REC2020:
       built = buildProfile(kRec2020Primaries, true);
+      nameProfile(built, "Linear Rec.2020 (OfxHost)");
       break;
     default:
       return nullptr;

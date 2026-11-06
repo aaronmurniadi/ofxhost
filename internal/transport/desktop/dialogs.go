@@ -15,6 +15,9 @@ type FilePicker interface {
 	// PickImage asks for an image file and returns its path, or an empty string when
 	// the user cancelled.
 	PickImage() (string, error)
+	// PickSave asks where to write a file, suggesting `suggested`, and returns the
+	// chosen path or an empty string.
+	PickSave(suggested string) (string, error)
 }
 
 // picker implements FilePicker through the Wails dialog manager.
@@ -32,6 +35,25 @@ func (a *App) FilePicker() FilePicker { return &picker{app: a.app} }
 // dialog filter is a display concern and importing the decoder to build it would
 // pull a native library into the window.
 const rawPattern = "*.3fr;*.ari;*.arw;*.bay;*.cr2;*.cr3;*.crw;*.dcr;*.dng;*.erf;*.fff;*.iiq;*.k25;*.kdc;*.mdc;*.mef;*.mos;*.mrw;*.nef;*.nrw;*.orf;*.pef;*.raf;*.raw;*.rw2;*.rwl;*.srf;*.srw;*.x3f"
+
+// PickSave implements FilePicker.
+//
+// The filter list comes from the current export format, which is why the caller
+// passes a suggested path rather than a filter: the window should not have to know
+// which extension belongs to which format.
+func (p *picker) PickSave(suggested string) (string, error) {
+	if p.app == nil {
+		return "", errors.New("desktop: the window is not available")
+	}
+	path, err := p.app.Dialog.SaveFile().
+		SetMessage("Export image").
+		SetFilename(suggested).
+		PromptForSingleSelection()
+	if err != nil {
+		return "", err
+	}
+	return path, nil
+}
 
 // PickImage implements FilePicker.
 func (p *picker) PickImage() (string, error) {

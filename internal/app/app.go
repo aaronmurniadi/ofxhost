@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/aaronmurniadi/ofxhost/frontend"
+	"github.com/aaronmurniadi/ofxhost/internal/adapter/codes"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/lcms"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/ofxhost"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/rawlib"
@@ -24,6 +25,7 @@ import (
 	"github.com/aaronmurniadi/ofxhost/internal/port"
 	chainsvc "github.com/aaronmurniadi/ofxhost/internal/service/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/service/document"
+	exportservice "github.com/aaronmurniadi/ofxhost/internal/service/export"
 	"github.com/aaronmurniadi/ofxhost/internal/service/preview"
 	"github.com/aaronmurniadi/ofxhost/internal/transport/binds"
 	"github.com/aaronmurniadi/ofxhost/internal/transport/desktop"
@@ -138,12 +140,17 @@ func New(opts Options) (*App, error) {
 	})
 
 	binds.SetVersion(version)
+	// The export pipeline: encode through the native libraries, converting into the
+	// chosen export space first.
+	exportService := exportservice.New(codes.New(), color, sink)
 	// Registering after the window exists is what lets the document binding hold the
 	// window's file picker, so the frontend can ask for a file without this package
 	// exporting a dialog of its own.
 	window.Application().RegisterService(
 		application.NewService(binds.NewDocument(ctx, docs, renderer, graph, pluginHost, window.FilePicker())))
 	window.Application().RegisterService(application.NewService(binds.NewChain(graph, pluginHost)))
+	window.Application().RegisterService(
+		application.NewService(binds.NewExport(ctx, docs, exportService, window.FilePicker())))
 
 	return &App{
 		window:  window,

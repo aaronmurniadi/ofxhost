@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, chainApi, type ChainDTO, type DocumentDTO } from "./api/document";
+import ExportDialog from "./panels/ExportDialog";
 import OpenDialog from "./panels/OpenDialog";
 import ParametersPanel from "./panels/ParametersPanel";
 import PluginsPanel from "./panels/PluginsPanel";
@@ -45,6 +46,8 @@ export default function App() {
   // pendingPath is the file waiting for a colour space. Decision D8: the space is an
   // input to the decode, so it is asked before the file opens.
   const [pendingPath, setPendingPath] = useState("");
+  // exporting shows the export dialog, which is only reachable once a file is open.
+  const [exporting, setExporting] = useState(false);
 
   // Poll while a decode is in flight.
   //
@@ -173,6 +176,14 @@ export default function App() {
         <button className="button" onClick={() => void chooseFile()}>
           Open…
         </button>
+        <button
+          className="button"
+          onClick={() => setExporting(true)}
+          disabled={!doc?.open}
+          title={doc?.open ? "Export the chain at full resolution" : "Open a file first"}
+        >
+          Export…
+        </button>
         <span className="app__version">{version}</span>
       </header>
 
@@ -199,6 +210,16 @@ export default function App() {
           path={pendingPath}
           onConfirm={(space) => void openWithSpace(space)}
           onCancel={() => setPendingPath("")}
+        />
+      ) : null}
+
+      {exporting ? (
+        <ExportDialog
+          onClose={() => setExporting(false)}
+          onExported={(result) => {
+            setMessage(`Exported ${result.path}`);
+            setExporting(false);
+          }}
         />
       ) : null}
     </div>
