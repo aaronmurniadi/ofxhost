@@ -487,6 +487,38 @@ class InstanceImpl : public OFX::Host::ImageEffect::Instance {
     outputHeight_ = height;
   }
 
+  /* setSourceSize changes the dimensions the region-of-definition action reasons
+   * about, without copying pixels from anywhere.
+   *
+   * It exists because the action must be asked before the real frame is bound, so the
+   * stored buffer still holds the previous pass. Reporting the new size while leaving
+   * the old buffer is what crashed: the caller used to re-bind the instance's own
+   * pixels at the new size, and std::vector::assign then reallocated the buffer while
+   * reading from it, past its old end.
+   *
+   * The buffer is resized to fit rather than merely relabelled. A plugin is not
+   * supposed to read images during this action, but one that does would otherwise read
+   * past the allocation, and a wrong answer is cheaper than a crash. The resize only
+   * happens when the size actually changes, so repeated renders at one size do not
+   * pay for it again.
+   */
+  void setSourceSize(int width, int height) {
+    std::lock_guard<std::mutex> lock(bufferMutex_);
+    sourceWidth_ = width;
+    sourceHeight_ = height;
+    // The output takes the input's size until the action says otherwise.
+    outputWidth_ = width;
+    outputHeight_ = height;
+    if (width <= 0 || height <= 0) {
+      source_.clear();
+      return;
+    }
+    const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+    if (source_.size() != count) {
+      source_.assign(count, 0.0f);
+    }
+  }
+
   void prepareOutput(int width, int height) {
     std::lock_guard<std::mutex> lock(bufferMutex_);
     outputWidth_ = width;
@@ -1450,7 +1482,7 @@ extern "C" int ofxh_instance_output_size(ofxh_instance *handle, int inWidth, int
   }
   try {
     InstanceImpl *instance = handle->entry->instance.get();
-    instance->setSource(instance->sourcePixels(), inWidth, inHeight);
+    instance->setSourceSize(inWidth, inHeight);
 
     OfxRectD rod = {0, 0, static_cast<double>(inWidth), static_cast<double>(inHeight)};
     OfxPointD scale = {1.0, 1.0};

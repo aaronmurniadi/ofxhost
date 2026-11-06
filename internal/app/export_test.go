@@ -418,3 +418,75 @@ func TestPreviewResolutionIsFaster(t *testing.T) {
 			float64(full.W*full.H)/float64(out.W*out.H))
 	}
 }
+
+// TestARenderAtOneSizeDoesNotBreakTheNext renders a chain small and then large, which
+// is what raising the preview resolution does.
+//
+// The host answered the region-of-definition question by re-binding the instance's own
+// pixel buffer at the new, larger size. std::vector::assign reallocated the buffer
+// while reading through a pointer into it, and ran past the old end: the second render
+// segfaulted inside the plugin, after the first had succeeded. Raising the preview to
+// full resolution was therefore the one action that reliably crashed.
+//
+// Any plugin that reports a region of definition could hit it, so this asks for one
+// filter and does not care which.
+func TestARenderAtOneSizeDoesNotBreakTheNext(t *testing.T) {
+	host, err := ofxhost.New(ofxhost.Options{})
+	if err != nil {
+		t.Skipf("no plugin host: %v", err)
+	}
+	defer host.Close()
+	if err := host.Discover(nil); err != nil {
+		t.Skipf("the plugin scan failed: %v", err)
+	}
+	graph := chainsvc.New(host)
+	defer graph.Close()
+
+	added := false
+	for _, plugin := range host.Plugins() {
+		if _, addErr := graph.Add(plugin.Index); addErr == nil {
+			added = true
+			break
+		}
+	}
+	if !added {
+		t.Skip("no filter plugin is installed")
+	}
+
+	render := func(edge int) (image.Raster, error) {
+		frame := image.New(edge, edge)
+		// A mid grey, not a transparent black, so a plugin that reads its input has
+		// something defined to read.
+		for i := 0; i < len(frame.Pixels); i++ {
+			frame.Pixels[i] = 0.5
+		}
+		return graph.ApplyProjected(frame, edge, 1)
+	}
+
+	small, err := render(256)
+	if err != nil {
+		t.Fatalf("render at 256: %v", err)
+	}
+	if small.W != 256 {
+		t.Fatalf("the first render is %dx%d, want 256x256", small.W, small.H)
+	}
+
+	// The step that crashed: a larger frame against an instance built on a smaller one.
+	large, err := render(1024)
+	if err != nil {
+		t.Fatalf("render at 1024 after 256: %v", err)
+	}
+	if large.W != 1024 || large.H != 1024 {
+		t.Fatalf("the second render is %dx%d, want 1024x1024", large.W, large.H)
+	}
+
+	// And back down, because a plugin holding a larger buffer is the same hazard in
+	// the other direction.
+	back, err := render(256)
+	if err != nil {
+		t.Fatalf("render at 256 after 1024: %v", err)
+	}
+	if back.W != 256 {
+		t.Fatalf("the third render is %dx%d, want 256x256", back.W, back.H)
+	}
+}
