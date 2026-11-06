@@ -2,11 +2,20 @@ package binds
 
 import (
 	"context"
+	"errors"
+	"time"
 
+	chainmod "github.com/aaronmurniadi/ofxhost/internal/domain/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
+	"github.com/aaronmurniadi/ofxhost/internal/domain/project"
 	"github.com/aaronmurniadi/ofxhost/internal/service/document"
 	exportservice "github.com/aaronmurniadi/ofxhost/internal/service/export"
 )
+
+// chainReader is the part of the chain graph an export reads.
+type chainReader interface {
+	Chain() *chainmod.Chain
+}
 
 // Export is the binding for writing a file.
 //
@@ -19,11 +28,25 @@ type Export struct {
 	docs    *document.Service
 	service *exportservice.Service
 	picker  Picker
+	// store writes the optional sidecar that records how a file was produced.
+	store SidecarWriter
+	// graph is read for the chain, which is what the sidecar records.
+	graph chainReader
 }
 
 // NewExport returns the export binding.
-func NewExport(ctx context.Context, docs *document.Service, service *exportservice.Service, picker Picker) *Export {
-	return &Export{ctx: ctx, docs: docs, service: service, picker: picker}
+func NewExport(ctx context.Context, docs *document.Service, service *exportservice.Service,
+	picker Picker, store SidecarWriter, graph chainReader) *Export {
+	return &Export{ctx: ctx, docs: docs, service: service, picker: picker, store: store, graph: graph}
+}
+
+// SidecarWriter records how an exported file was produced.
+//
+// It is separate from the store the document uses, because a sidecar is written at a
+// different moment and for a different reason: the document remembers a place, an
+// export optionally records a method.
+type SidecarWriter interface {
+	SaveExportSidecar(exportPath, sourcePath string, sidecar project.Sidecar) error
 }
 
 // FormatDTO describes one export format and what it can do.
@@ -120,6 +143,12 @@ type Request struct {
 	Quality int `json:"quality"`
 	// Lossless is honoured only by the formats that offer it.
 	Lossless bool `json:"lossless"`
+	// WriteSidecar asks for a sidecar beside the exported file, recording the chain
+	// and the spaces that produced it.
+	//
+	// It is off by default. Most exports do not need one, and a sidecar the user did
+	// not ask for is a file they have to notice and delete.
+	WriteSidecar bool `json:"writeSidecar"`
 	// Path is the destination the user chose.
 	Path string `json:"path"`
 }
@@ -189,13 +218,49 @@ func (e *Export) Run(req Request) Result {
 		return Result{Error: err.Error()}
 	}
 
+	notes := result.Notes
+	if req.WriteSidecar {
+		if sidecarErr := e.writeSidecar(result.Path, state); sidecarErr != nil {
+			// The file was written; only the record of how failed, and saying so is
+			// better than claiming a clean export.
+			notes = append(notes, "the sidecar could not be written: "+sidecarErr.Error())
+		}
+	}
+
 	return Result{
 		OK:     true,
 		Path:   result.Path,
 		Width:  result.Width,
 		Height: result.Height,
-		Notes:  result.Notes,
+		Notes:  notes,
 	}
+}
+
+// writeSidecar records how an exported file was produced.
+//
+// It describes the source image and the chain that was applied, so the same edit can be
+// reproduced or inspected later. The export path is what the sidecar is named after: a
+// record belongs to the file it explains.
+func (e *Export) writeSidecar(exportPath string, state document.State) error {
+	if e.store == nil {
+		return errors.New("no store is configured")
+	}
+	if state.Path == "" {
+		return errors.New("the source image is unknown")
+	}
+
+	sidecar := project.Sidecar{
+		Format:     project.FormatTag,
+		Version:    project.Version,
+		SourcePath: state.Path,
+		FileSpace:  state.FileSpace.String(),
+		ChainSpace: state.InputSpace.String(),
+		ExportedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if e.graph != nil {
+		sidecar.Chain = e.graph.Chain().Snapshot()
+	}
+	return e.store.SaveExportSidecar(exportPath, state.Path, sidecar)
 }
 
 // Busy reports whether an export is running.

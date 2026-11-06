@@ -58,6 +58,12 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
 }
 
 /** The methods the frontend uses. */
+/** LastSessionDTO names the image a relaunch should reopen. */
+export interface LastSessionDTO {
+  found: boolean;
+  path: string;
+}
+
 export const api = {
   /**
    * Starts decoding a file into a colour space.
@@ -85,6 +91,14 @@ export const api = {
 
   /** The preview size names, in enum order. */
   previewResolutions: () => call<string[]>("PreviewResolutions"),
+
+  /**
+   * The image that was open when the program last quit.
+   *
+   * It comes from a directory entry, not from the settings file, and it reports
+   * nothing when the file has since been deleted or when this is the first run.
+   */
+  lastSession: () => call<LastSessionDTO>("LastSession"),
 
   /** The build version. */
   version: () => call<string>("Version"),
@@ -226,6 +240,14 @@ export interface ExportRequest {
   depth: number;
   quality: number;
   lossless: boolean;
+  /**
+   * Asks for a sidecar beside the exported file, recording the chain and the colour
+   * spaces that produced it.
+   *
+   * Off by default: most exports do not need one, and a file the user did not ask for
+   * is a file they have to notice and delete.
+   */
+  writeSidecar: boolean;
   path: string;
 }
 

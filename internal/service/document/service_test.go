@@ -3,6 +3,7 @@ package document
 import (
 	"context"
 	"errors"
+	"github.com/aaronmurniadi/ofxhost/internal/domain/project"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aaronmurniadi/ofxhost/internal/domain/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/status"
 	"github.com/aaronmurniadi/ofxhost/internal/port"
@@ -426,6 +428,11 @@ func (r *recordingRunner) ApplyProjected(in image.Raster, projectEdge int, _ uin
 
 func (r *recordingRunner) Close() {}
 
+// Snapshot and Restore are what persistence uses; this fake keeps no chain, so the
+// snapshot is empty and a restore is a no-op.
+func (r *recordingRunner) Snapshot() chain.Snapshot     { return chain.Snapshot{} }
+func (r *recordingRunner) Restore(chain.Snapshot) error { return nil }
+
 // TestRenderAtShrinksBeforeTheChain is the point of the feature. A preview that is
 // scaled after the chain costs exactly as much as a full render, so the only useful
 // measurement is what the chain was handed.
@@ -505,5 +512,119 @@ func TestRenderAtDoesNotScaleUp(t *testing.T) {
 	}
 	if runner.gotW != 400 || runner.gotH != 200 {
 		t.Fatalf("the chain ran on %dx%d, want the untouched 400x200", runner.gotW, runner.gotH)
+	}
+}
+
+// fakePlaceStore records directory entries in memory.
+//
+// It deliberately has no sidecar methods: the document must not need them, because a
+// chain is not written by the document (D10).
+type fakePlaceStore struct {
+	entries map[string]project.DirectoryEntry
+	saves   int
+}
+
+func newFakePlaceStore() *fakePlaceStore {
+	return &fakePlaceStore{entries: map[string]project.DirectoryEntry{}}
+}
+
+func (f *fakePlaceStore) SaveDirectoryEntry(dir string, entry project.DirectoryEntry) error {
+	f.saves++
+	f.entries[dir] = entry
+	return nil
+}
+
+func (f *fakePlaceStore) LoadDirectoryEntry(dir string) (project.DirectoryEntry, error) {
+	return f.entries[dir], nil
+}
+
+// TestPersistRemembersThePlaceNotTheChain pins decision D10. Opening a file records the
+// folder and the image so a relaunch can offer it again, and writes no chain.
+func TestPersistRemembersThePlaceNotTheChain(t *testing.T) {
+	decoder := newFakeDecoder()
+	decoder.frames["/photos/a.cr3"] = image.New(20, 10)
+	s := newService(t, decoder)
+	store := newFakePlaceStore()
+	s.SetStore(store)
+
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/photos/a.cr3", Space: image.SRGB}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, s)
+
+	// Opening already records the place, so the explicit call is a second write of
+	// the same entry. What matters is that it happened without being asked twice.
+	if store.saves < 1 {
+		t.Fatalf("opening saved nothing, want the folder recorded")
+	}
+	if err := s.Persist(); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+	entry, ok := store.entries["/photos"]
+	if !ok {
+		t.Fatalf("no entry for the folder, got %v", store.entries)
+	}
+	if entry.ActiveImage != "a.cr3" {
+		t.Fatalf("activeImage = %q, want a.cr3", entry.ActiveImage)
+	}
+	if entry.Format != project.FormatTag {
+		t.Fatalf("format = %q, want %q", entry.Format, project.FormatTag)
+	}
+	if got := s.LastDirectory(); got != "/photos" {
+		t.Fatalf("LastDirectory = %q", got)
+	}
+}
+
+// TestRestoreReportsTheFileThatWasOpen covers the relaunch path.
+func TestRestoreReportsTheFileThatWasOpen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shot.cr3")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	decoder := newFakeDecoder()
+	decoder.frames[path] = image.New(8, 8)
+	s := newService(t, decoder)
+	store := newFakePlaceStore()
+	s.SetStore(store)
+
+	if _, err := s.Open(context.Background(), OpenRequest{Path: path, Space: image.SRGB}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, s)
+	if err := s.Persist(); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+
+	got, ok, err := s.Restore(store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if !ok || got != path {
+		t.Fatalf("Restore = %q ok=%v, want %q", got, ok, path)
+	}
+}
+
+// TestRestoreSkipsADeletedFile keeps a relaunch from failing on something that is gone.
+func TestRestoreSkipsADeletedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gone.cr3")
+	// The entry is recorded but the file never exists.
+	store := newFakePlaceStore()
+	store.entries[dir] = project.DirectoryEntry{Format: project.FormatTag, Version: project.Version, ActiveImage: "gone.cr3"}
+
+	s := newService(t, newFakeDecoder())
+	s.SetStore(store)
+	s.mu.Lock()
+	s.lastDirectory = dir
+	s.mu.Unlock()
+
+	got, ok, err := s.Restore(store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if ok || got != path[:0] {
+		t.Fatalf("Restore = %q ok=%v, want nothing", got, ok)
 	}
 }

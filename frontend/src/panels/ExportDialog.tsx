@@ -27,6 +27,9 @@ export default function ExportDialog({ onClose, onExported }: Props) {
   const [depth, setDepth] = useState(8);
   const [quality, setQuality] = useState(92);
   const [lossless, setLossless] = useState(false);
+  // A sidecar records how the file was produced. It is opt-in: the export is the
+  // deliverable, and an unrequested file beside it is clutter the user must clean up.
+  const [writeSidecar, setWriteSidecar] = useState(false);
   const [error, setError] = useState("");
   const [notes, setNotes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -94,6 +97,7 @@ export default function ExportDialog({ onClose, onExported }: Props) {
       depth,
       quality,
       lossless,
+      writeSidecar,
       path,
     });
     setBusy(false);
@@ -188,6 +192,17 @@ export default function ExportDialog({ onClose, onExported }: Props) {
             ))}
           </select>
         </div>
+
+        <label className="field field--inline">
+          <input
+            type="checkbox"
+            checked={writeSidecar}
+            onChange={(event) => setWriteSidecar(event.target.checked)}
+          />
+          <span title="Records the plugin chain and colour spaces beside the file">
+            Write sidecar with the chain
+          </span>
+        </label>
 
         {current?.lossless ? (
           <label className="field field--inline">

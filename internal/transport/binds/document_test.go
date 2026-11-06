@@ -91,7 +91,7 @@ func newBindings(t *testing.T) *Document {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	return NewDocument(ctx, docs, renderer, nil, nil, nil)
+	return NewDocument(ctx, docs, renderer, nil, nil, nil, nil)
 }
 
 // waitForDocument polls Current until the decode lands, as the frontend does.

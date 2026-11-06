@@ -144,6 +144,11 @@ func New(opts Options) (*App, error) {
 
 	binds.SetVersion(version)
 
+	// The store remembers which image of which folder was open. It writes no sidecar:
+	// a chain reaches disk only through an export that asks for one.
+	docStore := statefiles.New()
+	docs.SetStore(docStore)
+
 	// The settings service is built before the window so the first draw already
 	// knows the layout it should restore. A settings file that cannot be read is
 	// reported and replaced by the defaults: a window that opens with a default
@@ -164,10 +169,10 @@ func New(opts Options) (*App, error) {
 	// window's file picker, so the frontend can ask for a file without this package
 	// exporting a dialog of its own.
 	window.Application().RegisterService(
-		application.NewService(binds.NewDocument(ctx, docs, renderer, graph, pluginHost, window.FilePicker())))
+		application.NewService(binds.NewDocument(ctx, docs, renderer, graph, pluginHost, window.FilePicker(), docStore)))
 	window.Application().RegisterService(application.NewService(binds.NewChain(graph, pluginHost)))
 	window.Application().RegisterService(
-		application.NewService(binds.NewExport(ctx, docs, exportService, window.FilePicker())))
+		application.NewService(binds.NewExport(ctx, docs, exportService, window.FilePicker(), docStore, graph)))
 
 	return &App{
 		window:  window,

@@ -60,6 +60,8 @@ export default function App() {
   // attempt to finish - success or failure - costs one frame and makes a restored
   // layout actually take effect.
   const [settingsReady, setSettingsReady] = useState(false);
+  // lastImage is the file that was open last time, offered as a one-click restore.
+  const [lastImage, setLastImage] = useState("");
 
   // Load the stored layout once.
   //
@@ -76,6 +78,23 @@ export default function App() {
         // Keep the defaults.
       } finally {
         setSettingsReady(true);
+      }
+    })();
+
+    // Return to the picture that was open last time.
+    //
+    // The working space is not restored from disk: a chain is not saved with the image
+    // (only an export can record one), so the space the file is developed into is asked
+    // for again rather than guessed. Reopening a file the user did not choose would be
+    // worse than starting at the picker, so this asks first.
+    void (async () => {
+      try {
+        const session = await api.lastSession();
+        if (session?.found && session.path) {
+          setLastImage(session.path);
+        }
+      } catch {
+        // No session to restore.
       }
     })();
   }, []);
@@ -207,6 +226,15 @@ export default function App() {
         <button className="button" onClick={() => void chooseFile()}>
           Open…
         </button>
+        {lastImage !== "" && !doc?.open ? (
+          <button
+            className="button"
+            onClick={() => setPendingPath(lastImage)}
+            title={lastImage}
+          >
+            Reopen last
+          </button>
+        ) : null}
         <button
           className="button"
           onClick={() => setExporting(true)}

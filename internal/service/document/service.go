@@ -110,8 +110,16 @@ type Service struct {
 	// and every use of it is guarded.
 	chain ChainRunner
 
+	// store remembers which image of which folder is open, so a relaunch returns the
+	// user to the picture they were looking at. It never holds a plugin chain: that is
+	// written only by export, and only on request.
+	store Store
+
 	mu    sync.RWMutex
 	state State
+	// lastDirectory is the folder of the open document, recorded so a relaunch can
+	// find the directory entry that names the image.
+	lastDirectory string
 
 	// generation counts requests, so a decode that finished after a newer one
 	// started can tell it is stale and discard its work.
@@ -276,10 +284,17 @@ func (s *Service) apply(outcome Outcome) {
 	s.state.WorkingSpace = outcome.decoded.FileSpace
 	s.state.InputSpace = outcome.decoded.FileSpace
 
-	// A new file starts a new chain; the sidecar is what would restore one, and
-	// that is the caller's decision rather than this package's.
+	// A new file starts a new chain. A saved chain is not applied here: a chain is a
+	// processing decision, not a place the user was, and it is written only by export.
 	s.state.Chain = chain.New()
 	s.mu.Unlock()
+
+	// Record which image is open, so a relaunch returns here.
+	if err := s.Persist(); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("the open image could not be recorded", "path", outcome.Path, "err", err)
+		}
+	}
 
 	s.status.Report(fmt.Sprintf("Opened %s (%dx%d, %s)", filepath.Base(outcome.Path),
 		outcome.decoded.Image.W, outcome.decoded.Image.H, outcome.decoded.FileSpace))
@@ -356,8 +371,21 @@ func (s *Service) RenderAt(generation uint64, maxEdge int) (image.Raster, error)
 // and replaces it only when a new file opens.
 func (s *Service) Chain() *chain.Chain {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.state.Chain
+	runner := s.chain
+	own := s.state.Chain
+	s.mu.RUnlock()
+
+	// The runner owns the live chain once it is installed; the copy in State is only
+	// what the document starts with. Returning the runner's chain keeps one truth,
+	// which matters as soon as either side can be restored.
+	if runner != nil {
+		if holder, ok := runner.(interface{ Chain() *chain.Chain }); ok {
+			if live := holder.Chain(); live != nil {
+				return live
+			}
+		}
+	}
+	return own
 }
 
 // Close stops the decode goroutine and waits for it.

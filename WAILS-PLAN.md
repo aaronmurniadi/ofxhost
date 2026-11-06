@@ -31,6 +31,7 @@ These are settled. Do not reopen them without a written reason in this file.
 | D6 | **No Metal in the first implementation.** Stubs behind the renderer port | `port.EffectHost` carries a `GPUBackend` seam with a CPU implementation and a no-op stub |
 | D7 | **No golden corpus, no porting from the C++ tree.** The old app is too crude to be a foundation | Requirements come from the OpenFX 1.5 standard and from this document, not from `src/` |
 | D8 | **The working space is the user's choice, asked when the file opens.** It becomes the input space of the first plugin. Nothing is compared against the camera's own JPEG | The decoder develops straight into the chosen space at 16 bits; the previous "matches the camera preview" check is dropped |
+| D10 | **Only UI state is persisted. A chain reaches disk only through an export, and only on request** | A chain is a processing decision, not a place the user was, and it is only meaningful with the exact plugin versions that built it. Writing one beside every image leaves files the user never asked for. An export records how the file was produced, which is the question a sidecar should answer |
 | D9 | **Base UI for components, `react-resizable-panels` for layout.** Panels resize and toggle; **docking is out of scope** | One drag-scrub number field instead of a hand-written one; a splitter library instead of the fixed CSS grid. `project.View` loses its three `show*` booleans and gains per-panel sizes, because a boolean that can disagree with a splitter is two sources of truth for one fact |
 
 D7 has one exception worth naming: the **on-disk formats** (`docs/workspace-format.md`
@@ -149,7 +150,7 @@ ofxhost/
     platform/
       paths/       config, state and cache directories; sidecar mirroring
       resource/    embedded fonts and icons (M4)
-      report/      fatal error dialog, parent console attach (M6)
+      report/      fatal error dialog, parent console attach (M7)
   frontend/        React + TS + Vite (Wails `react` template)
   tools/layerguard/
   third_party/openfx/    submodule
@@ -738,7 +739,7 @@ Rules:
 | State | Owner | Persisted where |
 |---|---|---|
 | Open document and its pixels | `service/document` | not persisted |
-| Chain of that document | `service/chain` | sidecar under the state dir |
+| Chain of that document | `service/chain` | **not persisted.** Written only by an export that asks for a sidecar (D10) |
 | Which image of a directory was open | `service/document` | `_directory.json` |
 | Theme, font size, panel visibility, export options | `service/session` | `settings.json` |
 | Window geometry | `transport/desktop` | Wails config |
@@ -989,15 +990,33 @@ existed only to drive it and had no other caller, so it is gone with it.
   the reader.
 - `docs/state-format.md`.
 
-**Gate:** quit and relaunch restores the chain, the open image, the theme, and the
-panel sizes and visibility. Dragging a splitter to zero hides that panel and the View
+**Gate:** quit and relaunch restores the open image, the theme, and the panel sizes and
+visibility. It does **not** restore the chain: decision D10 makes a chain an export
+artefact, not saved session state. Dragging a splitter to zero hides that panel and the View
 menu shows it again at the size it had. A parameter can be changed by dragging its
 number field, in the real window, on macOS.
 
 **Settled:** the pointer-lock question in §7.2b, by reading the library rather than by
 testing. No custom hook is needed.
 
-#### M6 — Other platforms
+#### M6 — Metal (stubs already in place)
+
+Moved ahead of the other platforms. The port stub, the seam and the tests already
+exist, so this is the smaller of the two and it stays on the platform this project is
+developed and measured on. Packaging on three more targets is the larger job and gains
+nothing from being started earlier.
+
+Fill `port.GPUBackend` with a Metal implementation in `internal/adapter/ofxhost`
+plus an Objective-C file, and pass `kOfxImageEffectPropMetalEnabled` to plugins
+that declare the capability. No service or transport change.
+
+**Gate:** a render through the device path matches the CPU path within the tolerance
+chosen for float32, and the CPU path still works when no device is present.
+
+#### M7 — Other platforms
+
+Last, and deliberately so. macOS is where this is developed and measured; the other
+targets are packaging work over adapters that are already behind ports.
 
 - Windows: static triplet, expat, the single-file constraint if you keep it.
 - Linux: GTK4 + WebKitGTK, AppImage.
@@ -1005,12 +1024,6 @@ testing. No custom hook is needed.
 - Only now build CI/CD.
 
 **Gate:** the same binary behaviour on all four targets.
-
-#### M7 — Metal (stubs already in place)
-
-Fill `port.GPUBackend` with a Metal implementation in `internal/adapter/ofxhost`
-plus an Objective-C file, and pass `kOfxImageEffectPropMetalEnabled` to plugins
-that declare the capability. No service or transport change.
 
 ### 9. Definition of done
 
@@ -1068,7 +1081,7 @@ Everything else in the table is permissive and needs only a notice file.
 | 5 | **Wails v3 is beta.** `v3.1.0` is pinned here, and the project still publishes alpha and beta tags | medium | Pin exactly in `go.mod`; never track `latest`; keep Wails inside `transport/` so it stays replaceable |
 | 6 | **Preview latency** over loopback HTTP | medium | One request per rendered frame, `no-store`, 8-bit PNG, never full resolution |
 | 7 | **Colour clipped in the preview** (D2) | medium | Documented in the export dialog; export is authoritative; 16-bit canvas escape hatch if banding shows |
-| 8 | **macOS first means Linux and Windows surprises arrive late** | medium | Keep every adapter behind a port and a build tag; M6 should be packaging work, not porting work |
+| 8 | **macOS first means Linux and Windows surprises arrive late** | medium | Keep every adapter behind a port and a build tag; M7 should be packaging work, not porting work |
 | 9 | **No file drag-and-drop** if Wails lacks a cross-platform hook | low | Verify during M8; the File menu and Open button remain; release notes say so |
 | 10 | **Greenfield scope creep** | medium | This document is the scope. A feature not in §8 is a new decision, written here first |
 
@@ -1092,7 +1105,7 @@ back to `~/Downloads` and `~/Pictures` and finally skip when there is none.
 
 ### 13. What is explicitly out of scope for v1
 
-- Metal and any other GPU render path beyond the stub (D6, M7).
+- Metal and any other GPU render path beyond the stub (D6, M6).
 - `kOfxOpenGLRenderSuite`, `kOfxParametricParameterSuite`, interact plugins.
 - Bundled OFX plugins. Only third-party plugins from the system and
   `OFX_PLUGIN_PATH`.

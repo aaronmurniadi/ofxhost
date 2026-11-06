@@ -32,6 +32,9 @@ type Document struct {
 	chain   *chainsvc.Graph
 	host    port.EffectHost
 	picker  Picker
+	// store reads the state directory for LastSession, so the frontend can reopen the
+	// image that was open before. It is nil when persistence is not configured.
+	store document.Store
 
 	// ctx is the application lifetime, set by the composition root before the
 	// frontend can call anything.
@@ -65,8 +68,11 @@ type Picker interface {
 // Both the chain and the host may be nil: a machine with no OpenFX plugins still
 // opens and shows images, it just has no chain to apply.
 func NewDocument(ctx context.Context, docs *document.Service, renderer *preview.Renderer, chain *chainsvc.Graph,
-	host port.EffectHost, picker Picker) *Document {
-	return &Document{ctx: ctx, docs: docs, preview: renderer, chain: chain, host: host, picker: picker}
+	host port.EffectHost, picker Picker, store document.Store) *Document {
+	return &Document{
+		ctx: ctx, docs: docs, preview: renderer, chain: chain,
+		host: host, picker: picker, store: store,
+	}
 }
 
 // PickFile asks the user for a file and returns its path, or an empty string.
@@ -329,4 +335,34 @@ func itoa(v uint64) string {
 		v /= 10
 	}
 	return string(buf[i:])
+}
+
+// LastSessionDTO names the image a relaunch should reopen.
+//
+// It is a separate call from Settings because it reads the state directory, not the
+// settings file, and it can fail on its own without the window needing to care.
+type LastSessionDTO struct {
+	// Found is false when there is nothing to reopen, which is the first run.
+	Found bool `json:"found"`
+	// Path is the image to open.
+	Path string `json:"path"`
+}
+
+// LastSession reports the image to reopen after a relaunch.
+//
+// A file that has since been deleted reports nothing, so a relaunch starts empty rather
+// than failing to open something that is not there.
+func (d *Document) LastSession() LastSessionDTO {
+	d.mu.Lock()
+	store := d.store
+	d.mu.Unlock()
+	if store == nil {
+		return LastSessionDTO{}
+	}
+
+	path, ok, err := d.docs.Restore(store)
+	if err != nil || !ok {
+		return LastSessionDTO{}
+	}
+	return LastSessionDTO{Found: true, Path: path}
 }

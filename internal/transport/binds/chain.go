@@ -19,6 +19,7 @@ type Chain struct {
 
 // NewChain returns the chain binding. Either argument may be nil on a machine with
 // no plugins.
+// NewChain returns the binding.
 func NewChain(graph *chainsvc.Graph, host port.EffectHost) *Chain {
 	return &Chain{graph: graph, host: host}
 }
