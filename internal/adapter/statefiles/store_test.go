@@ -33,7 +33,7 @@ func TestSaveThenLoadSettings(t *testing.T) {
 	want := project.DefaultSettings()
 	want.Appearance.Theme = "Light"
 	want.Appearance.FontPt = 15
-	want.View.ShowFilmstrip = false
+	want.View.Panels = project.Panels{Right: 30, Plugins: 60, Filmstrip: 0}
 	want.Updates.Channel = string(project.ChannelPrerelease)
 
 	if err := store.SaveSettings(want); err != nil {
@@ -359,5 +359,81 @@ func TestRelativeAndAbsolutePathsReachTheSameSidecar(t *testing.T) {
 	}
 	if got.ChainSpace != "sRGB" {
 		t.Fatalf("ChainSpace = %q", got.ChainSpace)
+	}
+}
+
+// writeSettingsFile puts a settings body where the store will look for it.
+func writeSettingsFile(t *testing.T, dir, body string) {
+	t.Helper()
+	path := filepath.Join(dir, "config", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
+
+// TestLoadSettingsWithoutPanelsUsesDefaults covers a settings file written before
+// panels were resizable. It has no "panels" key, and that must read as the
+// defaults rather than as three hidden panels.
+func TestLoadSettingsWithoutPanelsUsesDefaults(t *testing.T) {
+	store, dir := newStore(t)
+	const old = `{
+	  "format": "ofxhost",
+	  "version": 1,
+	  "view": {"previewSpace": "sRGB", "showFilmstrip": true},
+	  "appearance": {"theme": "Light", "fontPt": 15}
+	}`
+	writeSettingsFile(t, dir, old)
+
+	got, err := store.LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	want := project.DefaultSettings().View.Panels
+	if got.View.Panels != want {
+		t.Fatalf("Panels = %+v, want the defaults %+v", got.View.Panels, want)
+	}
+	// The other fields in the file still win.
+	if got.Appearance.Theme != "Light" {
+		t.Fatalf("theme = %q, want Light", got.Appearance.Theme)
+	}
+}
+
+// TestLoadSettingsWithZeroPanelsStaysHidden is the other half: a "panels" key that
+// is present and zero is a panel the user hid, and must survive a reload.
+func TestLoadSettingsWithZeroPanelsStaysHidden(t *testing.T) {
+	store, dir := newStore(t)
+	const hidden = `{
+	  "format": "ofxhost",
+	  "version": 1,
+	  "view": {"previewSpace": "sRGB", "panels": {"right": 0, "plugins": 0, "filmstrip": 0}}
+	}`
+	writeSettingsFile(t, dir, hidden)
+
+	got, err := store.LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if got.View.Panels != (project.Panels{}) {
+		t.Fatalf("Panels = %+v, want every panel hidden", got.View.Panels)
+	}
+}
+
+// TestLoadSettingsClampsPanels stops a hand-edited file from making a panel
+// larger than the window.
+func TestLoadSettingsClampsPanels(t *testing.T) {
+	store, dir := newStore(t)
+	const extreme = `{"format":"ofxhost","version":1,"view":{"panels":{"right":250,"plugins":-4,"filmstrip":95}}}`
+	writeSettingsFile(t, dir, extreme)
+
+	got, err := store.LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	want := project.Panels{Right: 60, Plugins: 0, Filmstrip: 50}
+	if got.View.Panels != want {
+		t.Fatalf("Panels = %+v, want %+v", got.View.Panels, want)
 	}
 }

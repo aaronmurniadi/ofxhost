@@ -97,7 +97,40 @@ func (s *Store) LoadSettings() (project.Settings, error) {
 	if !found {
 		return project.DefaultSettings(), nil
 	}
+	// A file written before panels were resizable has no "panels" key. An absent
+	// key means the defaults; a stored zero means the user hid the panel. The two
+	// cannot share a representation, so presence is decided from the bytes rather
+	// than from the decoded value.
+	if !hasJSONKey(path, "panels", "view") {
+		out.View.Panels = project.DefaultSettings().View.Panels
+	}
 	return normaliseSettings(out), nil
+}
+
+// hasJSONKey reports whether a nested key is present in the JSON file at path.
+//
+// The settings loader needs this to tell "absent, use the default" from "present
+// and zero, the user hid the panel". Decoding into a struct cannot make that
+// distinction for a numeric field.
+func hasJSONKey(path, key, parent string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var top map[string]json.RawMessage
+	if err = json.Unmarshal(data, &top); err != nil {
+		return false
+	}
+	raw, ok := top[parent]
+	if !ok {
+		return false
+	}
+	var object map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &object); err != nil {
+		return false
+	}
+	_, present := object[key]
+	return present
 }
 
 // SaveSettings writes the per-user settings file.
@@ -191,6 +224,8 @@ func (s *Store) SaveDirectoryEntry(dir string, entry project.DirectoryEntry) err
 func normaliseSettings(in project.Settings) project.Settings {
 	out := in
 	defaults := project.DefaultSettings()
+
+	out.View.Panels = project.ClampPanels(out.View.Panels)
 
 	if out.Format == "" {
 		out.Format = defaults.Format

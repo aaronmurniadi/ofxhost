@@ -65,18 +65,82 @@ body,
  * and the filmstrip runs along the bottom. Fixed ratios for now; draggable
  * splitters arrive with the layout persistence in M5.
  */
-.app__layout {
-  display: grid;
-  grid-template-columns: 1fr 300px;
-  grid-template-rows: 1fr 110px;
-  grid-template-areas:
-    "preview plugins"
-    "preview parameters"
-    "filmstrip filmstrip";
-  gap: var(--panel-gap);
-  padding: var(--panel-gap);
+/* The panel area.
+   Decision D9: react-resizable-panels owns the geometry, so this is a plain
+   column that fills the window and nothing sets a grid template. */
+.app__main {
+  display: flex;
   flex: 1;
   min-height: 0;
+  padding: var(--panel-gap);
+}
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.workspace__group {
+  min-height: 0;
+}
+
+/* The splitter.
+   It is a thin bar that grows on hover, which is the affordance the panels
+   already use elsewhere. The hit target is wider than the visible line so a
+   drag is easy to start. */
+.separator {
+  position: relative;
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  /* The visible line is drawn by the pseudo-element, so the target stays wide. */
+}
+
+.separator::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--line, #2e2e32);
+  transition: background 120ms ease;
+}
+
+.separator:hover::after,
+.separator:focus-visible::after {
+  background: var(--accent, #6c9cf5);
+}
+
+.separator:focus-visible {
+  outline: 2px solid var(--accent, #6c9cf5);
+  outline-offset: 2px;
+}
+
+.separator--vertical {
+  width: 10px;
+  cursor: col-resize;
+}
+
+.separator--vertical::after {
+  left: 4px;
+  right: 4px;
+}
+
+.separator--horizontal {
+  height: 10px;
+  cursor: row-resize;
+}
+
+.separator--horizontal::after {
+  top: 4px;
+  bottom: 4px;
+}
+
+/* A collapsed panel keeps its splitter so the user can drag it back open, which
+   is the only way to find a panel hidden by dragging rather than by the menu. */
+.separator[data-panel-group-direction] {
+  user-select: none;
 }
 
 .panel {

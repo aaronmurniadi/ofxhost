@@ -39,7 +39,7 @@ func parseSpaceName(name string) (string, bool) {
 
 func TestSettingsJSONRoundTrip(t *testing.T) {
 	in := DefaultSettings()
-	in.View.ShowFilmstrip = false
+	in.View.Panels = Panels{Right: 25, Plugins: 40, Filmstrip: 0}
 	in.View.PreviewFitToWindow = false
 	in.Appearance.Theme = "Light"
 	in.Appearance.FontPt = 15
@@ -186,5 +186,50 @@ func TestDirectoryEntryJSONRoundTrip(t *testing.T) {
 	}
 	if out != in {
 		t.Fatalf("round trip changed the value: %+v", out)
+	}
+}
+
+// TestPanelsAbsentStaysZero pins the domain half of the absent-key rule: an
+// unmarshalled value with no "panels" key has zero sizes, and filling them with
+// the defaults is the adapter's job. The adapter test covers that side.
+func TestPanelsAbsentStaysZero(t *testing.T) {
+	const old = `{"format":"ofxhost","version":1,"view":{"previewSpace":"sRGB"}}`
+
+	var settings Settings
+	if err := json.Unmarshal([]byte(old), &settings); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if settings.View.Panels != (Panels{}) {
+		t.Fatalf("Panels = %+v, want zero", settings.View.Panels)
+	}
+}
+
+// TestPanelsZeroMeansHidden is the other half: a zero that the file does record is
+// a panel the user hid, not a missing value.
+func TestPanelsZeroMeansHidden(t *testing.T) {
+	const hidden = `{"format":"ofxhost","version":1,"view":{"panels":{"right":0,"plugins":0,"filmstrip":0}}}`
+
+	var settings Settings
+	if err := json.Unmarshal([]byte(hidden), &settings); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got := settings.View.ResolvedPanels()
+	if got != (Panels{}) {
+		t.Fatalf("ResolvedPanels = %+v, want every panel hidden", got)
+	}
+}
+
+func TestClampPanels(t *testing.T) {
+	cases := []struct {
+		in, want Panels
+	}{
+		{Panels{Right: -5, Plugins: 200, Filmstrip: 90}, Panels{Right: 0, Plugins: 90, Filmstrip: 50}},
+		{Panels{Right: 22.04, Plugins: 55.06, Filmstrip: 16}, Panels{Right: 22, Plugins: 55.1, Filmstrip: 16}},
+		{Panels{}, Panels{}},
+	}
+	for _, c := range cases {
+		if got := ClampPanels(c.in); got != c.want {
+			t.Errorf("ClampPanels(%+v) = %+v, want %+v", c.in, got, c.want)
+		}
 	}
 }

@@ -21,12 +21,15 @@ import (
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/lcms"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/ofxhost"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/rawlib"
+	"github.com/aaronmurniadi/ofxhost/internal/adapter/statefiles"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/status"
+	"github.com/aaronmurniadi/ofxhost/internal/platform/paths"
 	"github.com/aaronmurniadi/ofxhost/internal/port"
 	chainsvc "github.com/aaronmurniadi/ofxhost/internal/service/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/service/document"
 	exportservice "github.com/aaronmurniadi/ofxhost/internal/service/export"
 	"github.com/aaronmurniadi/ofxhost/internal/service/preview"
+	sessionsvc "github.com/aaronmurniadi/ofxhost/internal/service/session"
 	"github.com/aaronmurniadi/ofxhost/internal/transport/binds"
 	"github.com/aaronmurniadi/ofxhost/internal/transport/desktop"
 	"github.com/aaronmurniadi/ofxhost/internal/transport/frames"
@@ -140,6 +143,20 @@ func New(opts Options) (*App, error) {
 	})
 
 	binds.SetVersion(version)
+
+	// The settings service is built before the window so the first draw already
+	// knows the layout it should restore. A settings file that cannot be read is
+	// reported and replaced by the defaults: a window that opens with a default
+	// theme is better than one that does not open.
+	sessionService, sessionErr := sessionsvc.New(sessionsvc.Options{
+		Store:   statefiles.New(),
+		Version: version,
+	})
+	if sessionErr != nil {
+		logger.Warn("the settings file could not be read", "err", sessionErr, "path", settingsPathForLog())
+		sink.Report("Settings were reset: " + sessionErr.Error())
+	}
+	window.Application().RegisterService(application.NewService(binds.NewSession(sessionService)))
 	// The export pipeline: encode through the native libraries, converting into the
 	// chosen export space first.
 	exportService := exportservice.New(codes.New(), color, sink)
@@ -179,4 +196,14 @@ func withFrames(server *frames.Server, static http.Handler) http.Handler {
 		}
 		static.ServeHTTP(w, r)
 	})
+}
+
+// settingsPathForLog returns the settings path for a log line, or a marker when the
+// platform cannot say where it is.
+func settingsPathForLog() string {
+	path, err := paths.SettingsPath()
+	if err != nil {
+		return "(unknown)"
+	}
+	return path
 }

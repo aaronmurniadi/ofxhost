@@ -68,13 +68,35 @@ type View struct {
 	// preview to sRGB inside the window, so this value describes what the export
 	// dialog starts from, not a wide-gamut preview.
 	PreviewSpace string `json:"previewSpace"`
-	// Panel visibility, so a user who hides the filmstrip keeps it hidden.
-	ShowPlugins    bool `json:"showPlugins"`
-	ShowParameters bool `json:"showParameters"`
-	ShowFilmstrip  bool `json:"showFilmstrip"`
+
+	// Panels records the size of each panel the user can resize. A zero here
+	// means the panel is hidden.
+	//
+	// A settings file written before panels were resizable has no "panels"
+	// key. The adapter fills in the defaults for that case, so by the time a
+	// value reaches this package every panel has a size.
+	Panels Panels `json:"panels"`
+
 	// PreviewFitToWindow follows the panel size; when false the preview keeps the
 	// user's own zoom.
 	PreviewFitToWindow bool `json:"previewFitToWindow"`
+}
+
+// Panels holds the size of each resizable panel as a percentage of the group it
+// sits in. The preview is not stored: it takes whatever the others leave.
+//
+// Decision D9. Three numbers replace three booleans. A panel dragged shut and a
+// panel hidden from the View menu are the same fact, so they are the same field.
+type Panels struct {
+	// Right is the width of the column holding the plugins and parameter panels,
+	// as a percentage of the window width. Zero hides the column.
+	Right float64 `json:"right"`
+	// Plugins is the height of the plugins panel inside that column. Zero gives
+	// the whole column to the parameters.
+	Plugins float64 `json:"plugins"`
+	// Filmstrip is the height of the filmstrip, as a percentage of the window
+	// height. Zero hides it.
+	Filmstrip float64 `json:"filmstrip"`
 }
 
 // Appearance is the theme and interface text size.
@@ -101,9 +123,7 @@ func DefaultSettings() Settings {
 		Version: Version,
 		View: View{
 			PreviewSpace:       "sRGB",
-			ShowPlugins:        true,
-			ShowParameters:     true,
-			ShowFilmstrip:      true,
+			Panels:             Panels{Right: 22, Plugins: 55, Filmstrip: 16},
 			PreviewFitToWindow: true,
 		},
 		Appearance: Appearance{Theme: "Dark", FontPt: 0},
@@ -140,4 +160,30 @@ func ParseUpdateChannel(name string) UpdateChannel {
 // a file was written by a version it understands calls IsKnown.
 func IsKnownUpdateChannel(name string) bool {
 	return UpdateChannel(name).Valid()
+}
+
+// ResolvedPanels returns the panel sizes, clamped to what the window can draw.
+func (v View) ResolvedPanels() Panels {
+	return ClampPanels(v.Panels)
+}
+
+// ClampPanels keeps the sizes inside a range the window can draw, so a settings
+// file edited by hand cannot make a panel larger than the window.
+func ClampPanels(in Panels) Panels {
+	return Panels{
+		Right:     clampPercent(in.Right, 60),
+		Plugins:   clampPercent(in.Plugins, 90),
+		Filmstrip: clampPercent(in.Filmstrip, 50),
+	}
+}
+
+func clampPercent(value, max float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > max {
+		return max
+	}
+	// Round to a tenth so a saved file does not carry float noise from a drag.
+	return float64(int(value*10+0.5)) / 10
 }

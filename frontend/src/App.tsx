@@ -16,6 +16,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, chainApi, type ChainDTO, type DocumentDTO } from "./api/document";
+import { DEFAULT_PANELS, sessionApi, type PanelsDTO } from "./api/session";
+import Workspace from "./layout/Workspace";
 import ExportDialog from "./panels/ExportDialog";
 import OpenDialog from "./panels/OpenDialog";
 import ParametersPanel from "./panels/ParametersPanel";
@@ -48,6 +50,35 @@ export default function App() {
   const [pendingPath, setPendingPath] = useState("");
   // exporting shows the export dialog, which is only reachable once a file is open.
   const [exporting, setExporting] = useState(false);
+  // panels is the window layout. It starts at the defaults so the first draw has
+  // something to show, and is replaced by the stored layout as soon as it loads.
+  const [panels, setPanels] = useState<PanelsDTO>(DEFAULT_PANELS);
+  // settingsReady holds the workspace back for one frame.
+  //
+  // react-resizable-panels reads defaultSize only when it mounts, so a layout that
+  // arrives after the first draw would never be applied. Waiting for the settings
+  // attempt to finish - success or failure - costs one frame and makes a restored
+  // layout actually take effect.
+  const [settingsReady, setSettingsReady] = useState(false);
+
+  // Load the stored layout once.
+  //
+  // A failure here must not stop the window: the defaults are already drawn, so a
+  // settings file that cannot be read costs the user their layout and nothing else.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const settings = await sessionApi.settings();
+        if (settings?.panels) {
+          setPanels(settings.panels);
+        }
+      } catch {
+        // Keep the defaults.
+      } finally {
+        setSettingsReady(true);
+      }
+    })();
+  }, []);
 
   // Poll while a decode is in flight.
   //
@@ -187,22 +218,31 @@ export default function App() {
         <span className="app__version">{version}</span>
       </header>
 
-      <main className="app__layout">
-        <PreviewPanel
-          preview={preview}
-          fileName={doc?.fileName ?? ""}
-          zoomLabel="100%"
-          busy={busy}
-          onResize={onResize}
+      <main className="app__main">
+        {settingsReady ? (
+        <Workspace
+          panels={panels}
+          onPanelsChange={setPanels}
+          preview={
+            <PreviewPanel
+              preview={preview}
+              fileName={doc?.fileName ?? ""}
+              zoomLabel="100%"
+              busy={busy}
+              onResize={onResize}
+            />
+          }
+          plugins={<PluginsPanel onChange={requestRender} />}
+          parameters={
+            <ParametersPanel selected={chain?.selected ?? -1} onChange={requestRender} />
+          }
+          filmstrip={
+            <section className="panel panel--filmstrip" aria-label="Filmstrip">
+              <p className="panel__placeholder">{message}</p>
+            </section>
+          }
         />
-
-        <PluginsPanel onChange={requestRender} />
-
-        <ParametersPanel selected={chain?.selected ?? -1} onChange={requestRender} />
-
-        <section className="panel panel--filmstrip" aria-label="Filmstrip">
-          <p className="panel__placeholder">{message}</p>
-        </section>
+        ) : null}
       </main>
 
       {pendingPath !== "" ? (
