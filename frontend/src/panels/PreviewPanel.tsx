@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/document";
+import Select from "../widgets/Select";
 
 /** The zoom range, matching what the previous host allowed. */
 const MIN_ZOOM = 0.05;
@@ -153,17 +154,16 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
         {resolutions.length > 0 ? (
           <label className="preview__overlay preview__overlay--resolution">
             <span className="visually-hidden">Preview resolution</span>
-            <select
-              className="preview__resolution"
-              value={resolution}
-              onChange={(event) => void chooseResolution(Number(event.target.value))}
-            >
-              {resolutions.map((name, index) => (
-                <option key={name} value={index}>
-                  {name}
-                </option>
-              ))}
-            </select>
+            <Select
+              id="preview-resolution"
+              label="Preview resolution"
+              value={String(resolution)}
+              onChange={(next) => void chooseResolution(Number(next))}
+              options={resolutions.map((name, index) => ({
+                label: name,
+                value: String(index),
+              }))}
+            />
           </label>
         ) : null}
         {fileName ? <span className="preview__overlay preview__overlay--name">{fileName}</span> : null}

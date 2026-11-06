@@ -24,6 +24,7 @@ import ParametersPanel from "./panels/ParametersPanel";
 import PluginsPanel from "./panels/PluginsPanel";
 import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
 import SettingsDialog from "./panels/SettingsDialog";
+import TooltipHint from "./widgets/Tooltip";
 
 /** How often the shell asks whether a decode has landed. */
 const POLL_INTERVAL_MS = 120;
@@ -248,22 +249,17 @@ export default function App() {
           Open…
         </button>
         {lastImage !== "" && !doc?.open ? (
-          <button
-            className="button"
-            onClick={() => setPendingPath(lastImage)}
-            title={lastImage}
-          >
-            Reopen last
-          </button>
+          <TooltipHint text={lastImage}>
+            <button className="button" onClick={() => setPendingPath(lastImage)}>
+              Reopen last
+            </button>
+          </TooltipHint>
         ) : null}
-        <button
-          className="button"
-          onClick={() => setExporting(true)}
-          disabled={!doc?.open}
-          title={doc?.open ? "Export the chain at full resolution" : "Open a file first"}
-        >
-          Export…
-        </button>
+        <TooltipHint text={doc?.open ? "Export the chain at full resolution" : "Open a file first"}>
+          <button className="button" onClick={() => setExporting(true)} disabled={!doc?.open}>
+            Export…
+          </button>
+        </TooltipHint>
         <button className="button" onClick={() => setSettingsOpen(true)}>
           Settings
         </button>

@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { sessionApi } from "../api/session";
 import Modal from "../widgets/Modal";
+import Select from "../widgets/Select";
 
 /** The themes the shell can draw. The names match `data-theme` in app.css. */
 const THEMES = ["Dark", "Light"];
@@ -115,36 +116,29 @@ export default function SettingsDialog({ onClose, onAppearanceChange }: Settings
         <label className="field__label" htmlFor="settings-text-size">
           Text size
         </label>
-        <select
+        <Select
           id="settings-text-size"
-          className="input"
-          value={fontPt}
-          onChange={(event) => void applyAppearance(theme, Number(event.target.value))}
-        >
-          {TEXT_SIZES.map((size) => (
-            <option key={size.value} value={size.value}>
-              {size.label}
-            </option>
-          ))}
-        </select>
+          label="Text size"
+          value={String(fontPt)}
+          onChange={(next) => void applyAppearance(theme, Number(next))}
+          options={TEXT_SIZES.map((size) => ({
+            label: size.label,
+            value: String(size.value),
+          }))}
+        />
       </div>
 
       <div className="field">
         <label className="field__label" htmlFor="settings-channel">
           Update channel
         </label>
-        <select
+        <Select
           id="settings-channel"
-          className="input"
+          label="Update channel"
           value={channel}
-          onChange={(event) => setChannel(event.target.value)}
-        >
-          {CHANNELS.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+          onChange={setChannel}
+          options={CHANNELS.map((name) => ({ label: name, value: name }))}
+        />
         <div className="settings__row">
           <button className="button" onClick={() => void checkForUpdate()}>
             Check for updates

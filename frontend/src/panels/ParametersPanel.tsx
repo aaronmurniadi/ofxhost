@@ -13,6 +13,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { chainApi, type ParamDTO } from "../api/document";
 import ParamNumber, { ParamScrubLabel } from "../widgets/ParamNumber";
+import Select from "../widgets/Select";
+import TooltipHint from "../widgets/Tooltip";
 import { buildParamTree, isContainer, type ParamNode } from "./paramTree";
 
 interface Props {
@@ -189,9 +191,9 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
     const checked = (param.nums?.[0] ?? 0) !== 0;
     return (
       <label className="params__row">
-        <span className="params__label" title={param.hint}>
-          {param.label}
-        </span>
+        <TooltipHint text={param.hint}>
+          <span className="params__label">{param.label}</span>
+        </TooltipHint>
         <input
           type="checkbox"
           checked={checked}
@@ -205,32 +207,32 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
   if (param.kind === "choice") {
     const current = Math.round(param.nums?.[0] ?? 0);
     return (
-      <label className="params__row">
-        <span className="params__label" title={param.hint}>
-          {param.label}
-        </span>
-        <select
-          className="input"
-          value={current}
+      <div className="params__row">
+        <TooltipHint text={param.hint}>
+          <span className="params__label">{param.label}</span>
+        </TooltipHint>
+        <Select
+          label={param.label}
+          value={String(current)}
           disabled={disabled}
-          onChange={(event) => onEdit([Number(event.target.value)])}
-        >
-          {(param.choices ?? []).map((label, index) => (
-            <option key={`${index}-${label}`} value={index}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
+          onChange={(next) => onEdit([Number(next)])}
+          // A plugin can offer forty-seven presets here, which is the case the native
+          // popup handled worst.
+          options={(param.choices ?? []).map((label, index) => ({
+            label,
+            value: String(index),
+          }))}
+        />
+      </div>
     );
   }
 
   if (param.kind === "string" || param.kind === "secret") {
     return (
       <label className="params__row">
-        <span className="params__label" title={param.hint}>
-          {param.label}
-        </span>
+        <TooltipHint text={param.hint}>
+          <span className="params__label">{param.label}</span>
+        </TooltipHint>
         <input
           className="input"
           type={param.kind === "secret" ? "password" : "text"}

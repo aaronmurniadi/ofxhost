@@ -817,3 +817,121 @@ body,
   border-color: var(--accent);
   color: var(--accent-contrast);
 }
+
+/*
+ * Dropdowns.
+ *
+ * Base UI draws the trigger and a portal-mounted popup. The list scrolls beyond a dozen
+ * entries, which is the case the native popup handled worst: a plugin can offer 47
+ * presets.
+ */
+.select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 8em;
+  max-width: 100%;
+  padding: 3px 8px;
+  background: var(--field-bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.select:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.select__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select__icon {
+  color: var(--text-dim);
+  font-size: 0.8em;
+}
+
+.select__positioner {
+  z-index: 20;
+}
+
+.select__popup {
+  width: var(--anchor-width, auto);
+  min-width: var(--anchor-width, 8em);
+  max-height: 320px;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.select__list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 3px;
+}
+
+.select__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+/* The highlight follows the keyboard as well as the pointer, which is what makes a long
+   list usable without a mouse. */
+.select__item[data-highlighted] {
+  background: var(--selected-bg);
+}
+
+.select__tick {
+  width: 1em;
+  color: var(--accent);
+}
+
+/*
+ * Tooltips.
+ *
+ * They replace the title attribute, which waits a second, cannot be themed, and never
+ * appears for a keyboard user.
+ */
+.tooltip-trigger {
+  display: inline-flex;
+  align-items: center;
+}
+
+.tooltip-positioner {
+  z-index: 30;
+}
+
+.tooltip {
+  max-width: 320px;
+  padding: 4px 8px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  font-size: 0.85em;
+  line-height: 1.35;
+}

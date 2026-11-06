@@ -12,6 +12,8 @@
  */
 
 import Modal from "../widgets/Modal";
+import Select from "../widgets/Select";
+import TooltipHint from "../widgets/Tooltip";
 import { useEffect, useState } from "react";
 import { exportApi, type ExportOptionsDTO, type ExportResult, type FormatDTO } from "../api/document";
 
@@ -133,78 +135,60 @@ export default function ExportDialog({ onClose, onExported }: Props) {
           <label className="field__label" htmlFor="export-format">
             Format
           </label>
-          <select
+          <Select
             id="export-format"
-            className="input"
-            value={format}
-            onChange={(event) => {
-              const next = formats.find((f) => f.index === Number(event.target.value));
-              if (next !== undefined) {
-                chooseFormat(next);
+            label="Format"
+            value={String(format)}
+            onChange={(next) => {
+              const chosen = formats.find((f) => f.index === Number(next));
+              if (chosen !== undefined) {
+                chooseFormat(chosen);
               }
             }}
-          >
-            {formats.map((f) => (
-              <option key={f.index} value={f.index}>
-                {f.name}
-              </option>
-            ))}
-          </select>
+            options={formats.map((f) => ({ label: f.name, value: String(f.index) }))}
+          />
         </div>
 
         <div className="field">
           <label className="field__label" htmlFor="export-space">
             Colour space
           </label>
-          <select
+          <Select
             id="export-space"
-            className="input"
-            value={space}
-            onChange={(event) => setSpace(Number(event.target.value))}
-          >
-            {spaces.map((name, index) => (
-              <option key={name} value={index}>
-                {name}
-                {name === options.workingSpace ? " (working space)" : ""}
-              </option>
-            ))}
-          </select>
+            label="Colour space"
+            value={String(space)}
+            onChange={(next) => setSpace(Number(next))}
+            options={spaces.map((name, index) => ({
+              label: name === options?.workingSpace ? `${name} (working space)` : name,
+              value: String(index),
+            }))}
+          />
         </div>
 
         <div className="field">
           <label className="field__label" htmlFor="export-intent">
             Rendering intent
           </label>
-          <select
+          <Select
             id="export-intent"
-            className="input"
-            value={intent}
-            onChange={(event) => setIntent(Number(event.target.value))}
-          >
-            {intents.map((name, index) => (
-              <option key={name} value={index}>
-                {name}
-              </option>
-            ))}
-          </select>
+            label="Rendering intent"
+            value={String(intent)}
+            onChange={(next) => setIntent(Number(next))}
+            options={intents.map((name, index) => ({ label: name, value: String(index) }))}
+          />
         </div>
 
         <div className="field">
           <label className="field__label" htmlFor="export-depth">
             Bit depth
           </label>
-          <select
+          <Select
             id="export-depth"
-            className="input"
-            value={depth}
-            onChange={(event) => setDepth(Number(event.target.value))}
-          >
-            {depths.map((d) => (
-              <option key={d} value={d}>
-                {d}-bit
-              </option>
-            ))}
-          </select>
+            label="Bit depth"
+            value={String(depth)}
+            onChange={(next) => setDepth(Number(next))}
+            options={depths.map((d) => ({ label: `${d}-bit`, value: String(d) }))}
+          />
         </div>
 
         <label className="field field--inline">
@@ -213,9 +197,9 @@ export default function ExportDialog({ onClose, onExported }: Props) {
             checked={writeSidecar}
             onChange={(event) => setWriteSidecar(event.target.checked)}
           />
-          <span title="Records the plugin chain and colour spaces beside the file">
-            Write sidecar with the chain
-          </span>
+          <TooltipHint text="Records the plugin chain and the colour spaces beside the file, so the edit can be reproduced">
+            <span>Write sidecar with the chain</span>
+          </TooltipHint>
         </label>
 
         {current?.lossless ? (

@@ -9,6 +9,7 @@
  * re-read of its answer, so there is one source of truth.
  */
 
+import TooltipHint from "../widgets/Tooltip";
 import { useEffect, useState } from "react";
 import { chainApi, type ChainDTO, type PluginDTO } from "../api/document";
 
@@ -78,14 +79,15 @@ export default function PluginsPanel({ onChange, hasDocument }: Props) {
       <h2 className="panel__title">Plugins</h2>
 
       <div className="plugins__actions">
-        <button
-          className="button"
-          onClick={() => setPickerOpen((open) => !open)}
-          disabled={!hasDocument}
-          title={hasDocument ? "Add a plugin to the chain" : "Open an image first"}
-        >
-          Add plugin
-        </button>
+        <TooltipHint text={hasDocument ? "Add a plugin to the chain" : "Open an image first"}>
+          <button
+            className="button"
+            onClick={() => setPickerOpen((open) => !open)}
+            disabled={!hasDocument}
+          >
+            Add plugin
+          </button>
+        </TooltipHint>
       </div>
 
       {pickerOpen && hasDocument ? (
@@ -132,36 +134,44 @@ export default function PluginsPanel({ onChange, hasDocument }: Props) {
               >
                 {node.label}
               </button>
-              <button
-                className="icon"
-                title={node.enabled ? "Disable" : "Enable"}
-                onClick={() => void run(() => chainApi.setEnabled(node.index, !node.enabled))}
-              >
-                {node.enabled ? "On" : "Off"}
-              </button>
-              <button
-                className="icon"
-                title="Move up"
-                disabled={node.index === 0}
-                onClick={() => void run(() => chainApi.move(node.index, node.index - 1))}
-              >
-                ↑
-              </button>
-              <button
-                className="icon"
-                title="Move down"
-                disabled={node.index === (chain?.nodes?.length ?? 1) - 1}
-                onClick={() => void run(() => chainApi.move(node.index, node.index + 1))}
-              >
-                ↓
-              </button>
-              <button
-                className="icon"
-                title="Remove"
-                onClick={() => void run(() => chainApi.remove(node.index))}
-              >
-                ✕
-              </button>
+              <TooltipHint text={node.enabled ? "Disable this plugin" : "Enable this plugin"}>
+                <button
+                  className="icon"
+                  aria-label={node.enabled ? "Disable this plugin" : "Enable this plugin"}
+                  onClick={() => void run(() => chainApi.setEnabled(node.index, !node.enabled))}
+                >
+                  {node.enabled ? "On" : "Off"}
+                </button>
+              </TooltipHint>
+              <TooltipHint text="Move up">
+                <button
+                  className="icon"
+                  aria-label="Move up"
+                  disabled={node.index === 0}
+                  onClick={() => void run(() => chainApi.move(node.index, node.index - 1))}
+                >
+                  ↑
+                </button>
+              </TooltipHint>
+              <TooltipHint text="Move down">
+                <button
+                  className="icon"
+                  aria-label="Move down"
+                  disabled={node.index === (chain?.nodes?.length ?? 1) - 1}
+                  onClick={() => void run(() => chainApi.move(node.index, node.index + 1))}
+                >
+                  ↓
+                </button>
+              </TooltipHint>
+              <TooltipHint text="Remove from the chain">
+                <button
+                  className="icon"
+                  aria-label="Remove from the chain"
+                  onClick={() => void run(() => chainApi.remove(node.index))}
+                >
+                  ✕
+                </button>
+              </TooltipHint>
             </li>
           ))
         )}
