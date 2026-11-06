@@ -117,6 +117,13 @@ export interface ParamDTO {
   hint: string;
   parent: string;
   kind: string;
+  /**
+   * The plugin marked this parameter as not to be drawn in a generated interface.
+   *
+   * It is separate from kind on purpose: a group the plugin hides is still a group,
+   * and a panel that reads this as a type loses the whole subtree.
+   */
+  secret: boolean;
   dimension: number;
   nums: number[] | null;
   text: string;

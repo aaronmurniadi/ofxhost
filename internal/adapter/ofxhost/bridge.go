@@ -308,10 +308,8 @@ func loadParams(handle *C.ofxh_instance) []port.ParamInfo {
 			continue
 		}
 		name := C.GoString(&info.name[0])
-		kind := kindFromType(C.GoString(&info.param_type[0]))
-		if info.secret != 0 {
-			kind = port.ParamSecret
-		}
+		rawType := C.GoString(&info.param_type[0])
+		kind := kindFromType(rawType)
 
 		param := port.ParamInfo{
 			Name:     name,
@@ -319,6 +317,8 @@ func loadParams(handle *C.ofxh_instance) []port.ParamInfo {
 			Hint:     C.GoString(&info.hint[0]),
 			Parent:   C.GoString(&info.parent[0]),
 			Kind:     kind,
+			Secret:   info.secret != 0,
+			RawType:  rawType,
 			Enabled:  info.enabled != 0,
 			Defaults: make([]float64, dimFromType(C.GoString(&info.param_type[0]))),
 		}

@@ -639,3 +639,38 @@ body,
   padding: 2px 4px;
   font-size: 0.85em;
 }
+
+/* The parameter tree.
+   Each group is a fold-out section, and a section inside a section is indented so the
+   nesting the plugin declared is visible. */
+.params__section {
+  margin: 2px 0;
+}
+
+.params__section > .params__section {
+  margin-left: 10px;
+  border-left: 1px solid var(--line, #2e2e32);
+  padding-left: 8px;
+}
+
+.params__group {
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.85em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #9a9aa2);
+  margin: 6px 0 2px;
+  padding: 2px 0;
+}
+
+.params__group:hover {
+  color: inherit;
+}
+
+.params__hidden {
+  font-size: 0.8em;
+  color: var(--muted, #9a9aa2);
+  margin: 2px 0 6px;
+  font-style: italic;
+}

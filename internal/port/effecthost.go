@@ -43,9 +43,6 @@ const (
 	ParamDouble3D
 	ParamRGB
 	ParamRGBA
-	// ParamSecret marks a string the UI must mask. It is not an OFX type of its
-	// own; the adapter sets it from the secret property.
-	ParamSecret
 )
 
 // Dimension returns how many numeric components the kind carries: 0 for kinds
@@ -69,7 +66,7 @@ func (k ParamKind) IsNumeric() bool { return k.Dimension() > 0 }
 
 // IsText reports whether the kind stores its value as a string.
 func (k ParamKind) IsText() bool {
-	return k == ParamString || k == ParamSecret
+	return k == ParamString
 }
 
 // ParamInfo is the metadata the parameters panel needs to draw one control.
@@ -84,6 +81,25 @@ type ParamInfo struct {
 	Parent string
 	// Kind is the resolved type.
 	Kind ParamKind
+	// Secret reports that the plugin marked the parameter as not to be drawn in a
+	// generated user interface.
+	//
+	// It is a flag, not a kind. Making it a kind would overwrite the real type, and
+	// a group that becomes "secret" loses both its nesting and any way to draw it:
+	// the panel falls back to a text box for something that is not text at all.
+	//
+	// OFX defines this for parameters a plugin controls through its own overlay, and
+	// vendors also use it to gate features that are not licensed in a given edition.
+	// A generic panel honours it by leaving the parameter out.
+	Secret bool
+
+	// RawType is the type string the plugin declared, for example
+	// "OfxParamTypeGroup". It is empty for a plugin type this host does not know.
+	//
+	// It exists because Kind collapses every unrecognised type into ParamUnknown,
+	// and a parameter that silently becomes unknown cannot be diagnosed from the
+	// outside: the panel shows nothing and there is no record of what was declared.
+	RawType string
 
 	// ChoiceLabels holds the option names for ParamChoice, in value order.
 	ChoiceLabels []string

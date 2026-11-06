@@ -62,6 +62,10 @@ type ParamDTO struct {
 	// Kind is the resolved type name, so the frontend picks a control without
 	// matching on a numeric enum it would have to keep in step.
 	Kind string `json:"kind"`
+	// Secret reports that the plugin does not want this parameter drawn in a
+	// generated user interface. It is separate from Kind so a hidden panel can
+	// still be described properly.
+	Secret bool `json:"secret"`
 	// Dimension is how many numeric components the value has.
 	Dimension int `json:"dimension"`
 	// Nums is the current value of a numeric parameter.
@@ -217,6 +221,7 @@ func (c *Chain) Params(index int) []ParamDTO {
 			Label:      info.Label,
 			Hint:       info.Hint,
 			Parent:     info.Parent,
+			Secret:     info.Secret,
 			Kind:       kindName(info.Kind),
 			Dimension:  info.Kind.Dimension(),
 			Choices:    info.ChoiceLabels,
@@ -282,8 +287,6 @@ func kindName(kind port.ParamKind) string {
 		return "choice"
 	case port.ParamString:
 		return "string"
-	case port.ParamSecret:
-		return "secret"
 	case port.ParamPushButton:
 		return "pushButton"
 	case port.ParamGroup:

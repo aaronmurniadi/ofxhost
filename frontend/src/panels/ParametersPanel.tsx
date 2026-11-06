@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { chainApi, type ParamDTO } from "../api/document";
 import ParamNumber, { ParamScrubLabel } from "../widgets/ParamNumber";
+import { buildParamTree, isContainer, type ParamNode } from "./paramTree";
 
 interface Props {
   /** Bumped by the shell when a render should be redone. */
@@ -84,7 +85,12 @@ export default function ParametersPanel({ selected, onChange }: Props) {
     );
   }
 
-  const editable = params.filter(isEditable);
+  // A secret parameter is not drawn, so it must not be counted here either: the reset
+  // button would otherwise stay enabled for a plugin whose every control is hidden.
+  const editable = params.filter((param) => !param.secret && isEditable(param));
+  // The tree is rebuilt on every load, which is once per edit. It is a few passes
+  // over at most a few hundred parameters.
+  const tree = buildParamTree(params);
 
   return (
     <section className="panel panel--parameters" aria-label="Parameters">
@@ -98,27 +104,74 @@ export default function ParametersPanel({ selected, onChange }: Props) {
       {error ? <p className="plugins__error">{error}</p> : null}
       {editable.length === 0 ? <p className="panel__placeholder">This plugin has no editable parameters.</p> : null}
 
-      {params.map((param) => {
-        if (param.kind === "group" || param.kind === "page") {
-          return (
-            <h3 key={param.name} className="params__group">
-              {param.label}
-            </h3>
-          );
-        }
-        if (!isEditable(param)) {
-          return null;
-        }
-        return (
-          <ParamRow
-            key={param.name}
-            param={param}
-            onEdit={(values) => void edit(() => chainApi.setParam(selected, param.name, values))}
-            onEditText={(value) => void edit(() => chainApi.setParamText(selected, param.name, value))}
-          />
-        );
-      })}
+      {tree.hiddenCount > 0 ? (
+        <p className="params__hidden">
+          {tree.hiddenCount} parameter{tree.hiddenCount === 1 ? "" : "s"} hidden by the plugin.
+        </p>
+      ) : null}
+
+      {tree.roots.map((node) => (
+        <ParamBranch
+          key={node.param.name}
+          node={node}
+          depth={0}
+          onEdit={(name, values) => void edit(() => chainApi.setParam(selected, name, values))}
+          onEditText={(name, value) => void edit(() => chainApi.setParamText(selected, name, value))}
+        />
+      ))}
     </section>
+  );
+}
+
+/**
+ * ParamBranch draws one parameter and, when it is a group, everything inside it.
+ *
+ * The nesting comes from the plugin: it names each parameter's containing group, and
+ * a group can hold another group. A flat list put every group heading at the top and
+ * every control under it, which is what made a 49-group plugin unreadable.
+ *
+ * Groups are drawn as a <details> so a user can fold the sections they are not using.
+ * They start open, because a collapsed panel that looks empty is worse than a long one.
+ */
+function ParamBranch({
+  node,
+  depth,
+  onEdit,
+  onEditText,
+}: {
+  node: ParamNode;
+  depth: number;
+  onEdit: (name: string, values: number[]) => void;
+  onEditText: (name: string, value: string) => void;
+}) {
+  const { param, children } = node;
+
+  if (isContainer(param.kind)) {
+    return (
+      <details className="params__section" open data-depth={depth}>
+        <summary className="params__group">{param.label}</summary>
+        {children.map((child) => (
+          <ParamBranch
+            key={child.param.name}
+            node={child}
+            depth={depth + 1}
+            onEdit={onEdit}
+            onEditText={onEditText}
+          />
+        ))}
+      </details>
+    );
+  }
+
+  if (!isEditable(param)) {
+    return null;
+  }
+  return (
+    <ParamRow
+      param={param}
+      onEdit={(values) => onEdit(param.name, values)}
+      onEditText={(value) => onEditText(param.name, value)}
+    />
   );
 }
 
