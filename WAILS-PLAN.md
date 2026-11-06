@@ -897,6 +897,11 @@ wails3 build               # macOS .app
 wails3 package             # last milestone, per target
 ```
 
+The decode tests run against `samples/DSCF0209.RAF`, a Fujifilm X-M1 frame committed
+so the decode is reproducible: the same file decodes to the same pixels in every
+checkout. `OFXHOST_RAW_SAMPLES` points the tests at other camera files, and they fall
+back to `~/Downloads` and `~/Pictures` and finally skip when there is none.
+
 ### 13. What is explicitly out of scope for v1
 
 - Metal and any other GPU render path beyond the stub (D6, M7).

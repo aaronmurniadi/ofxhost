@@ -3,76 +3,11 @@ package rawlib
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/lcms"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
 )
-
-// samplePaths returns the RAW files a test can use.
-//
-// The repository ships no camera images, so the tests read whatever the machine
-// has and skip when there is nothing. A skipped test is honest here: the decode
-// path cannot be exercised against a fabricated file, because libraw detects a
-// RAW file by its contents.
-func samplePaths(t *testing.T) []string {
-	t.Helper()
-
-	var found []string
-	if dir := os.Getenv("OFXHOST_RAW_SAMPLES"); dir != "" {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			t.Fatalf("OFXHOST_RAW_SAMPLES: %v", err)
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			found = append(found, filepath.Join(dir, e.Name()))
-		}
-	}
-	if len(found) == 0 {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			for _, dir := range []string{filepath.Join(home, "Downloads"), filepath.Join(home, "Pictures")} {
-				entries, readErr := os.ReadDir(dir)
-				if readErr != nil {
-					continue
-				}
-				for _, e := range entries {
-					if e.IsDir() {
-						continue
-					}
-					if IsRAWFilename(e.Name()) {
-						found = append(found, filepath.Join(dir, e.Name()))
-					}
-				}
-			}
-		}
-	}
-	if len(found) == 0 {
-		t.Skip("no RAW sample found; set OFXHOST_RAW_SAMPLES to a directory of camera files")
-	}
-	// A full develop of every file in a large folder takes minutes. Two files
-	// exercise the path and keep the suite quick; a caller that wants every file
-	// sets OFXHOST_RAW_SAMPLES to a directory and OFXHOST_RAW_ALL=1.
-	if os.Getenv("OFXHOST_RAW_ALL") != "1" && len(found) > 2 {
-		found = found[:2]
-	}
-	return found
-}
-
-// IsRAWFilename reports whether a name ends in a RAW extension.
-func IsRAWFilename(name string) bool {
-	lower := strings.ToLower(name)
-	for _, ext := range rawExtensions {
-		if strings.HasSuffix(lower, ext) {
-			return true
-		}
-	}
-	return false
-}
 
 func TestVersionIsReported(t *testing.T) {
 	if version == "" {

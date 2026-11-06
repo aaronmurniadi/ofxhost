@@ -140,6 +140,19 @@ go test ./... -race
 go run ./tools/layerguard
 ```
 
+The decode tests run against `samples/DSCF0209.RAF`, a Fujifilm X-M1 frame committed
+for the purpose, so they decode the same pixels in every checkout. They fall back to
+`~/Downloads` and `~/Pictures` when the sample is removed, and skip when there is no
+camera file at all:
+
+```sh
+go test ./internal/adapter/rawlib/ -v          # uses samples/
+OFXHOST_RAW_SAMPLES=~/DCIM go test ./...       # uses your own files
+```
+
+To check a different camera, drop a file in `samples/` or point `OFXHOST_RAW_SAMPLES`
+at a directory.
+
 ## License
 
 BSD-3-Clause. See `LICENSE`. The OpenFX SDK in `third_party/openfx` keeps its own

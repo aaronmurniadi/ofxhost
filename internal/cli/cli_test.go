@@ -121,36 +121,73 @@ func TestSpaceByName(t *testing.T) {
 	}
 }
 
-// firstSample returns one camera file from the machine, or skips the test.
+// firstSample returns one camera file, or skips the test.
+//
+// The order matches the rawlib tests: an explicit directory, then the committed
+// ./samples, then the usual places in the home directory. A checkout without the
+// sample still runs, against whatever camera files the machine has.
 func firstSample(t *testing.T) string {
 	t.Helper()
+
 	if dir := os.Getenv("OFXHOST_RAW_SAMPLES"); dir != "" {
-		entries, err := os.ReadDir(dir)
-		if err == nil {
-			for _, e := range entries {
-				if !e.IsDir() {
-					return filepath.Join(dir, e.Name())
-				}
-			}
+		if path := firstRAWIn(dir); path != "" {
+			return path
 		}
 	}
-	home, err := os.UserHomeDir()
-	if err == nil {
+	if root := moduleRoot(t); root != "" {
+		if path := firstRAWIn(filepath.Join(root, "samples")); path != "" {
+			return path
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
 		for _, dir := range []string{filepath.Join(home, "Downloads"), filepath.Join(home, "Pictures")} {
-			entries, readErr := os.ReadDir(dir)
-			if readErr != nil {
-				continue
-			}
-			for _, e := range entries {
-				lower := strings.ToLower(e.Name())
-				for _, ext := range []string{".cr3", ".nef", ".arw", ".dng", ".raf", ".orf", ".rw2"} {
-					if strings.HasSuffix(lower, ext) {
-						return filepath.Join(dir, e.Name())
-					}
-				}
+			if path := firstRAWIn(dir); path != "" {
+				return path
 			}
 		}
 	}
-	t.Skip("no camera file found; set OFXHOST_RAW_SAMPLES")
+	t.Skip("no camera file found; put one in ./samples or set OFXHOST_RAW_SAMPLES")
 	return ""
+}
+
+// rawExtensionList is the set of names the sample search accepts.
+var rawExtensionList = []string{".cr3", ".cr2", ".nef", ".arw", ".dng", ".raf", ".orf", ".rw2", ".pef", ".srw"}
+
+// firstRAWIn returns the first camera file in a directory, in name order.
+func firstRAWIn(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		lower := strings.ToLower(entry.Name())
+		for _, ext := range rawExtensionList {
+			if strings.HasSuffix(lower, ext) {
+				return filepath.Join(dir, entry.Name())
+			}
+		}
+	}
+	return ""
+}
+
+// moduleRoot walks up from the working directory to the module root.
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
