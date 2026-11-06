@@ -133,7 +133,9 @@ export default function ParametersPanel({ selected, onChange }: Props) {
  * every control under it, which is what made a 49-group plugin unreadable.
  *
  * Groups are drawn as a <details> so a user can fold the sections they are not using.
- * They start open, because a collapsed panel that looks empty is worse than a long one.
+ * They start closed: a plugin can declare forty-nine groups, and opening all of them by
+ * default buries the one the user came for. The headings are the map; the controls are
+ * one click away.
  */
 function ParamBranch({
   node,
@@ -150,7 +152,7 @@ function ParamBranch({
 
   if (isContainer(param.kind)) {
     return (
-      <details className="params__section" open data-depth={depth}>
+      <details className="params__section" data-depth={depth}>
         <summary className="params__group">{param.label}</summary>
         {children.map((child) => (
           <ParamBranch
