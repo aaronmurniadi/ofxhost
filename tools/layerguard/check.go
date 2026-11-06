@@ -132,8 +132,14 @@ func checkImport(file string, line int, importPath string) (Violation, bool) {
 	}
 
 	// Rule 3: Wails only in the transport layer and the composition root.
+	//
+	// The composition root is the one place that is allowed to name every layer,
+	// and it has to construct the window, so it is named here rather than being
+	// given a blanket exemption: a new package doesn't get to import Wails by
+	// appearing in a new directory.
 	if isWails(importPath) {
-		if !strings.HasPrefix(file, "internal/transport/") && !strings.HasPrefix(file, "cmd/") {
+		if !strings.HasPrefix(file, "internal/transport/") && !strings.HasPrefix(file, "cmd/") &&
+			file != "internal/app/app.go" {
 			return Violation{file, line, importPath, "wails outside internal/transport"}, true
 		}
 		return Violation{}, false

@@ -50,12 +50,16 @@ type Options struct {
 	// the static assets. It receives the static handler and returns the combined
 	// one. Nil means static assets only.
 	AssetMiddleware func(static application.AssetOptions) application.AssetOptions
+	// OnShutdown is called once when the last window closes, before the loop
+	// returns. The composition root uses it to cancel work and close the services.
+	OnShutdown func()
 }
 
 // App is the running window.
 type App struct {
-	app    *application.App
-	logger *slog.Logger
+	app        *application.App
+	logger     *slog.Logger
+	onShutdown func()
 }
 
 // New builds the application and its window without starting the message loop.
@@ -103,7 +107,7 @@ func New(opts Options) *App {
 		URL: "/",
 	})
 
-	return &App{app: app, logger: logger}
+	return &App{app: app, logger: logger, onShutdown: opts.OnShutdown}
 }
 
 // Application exposes the underlying application, so a caller can register more
@@ -118,5 +122,8 @@ func (a *App) Run() error {
 		return err
 	}
 	a.logger.Info("window closed")
+	if a.onShutdown != nil {
+		a.onShutdown()
+	}
 	return nil
 }

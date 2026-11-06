@@ -8,10 +8,19 @@ run as native code and the interface stays easy to change.
 
 ## Status
 
-Early development. The project is at milestone M1 of `WAILS-PLAN.md`: the
-skeleton builds, the layer rules are enforced, the window opens, and the state
-files, the update check and the thumbnail pool work. There is no image loading
-yet; that arrives with the codec adapters in M2.
+Early development. The project is at milestone M2 of `WAILS-PLAN.md`: a RAW file
+opens, is developed by libraw, is converted to sRGB by lcms2, and is shown in the
+window. There is no plugin chain yet; OpenFX arrives with M3.
+
+What works today:
+
+- open a RAW file and see it, with CSS pan and zoom in the preview
+- the preview is always encoded sRGB, so it looks the same in every WebView
+- the command line renders a file to a PNG without a window:
+
+  ```sh
+  ofxhost render -out preview.png -max-edge 1200 -space "Linear Rec.709" photo.cr3
+  ```
 
 ## Architecture
 
@@ -64,13 +73,20 @@ For the Go side and the window:
 | Node.js | 20 or newer | for the frontend |
 | Task | 3.x | the Wails build system; `brew install go-task` |
 
-For the adapters (from milestone M2):
+For the native adapters:
 
-| Library | Purpose |
-|---|---|
-| libraw | RAW decode |
-| libpng, libjpeg-turbo, libtiff, libwebp, libjxl, zlib | encode |
-| lcms2 | ICC colour conversion |
+| Library | Purpose | How to install |
+|---|---|---|
+| libraw | RAW decode | `brew install libraw` |
+| lcms2 | ICC colour conversion | `brew install little-cms2` |
+
+The encoder libraries (`libpng`, `libjpeg-turbo`, `libtiff`, `libwebp`, `libjxl`)
+are needed from M4.
+
+Both current adapters are linked statically where the platform allows it. On macOS
+the build uses the Homebrew include and library paths directly rather than
+pkg-config, because libraw's pkg-config output carries `-Xpreprocessor -fopenmp`
+flags that cgo rejects.
 
 The OpenFX submodule is required:
 

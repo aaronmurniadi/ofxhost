@@ -1,9 +1,8 @@
-// Command ofxhost is the composition root.
+// Command ofxhost is the executable.
 //
-// It is the only package that knows every layer: it builds the adapters, hands
-// them to the services, registers the services with the window, and runs. Nothing
-// below it may reach for a global, because everything they need is passed in
-// here.
+// The wiring lives in internal/app so it can be built and tested without an
+// executable; this file holds the build version, the logger and the exit code and
+// nothing else.
 //
 // Run with no arguments to open the window:
 //
@@ -15,8 +14,8 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/aaronmurniadi/ofxhost/frontend"
-	"github.com/aaronmurniadi/ofxhost/internal/transport/desktop"
+	"github.com/aaronmurniadi/ofxhost/internal/app"
+	"github.com/aaronmurniadi/ofxhost/internal/cli"
 )
 
 // version is the build version, injected at link time:
@@ -30,6 +29,13 @@ var version = "dev"
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+	cli.Version = version
+
+	// A subcommand runs without a window, which is what makes the decode path
+	// testable from a script and usable from a terminal.
+	if len(os.Args) > 1 {
+		os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr))
+	}
 
 	if err := run(logger); err != nil {
 		fmt.Fprintf(os.Stderr, "ofxhost: %v\n", err)
@@ -37,17 +43,14 @@ func main() {
 	}
 }
 
-// run wires the program and blocks on the window.
+// run builds the application and blocks on the window.
 //
-// The state files, the update checker and the thumbnail pool exist as adapters
-// (milestone M1) but no service consumes them yet, so they are not built here. The
-// codec and OpenFX adapters arrive in M2 and M3. Each milestone adds the lines that
-// make a dependency real, and nothing else changes in this function.
+// The wiring lives in internal/app so it can be built and tested without an
+// executable; this function holds the build version and nothing else.
 func run(logger *slog.Logger) error {
-	app := desktop.New(desktop.Options{
-		Assets:  frontend.Dist,
-		Version: version,
-		Logger:  logger,
-	})
-	return app.Run()
+	a, err := app.New(app.Options{Version: version, Logger: logger})
+	if err != nil {
+		return err
+	}
+	return a.Run()
 }

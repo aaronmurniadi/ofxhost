@@ -1,43 +1,100 @@
 /**
  * The application shell.
  *
- * At milestone M0 this is a placeholder that shows the four panel areas the
- * finished window will have, so the layout can be judged before there is
- * anything in it. Each panel becomes a real component from M2 onward:
+ * It holds the state the panels share and nothing else: the open document, the
+ * preview URL, and whether a decode is in flight. Every change is a call to the Go
+ * side and a state update from its answer, so there is no second copy of the
+ * document in JavaScript.
  *
- *   Plugins     the chain list and the plugin picker
- *   Preview     the image, with CSS pan and zoom
- *   Parameters  the controls of the selected plugin
- *   Filmstrip   the thumbnails of the open directory
+ * What this shell does not have yet, and where it goes:
  *
- * The panel layout is persisted in localStorage under `ofxhost.layout.v1`
- * (see WAILS-PLAN.md §7.4). Nothing writes it yet.
+ *   MS-peek  the preview URL is fetched, shown, and replaced on demand
+ *   M3       the chain list and the parameter controls
+ *   M4       the export dialog with the colour space and intent
+ *   M5       the filmstrip, the settings panel and the saved layout
  */
+
+import { useCallback, useEffect, useState } from "react";
+import { api, type DocumentDTO } from "./api/document";
+import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
+
+/** How often the shell asks whether a decode has landed. */
+const POLL_INTERVAL_MS = 120;
+
 export default function App() {
+  const [doc, setDoc] = useState<DocumentDTO | null>(null);
+  const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("Open a RAW file to see the preview.");
+  const [version, setVersion] = useState("");
+
+  // One poll while a decode is in flight. The Go side decodes on its own goroutine
+  // and applies the result when the shell asks, so the window never blocks.
+  useEffect(() => {
+    if (!busy) {
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      const current = await api.current();
+      if (!current.open) {
+        setBusy(false);
+        return;
+      }
+      const published = await api.publishPreview();
+      if (published.error) {
+        setMessage(published.error);
+        setBusy(false);
+        return;
+      }
+      setDoc(current);
+      setPreview({ url: published.url, width: published.width, height: published.height });
+      setBusy(false);
+    }, POLL_INTERVAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [busy]);
+
+  useEffect(() => {
+    api.version().then(setVersion).catch(() => setVersion(""));
+  }, []);
+
+  const onResize = useCallback((width: number, height: number) => {
+    // The Go side stores two numbers and nothing else, so a resize stream is cheap.
+    void api.setPreviewPanelSize(width, height);
+  }, []);
+
   return (
     <div className="app">
       <header className="app__bar">
         <span className="app__title">OfxHost</span>
-        <span className="app__hint">Milestone M0 — no image loading yet</span>
+        <span className="app__hint">
+          {doc?.open ? `${doc.fileName} — ${doc.width}×${doc.height}` : "No image open"}
+        </span>
+        <span className="app__version">{version}</span>
       </header>
 
       <main className="app__layout">
-        <section className="panel panel--preview" aria-label="Preview">
-          <p className="panel__placeholder">Open a RAW file to see the preview.</p>
-        </section>
+        <PreviewPanel
+          preview={preview}
+          fileName={doc?.fileName ?? ""}
+          zoomLabel="100%"
+          busy={busy}
+          onResize={onResize}
+        />
 
         <section className="panel panel--plugins" aria-label="Plugins">
           <h2 className="panel__title">Plugins</h2>
-          <p className="panel__placeholder">No plugins discovered.</p>
+          <p className="panel__placeholder">The plugin chain arrives with M3.</p>
         </section>
 
         <section className="panel panel--parameters" aria-label="Parameters">
           <h2 className="panel__title">Parameters</h2>
-          <p className="panel__placeholder">Select a plugin in the chain.</p>
+          <p className="panel__placeholder">
+            {doc?.open ? "No plugin selected." : "Select a plugin in the chain."}
+          </p>
         </section>
 
         <section className="panel panel--filmstrip" aria-label="Filmstrip">
-          <p className="panel__placeholder">Open a directory to see its images.</p>
+          <p className="panel__placeholder">{message}</p>
         </section>
       </main>
     </div>
