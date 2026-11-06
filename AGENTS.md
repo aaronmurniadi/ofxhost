@@ -103,6 +103,53 @@ Base UI components do not have the same API as Radix UI; this includes props, da
 There is no asChild prop on any component; instead, the render prop is used. Read Base UI's composition guide for details on how to use render: https://base-ui.com/react/handbook/composition.md.
 Always consult the Base UI llms.txt doc before building components with Base UI to ensure the correct patterns are being used.
 
+#### Read the docs before building a widget
+
+Not a formality. The tooltip was written from the type definitions alone and shipped a
+defect the compiler could not see: `Tooltip.Trigger` binds its own focus handler, so the
+trigger must be the focusable element. Wrapping the child in a `<span>` produced a tooltip
+that appeared on hover and never on Tab — the exact thing it was written to fix.
+
+The composition guide answered it in one line. Read the component's page, then build.
+
+Two habits that follow from the same lesson:
+
+- **`render` means "this part is my element".** Pass the caller's element; Base UI merges
+  its props onto it, including the ref and the handlers. Do not wrap.
+- **One `NumberField.Root` per value.** The canonical anatomy is `ScrubArea` (holding a
+  `<label htmlFor>` and `ScrubAreaCursor`) plus `Group` (`Decrement`, `Input`,
+  `Increment`), all inside one Root. The parameter row splits them across two Roots
+  because a slider sits between them; `aria-labelledby` is what keeps that accessible.
+  Do not copy the split without the reason.
+
+#### A portal does not inherit your stacking context
+
+`#root` carries `isolation: isolate`. Base UI renders dialogs, dropdowns and tooltips into
+a portal at the end of `<body>`, which sits outside the application's stacking context, so
+any `z-index` inside the layout can paint over an open popup. Isolating the root fixes it
+for every popup at once. Raising each popup's `z-index` until it happens to win is the
+wrong fix and does not scale.
+
+#### Kumo UI — reviewed, not adopted
+
+https://kumo-ui.com/llms.txt — Cloudflare's styled component library, built on Base UI.
+Worth reading; not a dependency here.
+
+Not adopted, for three concrete reasons:
+
+1. **It has no Number Field**, which is the component this host chose Base UI for. The
+   drag-to-scrub parameter is the centre of the interface.
+2. **It is styled to Cloudflare's design language.** This is a dense editor; adopting it
+   means restyling rather than theming.
+3. **It is Tailwind-based**, including its standalone build, where this project writes
+   plain CSS with tokens.
+
+It is still worth consulting when a Base UI question is about behaviour rather than
+appearance. Both defects found on review came from reading rather than guessing: the
+tooltip trigger from Base UI's composition guide, and the stacking-context problem from
+Kumo's installation page. If a decision ever needs revisiting — a Number Field appearing
+there, or a move to Tailwind — this note is the starting point, not the answer.
+
 ---
 
 ## 5. Pitfalls that have already cost time here
