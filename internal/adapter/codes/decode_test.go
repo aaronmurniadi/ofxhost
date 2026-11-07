@@ -128,3 +128,87 @@ func TestIsRAWIsFalseForFilesThatAreNotRAW(t *testing.T) {
 		}
 	}
 }
+
+// TestSixteenBitTIFFKeepsItsPrecision is why the scanline path replaced TIFFReadRGBAImage.
+//
+// The convenience reader hands back 8 bits a channel. This round-trip writes a 16-bit TIFF
+// with our own encoder, reads it with our own decoder, and checks a value that the two depths
+// round differently: 0.12345 becomes 0.1216 at 8 bits and 0.12348 at 16. A decoder that
+// silently dropped to 8 bits fails here and passes a test that only checks a mid-grey.
+func TestSixteenBitTIFFKeepsItsPrecision(t *testing.T) {
+	const width, height = 4, 2
+	const exact = 0.12345
+
+	pixels := make([]float32, width*height*4)
+	for i := 0; i < width*height; i++ {
+		pixels[i*4+0] = exact
+		pixels[i*4+1] = exact
+		pixels[i*4+2] = exact
+		pixels[i*4+3] = 1
+	}
+
+	path := filepath.Join(t.TempDir(), "wide.tif")
+	if err := New().Encode(
+		path,
+		domainimage.Raster{Pixels: pixels, W: width, H: height},
+		nil,
+		domainimage.Settings{Format: domainimage.TIFF, BitDepth: 16},
+	); err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	decoder := NewFileDecoder(lcms.New())
+	decoded, err := decoder.Decode(path, domainimage.SRGB)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if decoded.Image.W != width || decoded.Image.H != height {
+		t.Fatalf("decoded %dx%d, want %dx%d", decoded.Image.W, decoded.Image.H, width, height)
+	}
+
+	got := decoded.Image.Pixels[0]
+	const tolerance = 1e-4
+	if diff := got - exact; diff > tolerance || diff < -tolerance {
+		t.Fatalf("the first sample read back as %f, want %f within %g "+
+			"(an 8-bit read would give about 0.1216, so this is the depth being lost)", got, exact, tolerance)
+	}
+}
+
+// TestSixteenBitTIFFKeepsRowOrder checks the round-trip preserves which row is where.
+//
+// The fixture is built in the pipeline's own layout, so a round trip must hand back exactly
+// what it was given: encoder flips to top-down, decoder flips back. Either flip missing turns
+// this into an upside-down picture.
+func TestSixteenBitTIFFKeepsRowOrder(t *testing.T) {
+	const width, height = 2, 3
+	pixels := make([]float32, width*height*4)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			// Red grows with y, so the last pipeline row - the top of the picture - is darkest.
+			pixels[(y*width+x)*4+0] = float32(y) / float32(height)
+			pixels[(y*width+x)*4+1] = 0
+			pixels[(y*width+x)*4+2] = 0
+			pixels[(y*width+x)*4+3] = 1
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "rows.tif")
+	if err := New().Encode(
+		path,
+		domainimage.Raster{Pixels: pixels, W: width, H: height},
+		nil,
+		domainimage.Settings{Format: domainimage.TIFF, BitDepth: 16},
+	); err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	decoded, err := NewFileDecoder(lcms.New()).Decode(path, domainimage.SRGB)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	first := decoded.Image.Pixels[0]
+	last := decoded.Image.Pixels[(height-1)*width*4]
+	if !(last > first) {
+		t.Fatalf("first row is %f and last is %f; the round trip lost the row order", first, last)
+	}
+}

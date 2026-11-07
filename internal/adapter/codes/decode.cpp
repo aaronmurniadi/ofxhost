@@ -303,45 +303,136 @@ int decodeTIFF(const char *path, float **outPixels, int *outWidth, int *outHeigh
 
   uint32_t width = 0;
   uint32_t height = 0;
+  uint16_t bitsPerSample = 8;
+  uint16_t samplesPerPixel = 1;
+  uint16_t sampleFormat = SAMPLEFORMAT_UINT;
+  uint16_t photometric = PHOTOMETRIC_MINISBLACK;
+  uint16_t planarConfig = PLANARCONFIG_CONTIG;
+  uint16_t orientation = ORIENTATION_TOPLEFT;
+
   TIFFGetField(tiff, TIFFTAG_IMAGEWIDTH, &width);
   TIFFGetField(tiff, TIFFTAG_IMAGELENGTH, &height);
-  if (width == 0 || height == 0) {
+  TIFFGetFieldDefaulted(tiff, TIFFTAG_BITSPERSAMPLE, &bitsPerSample);
+  TIFFGetFieldDefaulted(tiff, TIFFTAG_SAMPLESPERPIXEL, &samplesPerPixel);
+  TIFFGetFieldDefaulted(tiff, TIFFTAG_SAMPLEFORMAT, &sampleFormat);
+  TIFFGetFieldDefaulted(tiff, TIFFTAG_PHOTOMETRIC, &photometric);
+  TIFFGetFieldDefaulted(tiff, TIFFTAG_PLANARCONFIG, &planarConfig);
+  TIFFGetFieldDefaulted(tiff, TIFFTAG_ORIENTATION, &orientation);
+
+  /* The scanline path reads the file's own depth, which is the whole point: TIFFReadRGBAImage
+   * would hand back 8 bits a channel and throw away the upper half of every 16-bit file -
+   * including the ones this program writes. */
+  const bool wide = bitsPerSample == 16;
+  if (bitsPerSample != 8 && bitsPerSample != 16) {
     TIFFClose(tiff);
-    *err = kDecodeFailed;
+    *err = "that TIFF depth is not supported";
+    return 1;
+  }
+  if (planarConfig != PLANARCONFIG_CONTIG) {
+    TIFFClose(tiff);
+    *err = "a planar TIFF is not supported";
+    return 1;
+  }
+  if (sampleFormat != SAMPLEFORMAT_UINT && sampleFormat != SAMPLEFORMAT_INT && sampleFormat != SAMPLEFORMAT_VOID) {
+    TIFFClose(tiff);
+    *err = "that TIFF sample format is not supported";
+    return 1;
+  }
+  if (photometric != PHOTOMETRIC_RGB && photometric != PHOTOMETRIC_MINISBLACK &&
+      photometric != PHOTOMETRIC_MINISWHITE) {
+    TIFFClose(tiff);
+    *err = "that TIFF is not RGB or greyscale";
+    return 1;
+  }
+  const bool grey = photometric != PHOTOMETRIC_RGB;
+  if (grey && samplesPerPixel != 1 && samplesPerPixel != 2) {
+    TIFFClose(tiff);
+    *err = "that greyscale TIFF has an unexpected channel count";
+    return 1;
+  }
+  if (!grey && samplesPerPixel != 3 && samplesPerPixel != 4) {
+    TIFFClose(tiff);
+    *err = "that RGB TIFF has an unexpected channel count";
     return 1;
   }
 
-  const size_t samples = static_cast<size_t>(width) * height;
-  auto *pixels = static_cast<float *>(std::malloc(samples * 4 * sizeof(float)));
+  const size_t pixelCount = static_cast<size_t>(width) * height;
+  auto *pixels = static_cast<float *>(std::malloc(pixelCount * 4 * sizeof(float)));
   if (pixels == nullptr) {
     TIFFClose(tiff);
     *err = kMemoryFailed;
     return 1;
   }
 
-  /* TIFFReadRGBAImage returns 8-bit rows in bottom-up order already, which is the layout the
-   * pipeline wants. The cost is precision on a 16-bit file; a TIFF that is the output of a
-   * previous export is the case that matters here, and the pixels have already been through
-   * the export quantiser by then. */
-  auto *raster = static_cast<uint32_t *>(_TIFFmalloc(static_cast<tmsize_t>(samples * sizeof(uint32_t))));
-  if (raster == nullptr || TIFFReadRGBAImage(tiff, width, height, raster, 0) == 0) {
-    if (raster != nullptr) {
-      _TIFFfree(raster);
-    }
-    std::free(pixels);
-    TIFFClose(tiff);
-    *err = kDecodeFailed;
-    return 1;
-  }
+  const size_t valuesPerRow = static_cast<size_t>(width) * samplesPerPixel;
+  const size_t bytesPerValue = wide ? 2 : 1;
+  std::vector<unsigned char> buffer(valuesPerRow * bytesPerValue);
 
-  for (size_t i = 0; i < samples; ++i) {
-    const uint32_t value = raster[i];
-    pixels[i * 4 + 0] = TIFFGetR(value) / 255.0f;
-    pixels[i * 4 + 1] = TIFFGetG(value) / 255.0f;
-    pixels[i * 4 + 2] = TIFFGetB(value) / 255.0f;
-    pixels[i * 4 + 3] = TIFFGetA(value) / 255.0f;
+  /* The scale is a divide by the file's maximum, so 8-bit and 16-bit land in the same
+   * range and the pipeline never learns which it read. */
+  const double scale = wide ? 1.0 / 65535.0 : 1.0 / 255.0;
+
+  for (uint32_t y = 0; y < height; ++y) {
+    auto *row = reinterpret_cast<tdata_t>(buffer.data());
+    if (TIFFReadScanline(tiff, row, y, 0) < 0) {
+      std::free(pixels);
+      TIFFClose(tiff);
+      *err = kDecodeFailed;
+      return 1;
+    }
+
+    /* Orientation is honoured for the two flipped cases and ignored for the rotated ones: a
+     * rotated TIFF is rare enough that guessing wrong would be worse than the limitation,
+     * and the alternative is a rotation pass nothing has asked for. */
+    const bool flipRows = orientation == ORIENTATION_BOTLEFT || orientation == ORIENTATION_BOTRIGHT;
+    const bool flipColumns = orientation == ORIENTATION_TOPRIGHT || orientation == ORIENTATION_BOTRIGHT;
+    const int targetRow = flipRows ? static_cast<int>(y) : static_cast<int>(height - 1 - y);
+    float *dst = pixels + static_cast<size_t>(targetRow) * width * 4;
+
+    for (uint32_t x = 0; x < width; ++x) {
+      const uint32_t sourceX = flipColumns ? width - 1 - x : x;
+      double red = 0;
+      double green = 0;
+      double blue = 0;
+      double alpha = 1.0;
+
+      if (grey) {
+        const size_t index = static_cast<size_t>(sourceX) * samplesPerPixel;
+        red = wide ? reinterpret_cast<const uint16_t *>(buffer.data())[index] * scale
+                   : buffer[index] * scale;
+        if (photometric == PHOTOMETRIC_MINISWHITE) {
+          red = 1.0 - red;
+        }
+        green = red;
+        blue = red;
+        if (samplesPerPixel == 2) {
+          const size_t alphaIndex = index + 1;
+          alpha = wide ? reinterpret_cast<const uint16_t *>(buffer.data())[alphaIndex] * scale
+                       : buffer[alphaIndex] * scale;
+        }
+      } else {
+        const size_t index = static_cast<size_t>(sourceX) * samplesPerPixel;
+        const auto sample = [&](size_t offset) -> double {
+          const size_t at = index + offset;
+          if (wide) {
+            return reinterpret_cast<const uint16_t *>(buffer.data())[at] * scale;
+          }
+          return buffer[at] * scale;
+        };
+        red = sample(0);
+        green = sample(1);
+        blue = sample(2);
+        if (samplesPerPixel == 4) {
+          alpha = sample(3);
+        }
+      }
+
+      dst[x * 4 + 0] = static_cast<float>(red);
+      dst[x * 4 + 1] = static_cast<float>(green);
+      dst[x * 4 + 2] = static_cast<float>(blue);
+      dst[x * 4 + 3] = static_cast<float>(alpha);
+    }
   }
-  _TIFFfree(raster);
 
   uint32_t profileLength = 0;
   void *profile = nullptr;
