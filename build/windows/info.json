@@ -7,11 +7,11 @@
 		"0409": {
 			"FileVersion": "0.1.0",
 			"ProductVersion": "0.1.0",
-			"CompanyName": "My Company",
-			"FileDescription": "A ofxhost application",
-			"LegalCopyright": "© 2026, My Company",
-			"ProductName": "My Product",
-			"Comments": "This is a comment"
+			"CompanyName": "OfxHost",
+			"FileDescription": "An OpenFX host for still images",
+			"LegalCopyright": "© 2026, OfxHost",
+			"ProductName": "OFXhost",
+			"Comments": "An OpenFX host for still images"
 		}
 	}
 }

@@ -304,30 +304,8 @@ body,
   -webkit-user-drag: none;
 }
 
-.preview__overlay {
-  position: absolute;
-  color: var(--text-dim);
-  font-size: 11px;
-  pointer-events: none;
-  /* A dark halo keeps the label readable over a bright photograph. */
-  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
-}
 
-.preview__overlay--name {
-  top: 8px;
-  left: 8px;
-  /* Leave room for the render-size control in the other corner, so a long file name
-   * cannot run underneath it. */
-  max-width: calc(100% - 160px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.preview__overlay--zoom {
-  bottom: 8px;
-  left: 8px;
-}
 
 .app__version {
   margin-left: auto;
@@ -698,14 +676,51 @@ body,
    not move the panels. */
 .app__status {
   display: flex;
-  gap: var(--panel-gap);
+  gap: 12px;
   align-items: center;
+  justify-content: space-between;
   padding: 4px 10px;
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: 0.85em;
-  min-height: 1.9em;
+  min-height: 2.1em;
   flex: 0 0 auto;
+}
+
+/* The left group answers "what am I looking at": name, zoom, size, render resolution. */
+.app__status-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* A long file name is the one thing here that can overflow, so it truncates rather than
+   pushing the render-size control off the bar. */
+.app__status-name {
+  max-width: 22em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.app__status-sep {
+  opacity: 0.5;
+}
+
+.app__status-zoom,
+.app__status-size {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The message is the only part that changes on its own, so it takes the remaining room
+   and stays right-aligned. */
+.app__status-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
 }
 
 .app__status--busy {
@@ -725,38 +740,8 @@ body,
   border: 0;
 }
 
-/* The render-size control, drawn over the preview like the other overlays. */
-/*
- * The render size sits at the top right.
- *
- * It used to be at the bottom left, in the same corner as the zoom label, so the two
- * were drawn on top of each other.
- *
- * The overlay default is pointer-events: none, because the labels must not swallow a
- * drag meant for the image. A control is the exception: without this the select is
- * drawn but every click passes through it to the canvas underneath.
- */
-.preview__overlay--resolution {
-  top: 8px;
-  right: 8px;
-  left: auto;
-  bottom: auto;
-  pointer-events: auto;
-}
 
-.preview__overlay--resolution .preview__resolution {
-  pointer-events: auto;
-  cursor: pointer;
-}
 
-.preview__resolution {
-  background: var(--overlay-bg);
-  color: inherit;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 2px 4px;
-  font-size: 0.85em;
-}
 
 /* The parameter tree.
    Each group is a fold-out section, and a section inside a section is indented so the

@@ -26,6 +26,7 @@ import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
 import SettingsDialog from "./panels/SettingsDialog";
 import { Button } from "@cloudflare/kumo/components/button";
 import { Toolbar } from "@cloudflare/kumo/components/toolbar";
+import Select from "./widgets/Select";
 import TooltipHint from "./widgets/Tooltip";
 
 /** How often the shell asks whether a decode has landed. */
@@ -68,6 +69,30 @@ export default function App() {
   const [lastImage, setLastImage] = useState("");
   // settingsOpen shows the settings dialog.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // zoomPercent is reported by the preview and shown in the status bar.
+  const [zoomPercent, setZoomPercent] = useState(100);
+  // The render size is chrome, not part of the picture, so it lives here beside the other
+  // status information rather than floating over the image.
+  const [resolutions, setResolutions] = useState<string[]>([]);
+  const [resolution, setResolution] = useState(0);
+
+  // The sizes are read once, and only when a file could be opened with one of them.
+  useEffect(() => {
+    void (async () => {
+      try {
+        setResolutions((await api.previewResolutions()) ?? []);
+      } catch {
+        // The control stays hidden when the list cannot be read.
+      }
+    })();
+  }, []);
+
+  const chooseResolution = useCallback(async (index: number) => {
+    setResolution(index);
+    await api.setPreviewResolution(index);
+    // Ask for the frame again at the new size; the old one is now the wrong one.
+    setRenderTick((tick) => tick + 1);
+  }, []);
 
   // applyAppearance repaints the shell.
   //
@@ -289,6 +314,7 @@ export default function App() {
               busy={busy}
               onResize={onResize}
               onChange={requestRender}
+              onZoomChange={setZoomPercent}
             />
           }
           plugins={<PluginsPanel onChange={requestRender} hasDocument={doc?.open === true} />}
@@ -301,9 +327,49 @@ export default function App() {
 
       {/* The status line carries the result of the last action, or why it failed.
           It is always present so the layout does not jump when a message appears. */}
-      <footer className="app__status" role="status" aria-live="polite">
-        {busy ? <span className="app__status--busy">Working…</span> : null}
-        <span>{message}</span>
+      <footer className="app__status">
+        {/* Left: what is open and how it is being shown. */}
+        <span className="app__status-left">
+          <span className="app__status-name" title={doc?.path ?? ""}>
+            {doc?.open ? doc.fileName : "No image"}
+          </span>
+          {doc?.open ? (
+            <>
+              <span className="app__status-sep" aria-hidden>
+                ·
+              </span>
+              <span className="app__status-zoom" aria-label={`Zoom ${zoomPercent}%`}>
+                {zoomPercent}%
+              </span>
+              <span className="app__status-sep" aria-hidden>
+                ·
+              </span>
+              <span className="app__status-size">
+                {doc.width}×{doc.height}
+              </span>
+            </>
+          ) : null}
+          {resolutions.length > 0 ? (
+            <span className="app__status-resolution">
+              <Select
+                id="preview-resolution"
+                label="Preview resolution"
+                value={String(resolution)}
+                onChange={(next) => void chooseResolution(Number(next))}
+                options={resolutions.map((name, index) => ({
+                  label: name,
+                  value: String(index),
+                }))}
+              />
+            </span>
+          ) : null}
+        </span>
+
+        {/* Right: the outcome of the last action, which is what a status line is for. */}
+        <span className="app__status-message" role="status" aria-live="polite">
+          {busy ? <span className="app__status--busy">Working… </span> : null}
+          {message}
+        </span>
       </footer>
 
       {pendingPath !== "" ? (

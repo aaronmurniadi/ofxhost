@@ -14,8 +14,6 @@
 import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { anchoredZoom, clampPan } from "./previewView";
-import { api } from "../api/document";
-import Select from "../widgets/Select";
 
 /** The zoom range, matching what the previous host allowed. */
 const MIN_ZOOM = 0.05;
@@ -35,34 +33,11 @@ interface Props {
   onResize: (width: number, height: number) => void;
   /** Asks for a fresh preview after the render size changed. */
   onChange: () => void;
+  /** Reports the zoom percentage, so the status bar can show it. */
+  onZoomChange: (percent: number) => void;
 }
 
-export default function PreviewPanel({ preview, fileName, busy, onResize, onChange }: Props) {
-  // The render size is a control on the panel because it is the one setting a user
-  // reaches for while iterating: a smaller frame makes every parameter edit return
-  // sooner. It is persisted by the Go side alongside the other view settings.
-  const [resolutions, setResolutions] = useState<string[]>([]);
-  const [resolution, setResolution] = useState(0);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        setResolutions((await api.previewResolutions()) ?? []);
-      } catch {
-        // The control stays hidden when the list cannot be read.
-      }
-    })();
-  }, []);
-
-  const chooseResolution = useCallback(
-    async (index: number) => {
-      setResolution(index);
-      await api.setPreviewResolution(index);
-      // Ask for the frame again at the new size; the old one is now the wrong one.
-      onChange();
-    },
-    [onChange],
-  );
+export default function PreviewPanel({ preview, fileName, busy, onResize, onChange, onZoomChange }: Props) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -115,6 +90,12 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
     preview && preview.width > 0 && preview.height > 0 && canvasSize.width > 0 && canvasSize.height > 0
       ? Math.min(canvasSize.width / preview.width, canvasSize.height / preview.height)
       : 1;
+
+  // The zoom percentage is shown in the status bar, one line of chrome rather than an
+  // overlay that covers the picture.
+  useEffect(() => {
+    onZoomChange(Math.round(fitScale * zoom * 100));
+  }, [onZoomChange, fitScale, zoom]);
 
   /**
    * clampPan keeps the image from being dragged out of the panel.
@@ -187,11 +168,6 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
       if (event.button !== 0 || !preview) {
         return;
       }
-      // The render-size control sits inside the canvas; a press on it must not start a
-      // drag that the user did not ask for.
-      if ((event.target as HTMLElement).closest(".preview__overlay--resolution")) {
-        return;
-      }
       // Pointer capture is what lets a drag continue past the edge of the panel, which
       // is what a user does when the image is larger than the view.
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -262,27 +238,6 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
           <p className="panel__placeholder">Open a RAW file to see the preview.</p>
         )}
 
-        {resolutions.length > 0 ? (
-          <label className="preview__overlay preview__overlay--resolution">
-            <span className="visually-hidden">Preview resolution</span>
-            <Select
-              id="preview-resolution"
-              label="Preview resolution"
-              value={String(resolution)}
-              onChange={(next) => void chooseResolution(Number(next))}
-              options={resolutions.map((name, index) => ({
-                label: name,
-                value: String(index),
-              }))}
-            />
-          </label>
-        ) : null}
-        {fileName ? <span className="preview__overlay preview__overlay--name">{fileName}</span> : null}
-        {preview ? (
-          <span className="preview__overlay preview__overlay--zoom">
-            {Math.round(fitScale * zoom * 100)}%
-          </span>
-        ) : null}
       </div>
     </LayerCard>
   );
