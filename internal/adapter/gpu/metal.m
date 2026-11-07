@@ -186,6 +186,14 @@ int gpu_metal_read(long long handle, void *dst, long long bytes) {
   return 0;
 }
 
+void *gpu_metal_pointer(long long handle) {
+  pthread_mutex_lock(&gMutex);
+  Entry *entry = findLocked(handle);
+  void *buffer = entry == NULL ? NULL : (void *)entry->buffer;
+  pthread_mutex_unlock(&gMutex);
+  return buffer;
+}
+
 void *gpu_metal_command_queue(void) {
   pthread_mutex_lock(&gMutex);
   void *queue = NULL;
@@ -212,6 +220,7 @@ void gpu_metal_device_name(char *buf, int bufLen) {
 long long gpu_metal_alloc(long long bytes) { return -1; }
 int gpu_metal_free(long long handle) { return 0; }
 long long gpu_metal_bytes(long long handle) { return -1; }
+void *gpu_metal_pointer(long long handle) { return NULL; }
 int gpu_metal_write(long long handle, const void *src, long long bytes) { return -1; }
 int gpu_metal_read(long long handle, void *dst, long long bytes) { return -1; }
 void *gpu_metal_command_queue(void) { return NULL; }

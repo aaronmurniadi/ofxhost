@@ -139,6 +139,16 @@ int ofxh_instance_output_size(ofxh_instance *instance, int inWidth, int inHeight
  * project long edge, and `generation` identifies the pass so a newer one can abort
  * it. The result is read with ofxh_instance_copy_output.
  */
+/* ofxh_instance_metal_supported reports whether the plugin declared Metal buffer render
+ * support. It is the plugin's declaration, not the host's ability: both are needed before a
+ * pass is handed to the device. */
+int ofxh_instance_metal_supported(ofxh_instance *instance);
+
+/* ofxh_instance_set_metal hands the next passes a queue and two MTLBuffers, or NULLs to go
+ * back to CPU memory. The buffers belong to the caller: this file passes the pointers
+ * through and never dereferences them. */
+int ofxh_instance_set_metal(ofxh_instance *instance, void *queue, void *srcBuffer, void *dstBuffer);
+
 int ofxh_instance_render(ofxh_instance *instance, int outWidth, int outHeight, int draft, double proxyScale,
                          uint64_t generation);
 

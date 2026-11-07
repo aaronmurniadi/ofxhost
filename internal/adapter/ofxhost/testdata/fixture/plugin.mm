@@ -26,6 +26,15 @@
 
 #include "ofxsImageEffect.h"
 
+/* The property name lives in the GPU-render header, which the support library does not pull
+ * in on its own. */
+#include "ofxGPURender.h"
+
+#ifdef __APPLE__
+#import <Foundation/Foundation.h>
+#import <Metal/Metal.h>
+#endif
+
 namespace {
 
 /** The four labels the host matches against its own colour space names. */
@@ -48,6 +57,17 @@ class FixtureEffect : public OFX::ImageEffect {
   }
 
   void render(const OFX::RenderArguments &args) override {
+    /* A pass is a Metal pass only when the host says so. The same plugin serves both paths,
+     * which is the point: the test can render one frame each way and compare the pixels
+     * without a second fixture that might differ in other ways. */
+    /* The support library surfaces the host's choice as a flag, so there is no property to
+     * read: isEnabledMetalRender is true only when the host set kOfxImageEffectPropMetalEnabled
+     * for this pass. */
+    if (args.isEnabledMetalRender) {
+      renderMetal(args);
+      return;
+    }
+
     double gain = 1.0;
     if (gain_ != nullptr) {
       gain_->getValueAtTime(args.time, gain);
@@ -74,6 +94,59 @@ class FixtureEffect : public OFX::ImageEffect {
         out[1] = static_cast<float>(in[1] * gain);
         out[2] = static_cast<float>(in[2] * gain);
         out[3] = in[3];
+      }
+    }
+  }
+
+  /* renderMetal is the same arithmetic through a buffer instead of an address.
+   *
+   * The host hands kOfxImagePropData an id<MTLBuffer>, not a pointer to the first pixel, so
+   * getPixelAddress is meaningless here and the plugin indexes the buffer itself. The layout
+   * is unchanged: four floats a pixel, rows in the buffer's order.
+   */
+  void renderMetal(const OFX::RenderArguments &args) {
+    double gain = 1.0;
+    if (gain_ != nullptr) {
+      gain_->getValueAtTime(args.time, gain);
+    }
+
+    OFX::Image *src = srcClip_->fetchImage(args.time);
+    OFX::Image *dst = dstClip_->fetchImage(args.time);
+    if (src == nullptr || dst == nullptr) {
+      return;
+    }
+
+    auto bufferContents = [](OFX::Image *image) -> float * {
+      void *handle = nullptr;
+      try {
+        handle = image->getPropertySet().propGetPointer(kOfxImagePropData, 0);
+      } catch (...) {
+        return nullptr;
+      }
+      if (handle == nullptr) {
+        return nullptr;
+      }
+      return static_cast<float *>([(id<MTLBuffer>)handle contents]);
+    };
+
+    float *in = bufferContents(src);
+    float *out = bufferContents(dst);
+    if (in == nullptr || out == nullptr) {
+      return;
+    }
+
+    OfxRectI bounds = src->getRegionOfDefinition();
+    const int width = bounds.x2 - bounds.x1;
+    const int height = bounds.y2 - bounds.y1;
+    const OfxRectI window = args.renderWindow;
+
+    for (int y = window.y1; y < window.y2; ++y) {
+      for (int x = window.x1; x < window.x2; ++x) {
+        const long index = (static_cast<long>(y) * width + x) * 4;
+        out[index + 0] = static_cast<float>(in[index + 0] * gain);
+        out[index + 1] = static_cast<float>(in[index + 1] * gain);
+        out[index + 2] = static_cast<float>(in[index + 2] * gain);
+        out[index + 3] = in[index + 3];
       }
     }
   }
@@ -133,6 +206,11 @@ void FixtureFactory::describe(OFX::ImageEffectDescriptor &desc) {
   desc.setSupportsTiles(true);
   desc.setTemporalClipAccess(false);
   desc.setRenderThreadSafety(OFX::eRenderFullySafe);
+  /* Declared so the host's device path can be exercised.
+   *
+   * The support library writes this property through its own helper; setting the raw property
+   * here crashed the host during discovery, and the helper is the documented route. */
+  desc.setSupportsMetalRender(true);
 }
 
 void FixtureFactory::describeInContext(OFX::ImageEffectDescriptor &desc, OFX::ContextEnum) {

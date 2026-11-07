@@ -1144,9 +1144,35 @@ test needs `samples/DSCF0209.RAF`, 25 MB and a pinned camera. A decoder that rea
 a TIFF makes a fixture that is a few kilobytes and any size the test wants. Do this first
 because it makes everything after it cheaper to verify.
 
-**2. Metal handover.**
+**2. Metal handover. — done.**
 
-The backend exists and is tested; the render action does not use it. What remains is
+Built: the descriptor declares `kOfxImageEffectPropMetalRenderSupported`, an instance reads the
+plugin's declaration once, and a pass is handed `id<MTLBuffer>` objects through
+`kOfxImagePropData` with `kOfxImageEffectPropMetalEnabled` and the command queue on the render
+arguments. The buffers are per instance and reused, because a preview re-renders one size many
+times.
+
+`TestDeviceMatchesCPU` is the gate and it passes: one frame, rendered on both paths through the
+same fixture, identical to within float32 rounding. The fixture declares support and carries a
+Metal branch, so the test exercises the handover rather than comparing a CPU render against
+itself.
+
+Two findings worth keeping:
+
+- **A host must create the capability property before a plugin can set it.** The support
+  library's `setSupportsMetalRender` writes to the descriptor's set; when the host has not
+  created the property, the write is refused and the support library swallows the refusal.
+  The plugin then looks indifferent and the host never enables the path. `DescriptorImpl` now
+  creates it with `"false"`, which is the honest default.
+- **Writing the raw property from the plugin crashed the host** during discovery. The
+  documented helper is the route; the raw write is not.
+
+Repeated construction of a device backend in one process (which only tests do) produces an
+intermittent `objc[...] __weak variable holds ...` warning from Metal. The program creates one
+backend per launch, so it does not occur in use. It is recorded here because it looks alarming
+and is not a render defect.
+
+The rest of this entry is the original plan, kept for the reasoning: What remains is
 `kOfxImageEffectPropMetalRenderSupported` on the descriptors, `id<MTLBuffer>` through
 `kOfxImagePropData` with `kOfxImageEffectPropMetalEnabled` and the command queue, and the
 read-back. The previous host does exactly this in `OfxPlugins.cpp` and it is the reference.

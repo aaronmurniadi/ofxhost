@@ -79,6 +79,8 @@ type Host struct {
 	reporter port.Reporter
 	// ref is the identity the C callbacks carry back.
 	ref uint64
+	// gpu is the device backend, or nil. A render asks its instance, which asks this.
+	gpu port.GPUBackend
 }
 
 // registry maps the callback identity to the host that owns it.
@@ -95,6 +97,10 @@ type Options struct {
 	Reporter port.Reporter
 	// PluginDirs are extra directories to search before the platform default.
 	PluginDirs []string
+	// GPU is the device backend a render may be handed to. Nil, or a backend that reports
+	// itself unavailable, leaves every pass on the CPU - which is what a machine without a
+	// device gets and is not an error.
+	GPU port.GPUBackend
 }
 
 // New creates a host.
@@ -121,6 +127,7 @@ func New(opts Options) (*Host, error) {
 		registry.Delete(uintptr(ref))
 		return nil, errors.New("ofxhost: a host already exists; OpenFX allows one per process")
 	}
+	host.gpu = opts.GPU
 	host.ref = ref
 	return host, nil
 }
@@ -243,6 +250,10 @@ func (h *Host) Create(index int) (port.Instance, error) {
 		host:   h,
 		info:   h.plugins[index],
 		params: loadParams(cHandle),
+		// Asked once: a plugin does not change its mind about hardware support, and a render
+		// path should not cross the bridge to find out on every pass.
+		gpu:          h.gpu,
+		metalCapable: C.ofxh_instance_metal_supported(cHandle) != 0,
 	}, nil
 }
 

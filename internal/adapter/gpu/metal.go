@@ -69,6 +69,12 @@ func metalRelease(buffer port.DeviceBuffer) error {
 	return nil
 }
 
+// Pointer returns the platform buffer object behind a handle, for a caller that has to hand
+// the object itself to a plugin. It is NULL for an unknown handle.
+func Pointer(buffer port.DeviceBuffer) unsafe.Pointer {
+	return C.gpu_metal_pointer(C.longlong(buffer))
+}
+
 // CommandQueue returns the queue a plugin should enqueue onto, or nil when there is no
 // device. It exists for the OpenFX handover, which needs the raw handle.
 func CommandQueue() unsafe.Pointer {

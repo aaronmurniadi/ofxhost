@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	gpudevice "github.com/aaronmurniadi/ofxhost/internal/adapter/gpu"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
 	"github.com/aaronmurniadi/ofxhost/internal/port"
 )
@@ -39,6 +40,17 @@ type Instance struct {
 	id int64
 	// generation counts renders, so a newer one can abort an older one.
 	generation atomic.Uint64
+
+	/* The device path. A plugin that declares Metal buffer support can be handed
+	 * id<MTLBuffer> objects instead of CPU addresses; the host keeps one pair of buffers per
+	 * instance and reuses them, because a preview re-renders the same size many times and
+	 * allocating per pass would cost more than the pass. */
+	gpu          port.GPUBackend
+	metalCapable bool
+	metalSrc     port.DeviceBuffer
+	metalDst     port.DeviceBuffer
+	metalSrcSize int
+	metalDstSize int
 }
 
 // nextInstanceID mints the ids.
@@ -298,6 +310,14 @@ func (i *Instance) Render(req port.RenderRequest) (image.Raster, port.RenderStat
 		return image.Raster{}, port.RenderFailed, statusError("copy the input frame", bindStatus)
 	}
 
+	// Hand the pass over to the device when both sides can take it. Any failure here is not
+	// fatal: the CPU path still works, and a preview rendered slowly beats one not rendered.
+	if err := i.prepareMetal(req.In, outW, outH); err != nil {
+		if i.gpu != nil {
+			i.disableMetal(err)
+		}
+	}
+
 	generation := req.Generation
 	if generation == 0 {
 		generation = i.generation.Add(1)
@@ -326,6 +346,16 @@ func (i *Instance) Render(req port.RenderRequest) (image.Raster, port.RenderStat
 	}
 	if status != statusOK {
 		return image.Raster{}, port.RenderFailed, statusError("render", status)
+	}
+
+	// A device pass wrote into the output buffer, not into the CPU vector.
+	if i.metalActive() {
+		out := image.New(outW, outH)
+		if err := i.gpu.Read(i.metalDst, floatBytesSlice(out.Pixels)); err != nil {
+			i.disableMetal(err)
+			return image.Raster{}, port.RenderFailed, err
+		}
+		return out, port.RenderOK, nil
 	}
 
 	out := image.New(outW, outH)
@@ -362,8 +392,23 @@ func (i *Instance) Close() error {
 	}
 	i.closed = true
 	if i.handle != nil {
+		// The buffers must go before the instance, because the host copy still references
+		// them and a plugin may read them on the way out.
+		C.ofxh_instance_set_metal(i.handle, nil, nil, nil)
 		C.ofxh_instance_free(i.handle)
 		i.handle = nil
+	}
+	if i.gpu != nil {
+		if i.metalSrc != 0 {
+			_ = i.gpu.Release(i.metalSrc)
+			i.metalSrc = 0
+			i.metalSrcSize = 0
+		}
+		if i.metalDst != 0 {
+			_ = i.gpu.Release(i.metalDst)
+			i.metalDst = 0
+			i.metalDstSize = 0
+		}
 	}
 	return nil
 }
@@ -381,4 +426,105 @@ func (i *Instance) paramByName(name string) *port.ParamInfo {
 // statusError turns an OfxStatus into a Go error that keeps the code.
 func statusError(op string, status C.int) error {
 	return &port.StatusError{Op: "ofxhost: " + op, Code: int(status)}
+}
+
+// floatBytes reports the byte length of a float slice, for the device API.
+func floatBytes(pixels []float32) int {
+	return len(pixels) * 4
+}
+
+// metalAttempted reports whether this instance can try the device path.
+func (i *Instance) metalAttempted() bool {
+	return i.gpu != nil && i.gpu.Available() && i.metalCapable
+}
+
+// metalActive reports whether the pass just rendered on the device.
+//
+// It is the pair being set that matters, not the capability: prepareMetal clears both
+// buffers when it falls back, so this cannot report a device pass that did not happen.
+func (i *Instance) metalActive() bool {
+	return i.metalSrc != 0 && i.metalDst != 0
+}
+
+// ensureBuffer grows a device buffer to hold at least bytes, reusing it when it already does.
+func (i *Instance) ensureBuffer(buffer *port.DeviceBuffer, have *int, bytes int) error {
+	if *buffer != 0 && *have >= bytes {
+		return nil
+	}
+	if *buffer != 0 {
+		_ = i.gpu.Release(*buffer)
+		*buffer = 0
+		*have = 0
+	}
+	allocated, err := i.gpu.Allocate(bytes)
+	if err != nil {
+		return err
+	}
+	*buffer = allocated
+	*have = bytes
+	return nil
+}
+
+// prepareMetal allocates or reuses the buffers and hands them to the host.
+//
+// A pass is only handed over when the plugin declared support, a device exists, and both
+// buffers are at least the size of the frame. Anything short of that leaves the instance on
+// the CPU path rather than half-enabled, because a plugin told it is receiving Metal buffers
+// must not receive a CPU address.
+func (i *Instance) prepareMetal(in image.Raster, outW, outH int) error {
+	if !i.metalAttempted() {
+		return nil
+	}
+
+	srcBytes := floatBytes(in.Pixels)
+	dstBytes := outW * outH * 4 * 4
+
+	if err := i.ensureBuffer(&i.metalSrc, &i.metalSrcSize, srcBytes); err != nil {
+		return err
+	}
+	if err := i.ensureBuffer(&i.metalDst, &i.metalDstSize, dstBytes); err != nil {
+		return err
+	}
+	if err := i.gpu.Write(i.metalSrc, floatBytesSlice(in.Pixels)); err != nil {
+		return err
+	}
+
+	status := C.ofxh_instance_set_metal(i.handle,
+		gpudevice.CommandQueue(),
+		gpudevice.Pointer(i.metalSrc),
+		gpudevice.Pointer(i.metalDst))
+	if status != statusOK {
+		return statusError("prepare the device pass", status)
+	}
+	return nil
+}
+
+// floatBytesSlice reinterprets pixels as bytes without a copy.
+func floatBytesSlice(pixels []float32) []byte {
+	if len(pixels) == 0 {
+		return nil
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(&pixels[0])), len(pixels)*4)
+}
+
+// disableMetal goes back to the CPU path for the rest of this instance's life.
+//
+// It does not retry on the next pass: a device that refused a frame at this size will refuse
+// it again, and retrying every render would turn one failure into a stall on every edit.
+func (i *Instance) disableMetal(cause error) {
+	i.metalCapable = false
+	C.ofxh_instance_set_metal(i.handle, nil, nil, nil)
+	if i.metalSrc != 0 {
+		_ = i.gpu.Release(i.metalSrc)
+		i.metalSrc = 0
+		i.metalSrcSize = 0
+	}
+	if i.metalDst != 0 {
+		_ = i.gpu.Release(i.metalDst)
+		i.metalDst = 0
+		i.metalDstSize = 0
+	}
+	if i.host != nil && i.host.logger != nil {
+		i.host.logger.Info("device render disabled", "err", cause, "plugin", i.info.Identifier)
+	}
 }

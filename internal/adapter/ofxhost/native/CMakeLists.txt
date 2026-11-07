@@ -95,8 +95,16 @@ set(OFX_SUPPORT_LIB "${OFX_ROOT}/Support/Library")
 set(OFX_SUPPORT_INCLUDE "${OFX_ROOT}/Support/include")
 
 if(EXISTS "${OFX_SUPPORT_LIB}/ofxsImageEffect.cpp")
+  # The fixture carries a Metal branch so the device path can be compared against the CPU
+  # path. It is Objective-C for that reason: reading through an id<MTLBuffer> needs the
+  # language, and the alternative is a fixture that cannot exercise the code it is there to
+  # test. Apple only; elsewhere the file compiles its CPU branch.
+  if(APPLE)
+    enable_language(OBJCXX)
+    set_source_files_properties(../testdata/fixture/plugin.mm PROPERTIES LANGUAGE OBJCXX)
+  endif()
   add_library(ofxhost_fixture MODULE
-    ../testdata/fixture/plugin.cpp
+    ../testdata/fixture/plugin.mm
     "${OFX_SUPPORT_LIB}/ofxsCore.cpp"
     "${OFX_SUPPORT_LIB}/ofxsImageEffect.cpp"
     "${OFX_SUPPORT_LIB}/ofxsInteract.cpp"
@@ -106,6 +114,10 @@ if(EXISTS "${OFX_SUPPORT_LIB}/ofxsImageEffect.cpp")
     "${OFX_SUPPORT_LIB}/ofxsProperty.cpp"
     "${OFX_SUPPORT_LIB}/ofxsPropertyValidation.cpp"
   )
+
+  if(APPLE)
+    target_link_libraries(ofxhost_fixture PRIVATE "-framework Metal" "-framework Foundation")
+  endif()
 
   target_include_directories(ofxhost_fixture PRIVATE
     "${OFX_INCLUDE}"

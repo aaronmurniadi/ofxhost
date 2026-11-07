@@ -540,9 +540,38 @@ class InstanceImpl : public OFX::Host::ImageEffect::Instance {
   int outputHeight() const { return outputHeight_; }
 
   const float *sourcePixels() const { return source_.data(); }
+  void *metalSource() const { return metalSrc_; }
+  void *metalDestination() const { return metalDst_; }
   float *outputPixels() { return output_.data(); }
 
   void setRenderScale(double x, double y) { renderScaleX_ = x; renderScaleY_ = y; }
+  /* setMetalCapable records what the plugin declared. Read once, at construction, because a
+   * plugin does not change its mind about hardware support. */
+  void setMetalCapable(bool capable) { metalCapable_ = capable; }
+  bool metalCapable() const { return metalCapable_; }
+
+  /* setMetal hands the next pass its buffers. A null queue, or a null either buffer,
+   * disables the handover rather than half-enabling it: a plugin told it is receiving Metal
+   * buffers must not receive a CPU address. */
+  void setMetal(void *queue, void *src, void *dst) {
+    metalQueue_ = queue;
+    metalSrc_ = src;
+    metalDst_ = dst;
+    metalEnabled_ = queue != nullptr && src != nullptr && dst != nullptr;
+  }
+  bool metalEnabled() const { return metalEnabled_; }
+
+  /* setCustomInArgs is where the library lets a host add to an action's arguments, and it is
+   * the only place the render arguments can be reached before the plugin sees them. */
+  void setCustomInArgs(const std::string &action, OFX::Host::Property::Set &inArgs) override {
+    OFX::Host::ImageEffect::Instance::setCustomInArgs(action, inArgs);
+    if (action != kOfxImageEffectActionRender || !metalEnabled_) {
+      return;
+    }
+    inArgs.setIntProperty(kOfxImageEffectPropMetalEnabled, 1);
+    inArgs.setPointerProperty(kOfxImageEffectPropMetalCommandQueue, metalQueue_);
+  }
+
   void setDraft(bool draft) { draft_ = draft; }
   bool draft() const { return draft_; }
 
@@ -758,6 +787,18 @@ class InstanceImpl : public OFX::Host::ImageEffect::Instance {
   double renderScaleY_ = 1.0;
   bool draft_ = false;
   uint64_t generation_ = 0;
+
+  /* The Metal handover. The plugin declares the capability; the host decides per pass.
+   *
+   * The buffers are opaque to this file: they are MTLBuffer objects owned by the Go side,
+   * which allocates them, uploads into them and reads back. All this file does is hand the
+   * pointer to the plugin where it would have handed a CPU address, so there is one place
+   * that knows a render might not be in system memory. */
+  bool metalCapable_ = false;
+  bool metalEnabled_ = false;
+  void *metalQueue_ = nullptr;
+  void *metalSrc_ = nullptr;
+  void *metalDst_ = nullptr;
   uint64_t cancelGeneration_ = 0;
 };
 
@@ -812,6 +853,31 @@ OFX::Host::ImageEffect::Image *ClipImpl::getImage(OfxTime time, const OfxRectD *
   const OfxRectI bounds = {0, 0, g.width, g.height};
   const int rowBytes = g.width * 4 * static_cast<int>(sizeof(float));
 
+  /* When the pass is a Metal pass, kOfxImagePropData is not a pixel address at all: it is an
+   * id<MTLBuffer>, and the plugin is expected to read and write through it. This file never
+   * dereferences it. Row bytes and bounds stay the same, because the buffer holds the same
+   * layout in shared memory. */
+  if (inst->metalEnabled()) {
+    void *buffer = isOutput() ? inst->metalDestination() : inst->metalSource();
+    if (buffer == nullptr) {
+      return nullptr;
+    }
+    auto *metalImage = new OFX::Host::ImageEffect::Image(*this);
+    metalImage->setPointerProperty(kOfxImagePropData, buffer);
+    metalImage->setIntProperty(kOfxImagePropRowBytes, rowBytes);
+    metalImage->setIntProperty(kOfxImagePropBounds, bounds.x1, 0);
+    metalImage->setIntProperty(kOfxImagePropBounds, bounds.y1, 1);
+    metalImage->setIntProperty(kOfxImagePropBounds, bounds.x2, 2);
+    metalImage->setIntProperty(kOfxImagePropBounds, bounds.y2, 3);
+    metalImage->setIntProperty(kOfxImagePropRegionOfDefinition, bounds.x1, 0);
+    metalImage->setIntProperty(kOfxImagePropRegionOfDefinition, bounds.y1, 1);
+    metalImage->setIntProperty(kOfxImagePropRegionOfDefinition, bounds.x2, 2);
+    metalImage->setIntProperty(kOfxImagePropRegionOfDefinition, bounds.y2, 3);
+    metalImage->addReference();
+    return metalImage;
+  }
+
+
   // The image is itself a property set: it copies the clip's depth, components,
   // premultiplication and aspect ratio in its constructor, and the data pointer and
   // geometry are then set on it directly.
@@ -839,13 +905,42 @@ OFX::Host::ImageEffect::Image *ClipImpl::getImage(OfxTime time, const OfxRectD *
 
 class DescriptorImpl : public OFX::Host::ImageEffect::Descriptor {
  public:
-  explicit DescriptorImpl(OFX::Host::Plugin *plugin) : OFX::Host::ImageEffect::Descriptor(plugin) {}
+  explicit DescriptorImpl(OFX::Host::Plugin *plugin) : OFX::Host::ImageEffect::Descriptor(plugin) {
+    declareDeviceProperty();
+  }
   DescriptorImpl(const OFX::Host::ImageEffect::Descriptor &root, OFX::Host::Plugin *plugin)
-      : OFX::Host::ImageEffect::Descriptor(root, plugin) {}
+      : OFX::Host::ImageEffect::Descriptor(root, plugin) {
+    declareDeviceProperty();
+  }
   DescriptorImpl(const std::string &bundlePath, OFX::Host::Plugin *plugin)
-      : OFX::Host::ImageEffect::Descriptor(bundlePath, plugin) {}
+      : OFX::Host::ImageEffect::Descriptor(bundlePath, plugin) {
+    declareDeviceProperty();
+  }
 
   ~DescriptorImpl() override = default;
+
+ private:
+  /* declareDeviceProperty creates the property a plugin needs in order to declare hardware
+   * support.
+   *
+   * The support library's setSupportsMetalRender only succeeds when the host already has that
+   * property: without it the write is refused and the plugin's declaration is silently
+   * dropped, which looks exactly like a plugin that does not care. Declaring it here with
+   * "false" is the honest default - the host does not assume a plugin wants the device - and
+   * it is what makes a plugin able to say otherwise. */
+  void declareDeviceProperty() {
+    try {
+      /* It has to be created, not merely written: a write to a property the set does not
+       * contain is refused, and the plugin's own declaration then fails in the same way -
+       * silently, which is how a capable plugin comes to look indifferent. */
+      const OFX::Host::Property::PropSpec spec = {
+          kOfxImageEffectPropMetalRenderSupported, OFX::Host::Property::eString, 1, false, "false"};
+      getProps().createProperty(spec);
+    } catch (...) {
+      // A library version without the property is not a failure: the host simply has no
+      // device path to offer.
+    }
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -1432,7 +1527,19 @@ extern "C" ofxh_instance *ofxh_instance_new(ofxh_host *host, int index) {
     }
 
     auto *entry = new InstanceEntry();
-    entry->instance.reset(static_cast<InstanceImpl *>(instance));
+    auto *concrete = static_cast<InstanceImpl *>(instance);
+    entry->instance.reset(concrete);
+
+    /* The capability is the plugin's declaration on its descriptor, which the instance
+     * inherits unless it says otherwise. Read here, once, so a render never has to ask. */
+    bool capable = false;
+    try {
+      const auto &props = instance->getDescriptor().getProps();
+      capable = props.getStringProperty(kOfxImageEffectPropMetalRenderSupported, 0) == "true";
+    } catch (...) {
+      capable = false;
+    }
+    concrete->setMetalCapable(capable);
 
     // The create action tells the plugin it is alive and lets it allocate anything
     // it needs. The OFX example host calls it once, after every parameter and clip
@@ -1558,6 +1665,21 @@ extern "C" int ofxh_instance_render(ofxh_instance *handle, int outWidth, int out
     reportError(handle->owner, "the render failed");
     return kOfxStatFailed;
   }
+}
+
+extern "C" int ofxh_instance_metal_supported(ofxh_instance *handle) {
+  if (handle == nullptr || handle->entry == nullptr) {
+    return 0;
+  }
+  return handle->entry->instance->metalCapable() ? 1 : 0;
+}
+
+extern "C" int ofxh_instance_set_metal(ofxh_instance *handle, void *queue, void *srcBuffer, void *dstBuffer) {
+  if (handle == nullptr || handle->entry == nullptr) {
+    return kOfxStatErrBadHandle;
+  }
+  handle->entry->instance->setMetal(queue, srcBuffer, dstBuffer);
+  return kOfxStatOK;
 }
 
 extern "C" void ofxh_instance_cancel(ofxh_instance *handle, uint64_t generation) {

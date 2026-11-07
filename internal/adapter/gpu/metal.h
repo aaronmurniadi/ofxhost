@@ -41,6 +41,10 @@ int gpu_metal_write(long long handle, const void *src, long long bytes);
 /* gpu_metal_read copies the buffer back into host memory. */
 int gpu_metal_read(long long handle, void *dst, long long bytes);
 
+/* gpu_metal_pointer returns the id<MTLBuffer> a handle names, for a caller that has to pass
+ * it to something expecting the object itself. It returns NULL when the handle is unknown. */
+void *gpu_metal_pointer(long long handle);
+
 /* gpu_metal_command_queue returns the id<MTLCommandQueue> a plugin should enqueue onto, or
  * NULL when there is no device. */
 void *gpu_metal_command_queue(void);
