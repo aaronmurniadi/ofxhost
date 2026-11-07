@@ -369,17 +369,23 @@ export default function App() {
         </button>
 
         <div className="app__status">
+          {/* The zoom leads: it is the one value that changes while the user works, and a
+              number that moves should stay in the same place so the eye finds it. */}
+          {doc?.open ? (
+            <>
+              <span className="app__status-zoom" aria-label={`Zoom ${zoomPercent}%`}>
+                {zoomPercent}%
+              </span>
+              <span className="app__status-sep" aria-hidden>
+                ·
+              </span>
+            </>
+          ) : null}
           <span className="app__status-name" title={doc?.path ?? ""}>
             {doc?.open ? doc.fileName : "No image"}
           </span>
           {doc?.open ? (
             <>
-              <span className="app__status-sep" aria-hidden>
-                ·
-              </span>
-              <span className="app__status-zoom" aria-label={`Zoom ${zoomPercent}%`}>
-                {zoomPercent}%
-              </span>
               <span className="app__status-sep" aria-hidden>
                 ·
               </span>
