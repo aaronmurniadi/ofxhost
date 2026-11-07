@@ -130,32 +130,31 @@ any `z-index` inside the layout can paint over an open popup. Isolating the root
 for every popup at once. Raising each popup's `z-index` until it happens to win is the
 wrong fix and does not scale.
 
-#### Kumo UI — adopted for the styled layers
+#### Kumo UI — tried and reverted
 
 https://kumo-ui.com/llms.txt — Cloudflare's styled component library, built on Base UI. It
-provides the dialog, the select and the tooltip. Base UI still provides the number field,
-because Kumo has none and the drag-to-scrub parameter is the centre of this interface. Both
-libraries are installed; keep the two separate rather than reaching for one where the other
-is already in use.
+was adopted for the dialogs, dropdowns, tooltips, panels and controls, and then removed
+again. **It is not a dependency. Do not add it back without being asked.**
 
-Read Kumo's `llms.txt` before changing a component that comes from it. Its props are not
-Base UI's: `Dialog` is the popup, not `Dialog.Popup`; `Select` is one component taking
-`items`, not an assembly of parts; `Tooltip` takes `content` and a `render` trigger.
+What it cost while it was in, measured: the stylesheet went from 12 KB to 166 KB and the
+bundle from 408 KB to 587 KB, because Kumo ships the whole of Tailwind v4 including
+preflight, which also resets base elements. Its look is Cloudflare's, not this editor's.
 
-Three integration details, each of which cost something to find:
+What it taught stayed, because those findings were about behaviour and were right:
 
-- **`data-mode`, not `data-theme`.** Kumo reads `data-mode` for light and dark and reserves
-  `data-theme` for named themes of its own. Setting only `data-theme="dark"` leaves Kumo's
-  components in light mode inside a dark window.
-- **Kumo's stylesheet loads first.** It carries all of Tailwind v4 including preflight,
-  which resets headings and box sizing. It is imported before `styles/app.css` so our rules
-  win on equal specificity. Do not reorder those imports.
-- **`Tooltip` needs `TooltipProvider` at the root** for consecutive tooltips to share one
-  delay. Without it every tooltip waits the full delay again.
+- **A portal does not inherit your stacking context.** `#root` carries `isolation: isolate`.
+  Without it a `z-index` inside the layout paints over an open dropdown. Raising each
+  popup's `z-index` until it wins is the wrong fix.
+- **A tooltip trigger must be the focusable element.** Wrapping the child in a span produces
+  a tooltip that appears on hover and never on Tab. Use `render` so the part *is* the
+  control.
+- **The number field wants a `ScrubAreaCursor`**, and the draggable name should be a real
+  `<label>` whose id the input points at.
 
-Cost, measured: the stylesheet went from 8 KB to 167 KB and the bundle from 406 KB to
-497 KB. That is the price of a design system with its own reset; it is a desktop binary and
-the trade was accepted, but it is the reason not to add another styled library.
+The other thing worth remembering: adopting a design system halfway achieves nothing. Kumo's
+`LayerCard` was invisible until `.panel` gave up its own background, border and radius,
+because this stylesheet loads after and won the cascade. Either the old surface goes or the
+new one never appears.
 
 ---
 

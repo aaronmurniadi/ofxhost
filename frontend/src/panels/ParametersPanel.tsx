@@ -10,15 +10,9 @@
  * the plugin actually holds.
  */
 
-import { Button } from "@cloudflare/kumo/components/button";
-import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import { useCallback, useEffect, useState } from "react";
 import { chainApi, type ParamDTO } from "../api/document";
 import ParamNumber, { ParamScrubLabel } from "../widgets/ParamNumber";
-import { Input } from "@cloudflare/kumo/components/input";
-import { SensitiveInput } from "@cloudflare/kumo/components/sensitive-input";
-import { Slider } from "@cloudflare/kumo/components/slider";
-import { Switch } from "@cloudflare/kumo/components/switch";
 import Select from "../widgets/Select";
 import TooltipHint from "../widgets/Tooltip";
 import { buildParamTree, isContainer, type ParamNode } from "./paramTree";
@@ -86,10 +80,10 @@ export default function ParametersPanel({ selected, onChange }: Props) {
 
   if (selected < 0) {
     return (
-      <LayerCard render={<section aria-label="Parameters" />} className="panel panel--parameters">
+      <section className="panel panel--parameters" aria-label="Parameters">
         <h2 className="panel__title">Parameters</h2>
         <p className="panel__placeholder">Select a plugin in the chain.</p>
-      </LayerCard>
+      </section>
     );
   }
 
@@ -101,12 +95,12 @@ export default function ParametersPanel({ selected, onChange }: Props) {
   const tree = buildParamTree(params);
 
   return (
-    <LayerCard render={<section aria-label="Parameters" />} className="panel panel--parameters">
+    <section className="panel panel--parameters" aria-label="Parameters">
       <div className="params__header">
         <h2 className="panel__title">Parameters</h2>
-        <Button variant="secondary" size="sm" onClick={() => void resetAll()} disabled={editable.length === 0}>
+        <button className="button" onClick={() => void resetAll()} disabled={editable.length === 0}>
           Reset all
-        </Button>
+        </button>
       </div>
 
       {error ? <p className="plugins__error">{error}</p> : null}
@@ -127,7 +121,7 @@ export default function ParametersPanel({ selected, onChange }: Props) {
           onEditText={(name, value) => void edit(() => chainApi.setParamText(selected, name, value))}
         />
       ))}
-    </LayerCard>
+    </section>
   );
 }
 
@@ -202,11 +196,11 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
         <TooltipHint text={param.hint}>
           <span className="params__label">{param.label}</span>
         </TooltipHint>
-        <Switch
+        <input
+          type="checkbox"
           checked={checked}
           disabled={disabled}
-          aria-label={param.label}
-          onCheckedChange={(next) => onEdit([next ? 1 : 0])}
+          onChange={(event) => onEdit([event.target.checked ? 1 : 0])}
         />
       </label>
     );
@@ -241,23 +235,13 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
         <TooltipHint text={param.hint}>
           <span className="params__label">{param.label}</span>
         </TooltipHint>
-        {param.kind === "secret" ? (
-          // SensitiveInput masks the value and offers a reveal, which a password input
-          // does not: a secret a plugin asks for is usually one the user must verify.
-          <SensitiveInput
-            aria-label={param.label}
-            defaultValue={param.text}
-            disabled={disabled}
-            onBlur={(event) => onEditText(event.target.value)}
-          />
-        ) : (
-          <Input
-            aria-label={param.label}
-            defaultValue={param.text}
-            disabled={disabled}
-            onBlur={(event) => onEditText(event.target.value)}
-          />
-        )}
+        <input
+          className="input"
+          type={param.kind === "secret" ? "password" : "text"}
+          defaultValue={param.text}
+          disabled={disabled}
+          onBlur={(event) => onEditText(event.target.value)}
+        />
       </label>
     );
   }
@@ -302,17 +286,16 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
       </ParamScrubLabel>
       <div className="params__controls">
         {single ? (
-          <Slider
-            className="params__slider"
+          <input
+            className="input params__slider"
+            type="range"
             min={param.displayMin}
             max={param.displayMax}
-            step={isInt ? 1 : undefined}
+            step={isInt ? 1 : "any"}
             value={values[0]}
             disabled={disabled}
-            getAriaLabel={() => `${param.label} slider`}
-            // The slider is for roughly setting a value; the number field beside it
-            // commits on release and is the precise control.
-            onValueChange={(next) => onEdit([Array.isArray(next) ? next[0] : next])}
+            aria-label={`${param.label} slider`}
+            onChange={(event) => onEdit([Number(event.target.value)])}
           />
         ) : null}
         {values.map((value, component) => (

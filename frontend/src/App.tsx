@@ -24,9 +24,6 @@ import ParametersPanel from "./panels/ParametersPanel";
 import PluginsPanel from "./panels/PluginsPanel";
 import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
 import SettingsDialog from "./panels/SettingsDialog";
-import { Button } from "@cloudflare/kumo/components/button";
-import { Toolbar } from "@cloudflare/kumo/components/toolbar";
-import { Loader } from "@cloudflare/kumo/components/loader";
 import Select from "./widgets/Select";
 import TooltipHint from "./widgets/Tooltip";
 
@@ -273,31 +270,24 @@ export default function App() {
       {/* The bar carries actions only. What is open and how it is being shown lives in
           the status bar, and repeating it here made two places say the same thing. */}
       <header className="app__bar">
-        <Toolbar>
-          <Button variant="primary" size="sm" onClick={() => void chooseFile()}>
-            Open…
-          </Button>
+        <button className="button button--primary" onClick={() => void chooseFile()}>
+          Open…
+        </button>
           {lastImage !== "" && !doc?.open ? (
             <TooltipHint text={lastImage}>
-              <Button variant="secondary" size="sm" onClick={() => setPendingPath(lastImage)}>
+              <button className="button" onClick={() => setPendingPath(lastImage)}>
                 Reopen last
-              </Button>
+              </button>
             </TooltipHint>
           ) : null}
           <TooltipHint text={doc?.open ? "Export the chain at full resolution" : "Open a file first"}>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setExporting(true)}
-              disabled={!doc?.open}
-            >
+            <button className="button" onClick={() => setExporting(true)} disabled={!doc?.open}>
               Export…
-            </Button>
+            </button>
           </TooltipHint>
-          <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
+          <button className="button" onClick={() => setSettingsOpen(true)}>
             Settings
-          </Button>
-        </Toolbar>
+          </button>
         <span className="app__version">{version}</span>
       </header>
 
@@ -333,7 +323,7 @@ export default function App() {
               makes the spinner mean something: an indicator that is always moving says
               nothing about whether the program is busy. */}
           {busy ? (
-            <Loader size="sm" aria-label="Rendering" className="app__status-spinner" />
+            <span className="app__spinner" role="status" aria-label="Rendering" />
           ) : (
             <span className="app__status-idle" aria-hidden />
           )}

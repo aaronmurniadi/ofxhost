@@ -9,15 +9,8 @@
  * and a user who needs larger text should not have to switch theme to get it.
  */
 
-/*
- * The mode is `data-mode`, not `data-theme`.
- *
- * Kumo reads `data-mode` for light and dark, and reserves `data-theme` for named themes
- * of its own. Using one attribute for both would have made a theme called "dark" that
- * Kumo does not have, and left its components in light mode inside a dark window.
- */
 :root,
-[data-mode="dark"] {
+[data-theme="dark"] {
   --bg: #1e1e1e;
   --panel: #252525;
   --line: #3d3d3d;
@@ -49,7 +42,7 @@
  * reads as raised, and the accent is darker so it keeps its contrast against a pale
  * background.
  */
-[data-mode="light"] {
+[data-theme="light"] {
   --bg: #f2f2f4;
   --panel: #ffffff;
   --line: #d8d8dd;
@@ -125,11 +118,7 @@ body,
   border-bottom: 1px solid var(--panel-border);
 }
 
-/* The bar holds actions only. The version is the one piece of text left, and it sits at
-   the far right so the buttons stay grouped at the left where the eye starts. */
-.app__bar > .app__version {
-  margin-left: auto;
-}
+
 
 /* The panel area.
    Decision D9: react-resizable-panels owns the geometry, so this is a plain
@@ -209,14 +198,6 @@ body,
   user-select: none;
 }
 
-/*
- * A panel is laid out here and surfaced by Kumo's LayerCard.
- *
- * The background, border and radius that used to live in this rule are gone on purpose.
- * Kumo supplies the surface, and this stylesheet loads after Kumo's - so leaving them here
- * would have won the cascade and made the LayerCard invisible, which is exactly the kind of
- * "it looks the same" that comes from half-adopting a design system.
- */
 .panel {
   display: flex;
   flex-direction: column;
@@ -224,6 +205,9 @@ body,
   min-height: 0;
   padding: 8px;
   overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
 }
 
 /*
@@ -279,9 +263,6 @@ body,
   width: 100%;
   height: 100%;
   overflow: hidden;
-  /* A drag anywhere in the panel pans the image, so the cursor says so before the user
-     tries. touch-action is off because the browser would otherwise claim the gesture for
-     scrolling and the drag would never reach the handler. */
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -301,8 +282,34 @@ body,
   -webkit-user-drag: none;
 }
 
+.preview__overlay {
+  position: absolute;
+  color: var(--text-dim);
+  font-size: 11px;
+  pointer-events: none;
+  /* A dark halo keeps the label readable over a bright photograph. */
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+}
 
+.preview__overlay--name {
+  top: 8px;
+  left: 8px;
+  /* Leave room for the render-size control in the other corner, so a long file name
+   * cannot run underneath it. */
+  max-width: calc(100% - 160px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
+.preview__overlay--zoom {
+  bottom: 8px;
+  left: 8px;
+}
+
+.app__bar > .app__version {
+  margin-left: auto;
+}
 
 .app__version {
   margin-left: auto;
@@ -496,21 +503,47 @@ body,
  * plain element: the window has one, only one, and it is shown while a file waits
  * for its colour space. */
 /*
- * The modal shell is Kumo's Dialog: it renders the backdrop, the portal, the focus trap and
- * the box. These rules only lay out what goes inside, and leave the surface to the
- * stylesheet that already decided what a dialog looks like.
+ * The modal.
+ *
+ * Base UI renders three elements: a backdrop, a viewport that centres its child, and the
+ * popup. The dim is a backdrop rather than a blur because the preview behind is the thing
+ * being decided about, so it stays visible.
  */
-/* Kumo sizes its select by content; inside a parameter row it should take the width the
-   row gives it rather than push the row wider. */
-.ofxhost-select {
-  min-width: 8em;
-  max-width: 100%;
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--backdrop);
+  z-index: 10;
 }
 
-.ofxhost-modal {
-  /* Kumo sets the width by size; the content just needs room to breathe. */
+.modal-viewport {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 16px;
-  gap: 0;
+  z-index: 11;
+}
+
+.modal {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  /* Base UI sets these while the dialog animates in; without a transition they are
+   * simply the final values. */
+  opacity: 1;
+  outline: none;
+}
+
+.modal--wide {
+  width: 640px;
 }
 
 .modal__body {
@@ -671,78 +704,6 @@ body,
 /* The status line.
    It sits below the workspace and never changes height, so a message appearing does
    not move the panels. */
-.app__status {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 10px;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 0.85em;
-  min-height: 2.1em;
-  flex: 0 0 auto;
-}
-
-/* A quiet dot while idle, in the same footprint as the spinner, so the status line does
-   not shift by a few pixels every time a render starts. */
-.app__status-idle {
-  width: 16px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-}
-
-.app__status-idle::after {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--muted);
-  opacity: 0.55;
-}
-
-.app__status-spinner {
-  flex: 0 0 auto;
-}
-
-/* The left group answers "what am I looking at": name, zoom, size, render resolution. */
-.app__status-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-/* A long file name is the one thing here that can overflow, so it truncates rather than
-   pushing the render-size control off the bar. */
-.app__status-name {
-  max-width: 22em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
-}
-
-.app__status-sep {
-  opacity: 0.5;
-}
-
-.app__status-zoom,
-.app__status-size {
-  font-variant-numeric: tabular-nums;
-}
-
-/* The message is the only part that changes on its own, so it takes the remaining room
-   and stays right-aligned. */
-.app__status-message {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-}
 
 
 /* An element that is read by a screen reader but not drawn. */
@@ -758,8 +719,38 @@ body,
   border: 0;
 }
 
+/* The render-size control, drawn over the preview like the other overlays. */
+/*
+ * The render size sits at the top right.
+ *
+ * It used to be at the bottom left, in the same corner as the zoom label, so the two
+ * were drawn on top of each other.
+ *
+ * The overlay default is pointer-events: none, because the labels must not swallow a
+ * drag meant for the image. A control is the exception: without this the select is
+ * drawn but every click passes through it to the canvas underneath.
+ */
+.preview__overlay--resolution {
+  top: 8px;
+  right: 8px;
+  left: auto;
+  bottom: auto;
+  pointer-events: auto;
+}
 
+.preview__overlay--resolution .preview__resolution {
+  pointer-events: auto;
+  cursor: pointer;
+}
 
+.preview__resolution {
+  background: var(--overlay-bg);
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 0.85em;
+}
 
 /* The parameter tree.
    Each group is a fold-out section, and a section inside a section is indented so the
@@ -964,13 +955,114 @@ body,
   user-select: none;
 }
 
-/* While the image is being dragged the cursor is closed, which is the standard signal
-   that the gesture is live. */
+/* The status line has two sides: what is open on the left, the last outcome on the right. */
+.app__status {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.85em;
+  min-height: 2.1em;
+  flex: 0 0 auto;
+}
+
+.app__status-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* A long file name is the one thing here that can overflow, so it truncates rather than
+   pushing the render-size control off the bar. */
+.app__status-name {
+  max-width: 22em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.app__status-sep {
+  opacity: 0.5;
+}
+
+.app__status-zoom,
+.app__status-size {
+  font-variant-numeric: tabular-nums;
+}
+
+.app__status-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* A quiet dot while idle, in the same footprint as the spinner, so the line does not shift
+   by a few pixels every time a render starts. */
+.app__status-idle {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.app__status-idle::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.55;
+}
+
+/*
+ * The busy indicator.
+ *
+ * A ring with one coloured quarter, turned by a keyframe. It replaces the styled library's
+ * spinner: this is twenty lines of CSS that belong to the program, rather than a dependency
+ * that brings a whole design system with it.
+ */
+.app__spinner {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  animation: app-spin 700ms linear infinite;
+}
+
+@keyframes app-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A user who asked the system to reduce motion gets a pulsing dot instead of a spin. */
+@media (prefers-reduced-motion: reduce) {
+  .app__spinner {
+    animation: app-pulse 1.2s ease-in-out infinite;
+    border-top-color: var(--line);
+    background: var(--accent);
+  }
+  @keyframes app-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+  }
+}
+
+/* While the image is being dragged the cursor is closed. */
 .preview__canvas--dragging {
   cursor: grabbing;
 }
 
-/* The cursor must not flicker to a text caret while the image is dragged. */
 .preview__canvas--dragging .preview__image {
   pointer-events: none;
 }

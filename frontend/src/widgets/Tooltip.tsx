@@ -1,23 +1,26 @@
 /**
- * A tooltip, on Kumo.
+ * A tooltip, on Base UI.
  *
- * It replaces the `title` attribute, which waits about a second before appearing, cannot be
- * styled, and is invisible to a keyboard user entirely.
+ * It replaces the `title` attribute, which waits about a second before appearing, cannot
+ * be styled, and is invisible to a keyboard user entirely.
  *
- * The trigger must be the control itself. A tooltip that wraps its child in a span cannot
- * show on Tab, because the span is what the library listens to and a span cannot take focus
- * — which is the exact defect this component exists to remove. Kumo's `render` prop is the
- * documented way to say "the trigger is this element", so the caller's control is passed
- * through rather than wrapped.
+ * The obvious implementation — wrap the child in a `<span>` and make that the trigger — is
+ * wrong, and Base UI's composition guide is what exposed it. `Tooltip.Trigger` binds its
+ * own focus handler, so the trigger must *be* the focusable element. A span cannot receive
+ * focus, so wrapping produced a tooltip that appeared on hover and never on Tab: the exact
+ * defect this component exists to remove.
  *
- * A disabled control receives neither hover nor focus, so no arrangement of a trigger can
- * make it explain itself; for that case the child is wrapped in a span, which at least
- * restores hover. Nothing is lost, because a disabled control cannot be focused anyway.
- * Pass `aria-disabled` instead of `disabled` to keep a control reachable and simply refuse
- * the action — then it behaves like any other and this exception does not apply.
+ * So the trigger is built by merging Base UI's props onto the caller's element through the
+ * `render` prop, which is the documented way to say "this part is my element".
+ *
+ * Disabled children are the one exception. A disabled button receives neither hover nor
+ * focus, so no arrangement of a trigger can make it explain itself; a wrapper span at least
+ * restores hover. Nothing is lost by that, because a disabled control cannot take focus
+ * anyway. Pass `aria-disabled` instead of `disabled` if the control should stay reachable
+ * and simply refuse the action — then it is focusable and this component behaves normally.
  */
 
-import { Tooltip } from "@cloudflare/kumo/components/tooltip";
+import { Tooltip } from "@base-ui/react/tooltip";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 
 export interface TooltipProps {
@@ -25,9 +28,11 @@ export interface TooltipProps {
   text: string;
   /** Exactly one element: the control the tooltip describes. */
   children: ReactNode;
+  /** Where it appears. Defaults to above. */
+  side?: "top" | "bottom" | "left" | "right";
 }
 
-export default function TooltipHint({ text, children }: TooltipProps) {
+export default function TooltipHint({ text, children, side = "top" }: TooltipProps) {
   if (text === "") {
     return <>{children}</>;
   }
@@ -38,15 +43,29 @@ export default function TooltipHint({ text, children }: TooltipProps) {
   }
 
   const disabled = (child.props as { disabled?: boolean }).disabled === true;
+
+  const popup = (
+    <Tooltip.Portal>
+      <Tooltip.Positioner className="tooltip-positioner" side={side} sideOffset={6}>
+        <Tooltip.Popup className="tooltip">{text}</Tooltip.Popup>
+      </Tooltip.Positioner>
+    </Tooltip.Portal>
+  );
+
   if (disabled) {
-    // Kumo takes the trigger's own content as children when `render` names a bare
-    // element, so the control is passed through rather than dropped.
+    // The control cannot be interacted with, so the trigger has to be something that can.
     return (
-      <Tooltip content={text} render={<span className="tooltip-trigger" />}>
-        {children}
-      </Tooltip>
+      <Tooltip.Root>
+        <Tooltip.Trigger render={<span className="tooltip-trigger" />}>{children}</Tooltip.Trigger>
+        {popup}
+      </Tooltip.Root>
     );
   }
 
-  return <Tooltip content={text} render={child as ReactElement} />;
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger render={child as ReactElement} />
+      {popup}
+    </Tooltip.Root>
+  );
 }

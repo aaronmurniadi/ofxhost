@@ -12,8 +12,6 @@
  */
 
 import Modal from "../widgets/Modal";
-import { Button } from "@cloudflare/kumo/components/button";
-import { Radio, RadioGroup } from "@cloudflare/kumo/components/radio";
 import { useEffect, useState } from "react";
 import { api } from "../api/document";
 
@@ -61,28 +59,28 @@ export default function OpenDialog({ path, onConfirm, onCancel }: Props) {
       description={`${fileName} is a RAW file, so it declares no colour space. Choose the space to develop it into. This is the space the chain works in, and the space the first plugin is given.`}
       actions={
         <>
-          <Button variant="primary" size="sm" onClick={confirm}>
+          <button className="button button--primary" onClick={confirm}>
             Open
-          </Button>
-          <Button variant="secondary" size="sm" onClick={onCancel}>
+          </button>
+          <button className="button" onClick={onCancel}>
             Cancel
-          </Button>
+          </button>
         </>
       }
     >
-      {/* A card group rather than a column of dots: the four spaces are a choice between
-          named options, and the card treatment makes the selected one legible at a glance. */}
-      <RadioGroup<string>
-        legend="Working space"
-        value={String(choice)}
-        onValueChange={(next) => setChoice(Number(next))}
-        appearance="card"
-        orientation="vertical"
-      >
+      <div className="modal__choices">
         {spaces.map((name, index) => (
-          <Radio.Item key={name} value={String(index)} label={name} />
+          <label key={name} className="modal__choice">
+            <input
+              type="radio"
+              name="working-space"
+              checked={choice === index}
+              onChange={() => setChoice(index)}
+            />
+            <span>{name}</span>
+          </label>
         ))}
-      </RadioGroup>
+      </div>
 
       <p className="modal__note">
         Changing this later means opening the file again: the space is where the decode
