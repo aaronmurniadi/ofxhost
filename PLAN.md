@@ -1212,9 +1212,26 @@ Largest of the six and the one that changes results most. It also carries the on
 question: that file stays under darktable's GPL-3.0 while the rest of the program is not.
 Settle that before writing code, not after.
 
-**4. M7 - other platforms and CI.**
+**4. M7 - other platforms and CI. — macOS CI done; Windows and Linux open.**
 
-Packaging work over ports that already exist. Nothing here changes behaviour.
+`.github/workflows/release.yml` builds the macOS app on both architectures, runs the tests,
+verifies the bundle carries its plugins and its signature, and publishes a draft release.
+
+Two facts it had to encode, both found by running the packaging locally rather than by reading
+the Taskfile:
+
+- **`wails3 build` produces a bare binary, not an app bundle.** The `.app` comes from
+  `task darwin:package`, which also ad-hoc signs it. A workflow that stopped at the first
+  step would publish something that cannot be opened by double-clicking.
+- **The app bundle did not carry the plugins.** The development build finds them by walking
+  up to the CMake output, and that path does not exist once the app is in /Applications. The
+  packaging task now copies each `*.ofx.bundle` into `Contents/Resources`, which is where
+  `BundledPluginDirs` looks. Verified by running a copy of the bundle from `/tmp`: it finds
+  the three bundled plugins and the six installed ones.
+
+Windows and Linux remain unbuilt. The workflow is deliberately macOS-only: writing release
+steps for toolchains that have never run here produces scripts that fail on the first user
+rather than here.
 
 **5. Project save and load. — done, in the state directory.**
 

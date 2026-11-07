@@ -1,0 +1,190 @@
+name: Release
+
+# Builds the macOS application and attaches it to a release.
+#
+# Two things make this workflow look the way it does, and both are worth stating.
+#
+# The native library is built first and by hand. `wails3 build` runs `go build`, and cgo links
+# against build/ofxhost-native/lib/libofxhost.a, which CMake produces. A workflow that skipped
+# the CMake step would produce a binary without the OpenFX host, or no binary at all — the
+# failure looks like a Go problem and is not one.
+#
+# The plugins are part of the build, not an extra: the bundle target is in the default CMake
+# build, so one `cmake --build` produces the host library and the bundled plugins together.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and release (for example v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: ofxhost
+  # Pinned rather than "latest": a release build should change because the code changed,
+  # not because a tool moved under it.
+  WAILS_VERSION: v3.1.0
+  GO_VERSION: '1.26'
+
+jobs:
+  macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: x86_64
+            runner: macos-13
+    env:
+      GOARCH: ${{ matrix.arch }}
+      # The cgo link line is generated per architecture, so the deployment target has to
+      # match what the Go toolchain was told.
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      CGO_CFLAGS: '-mmacosx-version-min=12.0'
+      CGO_LDFLAGS: '-mmacosx-version-min=12.0'
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          # The OpenFX headers and HostSupport are a submodule, and the host does not
+          # compile without them.
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # libraw decodes the RAW; lcms2 does the colour conversion; the rest write the export
+      # formats. expat parses the plugin XML. These are the same libraries the local build
+      # uses, and the link line names them, so a missing one is a link error rather than a
+      # missing feature discovered at runtime.
+      - name: Install native dependencies
+        run: |
+          brew install \
+            libraw lcms2 libpng libtiff jpeg-turbo webp jpeg-xl expat
+
+      - name: Install build tools
+        run: |
+          # task came from mise locally; here it is installed directly.
+          brew install go-task
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build the native library and the bundled plugins
+        run: |
+          cmake -S internal/adapter/ofxhost/native \
+                -B build/ofxhost-native \
+                -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/ofxhost-native -j "$(sysctl -n hw.ncpu)"
+
+      - name: Verify the native build produced what the link needs
+        run: |
+          test -f build/ofxhost-native/lib/libofxhost.a \
+            || { echo "libofxhost.a is missing; the CMake step did not run or failed"; exit 1; }
+          test -d build/ofxhost-native/bundled/OfxHost.ofx.bundle \
+            || { echo "the bundled plugins are missing; the app would ship with fewer effects"; exit 1; }
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Test
+        run: |
+          go test ./...
+          go run ./tools/layerguard
+          cd frontend && npm test
+
+      - name: Build the application bundle
+        run: |
+          # `wails3 build` alone produces a bare binary. `task darwin:package` builds it and
+          # then assembles the .app around it, copying the bundled plugins into Resources and
+          # ad-hoc signing the result. Asking for the bundle is the difference between a
+          # release that opens with its effects and one that opens empty.
+          task darwin:package ARCH=${GOARCH}
+
+      - name: Verify the app bundle
+        run: |
+          APP="bin/${APP_NAME}.app"
+          test -d "$APP" || { echo "no app bundle at $APP"; ls -la bin; exit 1; }
+          # A bundle that opens but discovers no plugins is the failure this catches: the
+          # plugin bundle has to be inside Resources, because the upward search for the CMake
+          # output does not find anything once the app is installed.
+          find "$APP/Contents/Resources" -name '*.ofx.bundle' -maxdepth 3 | grep -q . \
+            || { echo "the app bundle carries no plugins"; ls -la "$APP/Contents/Resources"; exit 1; }
+
+      - name: Verify the signature
+        run: |
+          # The packaging task signs ad hoc, which is what the local build does. Checking it
+          # here means a signing change fails the release rather than the user's first launch.
+          codesign --verify --deep --strict "bin/${APP_NAME}.app"
+
+      - name: Package
+        run: |
+          # ditto, not zip: it preserves the resource forks and permissions an app bundle
+          # needs, and a bundle unzipped with a plain zip quietly loses them.
+          ditto -c -k --sequesterRsrc --keepParent \
+            "bin/${APP_NAME}.app" \
+            "bin/${APP_NAME}-macOS-${{ matrix.arch }}.zip"
+          shasum -a 256 "bin/${APP_NAME}-macOS-${{ matrix.arch }}.zip" \
+            > "bin/${APP_NAME}-macOS-${{ matrix.arch }}.zip.sha256"
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-macOS-${{ matrix.arch }}
+          path: |
+            bin/${{ env.APP_NAME }}-macOS-${{ matrix.arch }}.zip
+            bin/${{ env.APP_NAME }}-macOS-${{ matrix.arch }}.zip.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    needs: macos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Collect the builds
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List what will be published
+        run: ls -la dist
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          # A tag push names itself. A manual run needs the tag, and refusing without one
+          # keeps a release from being published against the default branch.
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

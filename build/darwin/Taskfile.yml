@@ -173,6 +173,24 @@ tasks:
           cp build/darwin/Assets.car "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
         fi
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
+      # The bundled plugins are not linked into the binary; OpenFX loads them from a bundle
+      # on disk. In a development build the host finds them by walking up to the CMake output,
+      # which does not exist once the app is dragged to /Applications. Copying them into
+      # Resources is what makes the shipped app carry its own effects.
+      - |
+        # Only the bundles themselves. The directory also holds CMake's own output - a static
+        # library, CMakeFiles, install scripts - and copying all of it would put build debris
+        # in a shipped app.
+        found=0
+        for bundle in build/ofxhost-native/bundled/*.ofx.bundle; do
+          if [ -d "$bundle" ]; then
+            cp -R "$bundle" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources/"
+            found=1
+          fi
+        done
+        if [ "$found" -eq 0 ]; then
+          echo "warning: no bundled plugins found; the app will ship without its effects" >&2
+        fi
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
       - task: '{{if eq OS "darwin"}}codesign:adhoc{{else}}codesign:skip{{end}}'
 
