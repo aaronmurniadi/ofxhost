@@ -1,17 +1,22 @@
 /**
- * A dropdown, on Base UI.
+ * A dropdown, on Kumo.
  *
- * The native `<select>` is replaced for two reasons. A list can be long — a plugin can
- * offer forty-seven presets and the colour-space list has thirty-three entries — and the
- * native popup gives no way to search or to show a scroll context. The other reason is
- * that the native popup cannot be styled, so it was the one control that ignored the
- * theme.
+ * Kumo's Select is one component rather than an assembly of parts: it takes the options,
+ * the value and the change handler, and builds the trigger, the popup and the list itself.
+ * That replaced about eighty lines of Base UI plumbing with an adapter whose only job is to
+ * keep the prop names this project uses.
  *
- * Base UI supplies the keyboard model, typeahead, and the ARIA roles; only the look is
- * ours.
+ * Two deliberate choices:
+ *
+ * `aria-label` is passed rather than `label`, because Kumo renders a visible label above
+ * the control when given one, and every caller here already draws its own label beside the
+ * control. Two visible labels for one field is worse than none.
+ *
+ * The value stays a `string`. Kumo reports null when a selection is cleared, which this
+ * control never offers, so null is ignored rather than read as a choice of nothing.
  */
 
-import { Select as BaseSelect } from "@base-ui/react/select";
+import { Select as KumoSelect } from "@cloudflare/kumo";
 
 export interface SelectOption {
   /** The display text. */
@@ -45,46 +50,20 @@ export default function Select({
   id,
 }: SelectProps) {
   return (
-    <BaseSelect.Root
-      value={value}
-      // The items are declared here as well as rendered below, and that is not
-      // duplication. The rendered items live in a portal that is not mounted while the
-      // popup is closed, so the trigger has nothing to read a label from and falls back
-      // to the raw value - which showed "0" instead of the option's name in every
-      // dropdown.
+    <KumoSelect
+      id={id}
+      aria-label={labelId === undefined ? label : undefined}
+      aria-labelledby={labelId}
       items={options}
+      value={value}
       onValueChange={(next) => {
-        // Base UI reports null when the selection is cleared, which this control never
-        // offers, so it is ignored rather than treated as a choice of "nothing".
         if (next !== null) {
-          onChange(next as string);
+          onChange(String(next));
         }
       }}
       disabled={disabled}
-    >
-      <BaseSelect.Trigger id={id} className="select" aria-label={label} aria-labelledby={labelId}>
-        <BaseSelect.Value className="select__value" />
-        <BaseSelect.Icon className="select__icon" aria-hidden>
-          ▾
-        </BaseSelect.Icon>
-      </BaseSelect.Trigger>
-
-      <BaseSelect.Portal>
-        <BaseSelect.Positioner className="select__positioner" sideOffset={4}>
-          <BaseSelect.Popup className="select__popup">
-            <BaseSelect.List className="select__list">
-              {options.map((option) => (
-                <BaseSelect.Item key={option.value} value={option.value} className="select__item">
-                  <BaseSelect.ItemIndicator className="select__tick" aria-hidden>
-                    ✓
-                  </BaseSelect.ItemIndicator>
-                  <BaseSelect.ItemText>{option.label}</BaseSelect.ItemText>
-                </BaseSelect.Item>
-              ))}
-            </BaseSelect.List>
-          </BaseSelect.Popup>
-        </BaseSelect.Positioner>
-      </BaseSelect.Portal>
-    </BaseSelect.Root>
+      size="sm"
+      className="ofxhost-select"
+    />
   );
 }

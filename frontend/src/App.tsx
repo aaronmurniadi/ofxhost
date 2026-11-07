@@ -73,6 +73,8 @@ export default function App() {
   // style recalculation and no React re-render of the panels.
   const applyAppearance = useCallback((theme: string, fontPt: number) => {
     const root = document.documentElement;
+    // One attribute drives both our tokens and Kumo's components.
+    root.dataset.mode = theme.toLowerCase();
     root.dataset.theme = theme.toLowerCase();
     if (fontPt > 0) {
       root.style.setProperty("--font-size", `${fontPt}px`);

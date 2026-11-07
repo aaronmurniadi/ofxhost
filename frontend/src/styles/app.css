@@ -9,8 +9,15 @@
  * and a user who needs larger text should not have to switch theme to get it.
  */
 
+/*
+ * The mode is `data-mode`, not `data-theme`.
+ *
+ * Kumo reads `data-mode` for light and dark, and reserves `data-theme` for named themes
+ * of its own. Using one attribute for both would have made a theme called "dark" that
+ * Kumo does not have, and left its components in light mode inside a dark window.
+ */
 :root,
-[data-theme="dark"] {
+[data-mode="dark"] {
   --bg: #1e1e1e;
   --panel: #252525;
   --line: #3d3d3d;
@@ -42,7 +49,7 @@
  * reads as raised, and the accent is darker so it keeps its contrast against a pale
  * background.
  */
-[data-theme="light"] {
+[data-mode="light"] {
   --bg: #f2f2f4;
   --panel: #ffffff;
   --line: #d8d8dd;
@@ -503,47 +510,21 @@ body,
  * plain element: the window has one, only one, and it is shown while a file waits
  * for its colour space. */
 /*
- * The modal.
- *
- * Base UI renders three elements: a backdrop, a viewport that centres its child, and the
- * popup. The dim is a backdrop rather than a blur because the preview behind is the thing
- * being decided about, so it stays visible.
+ * The modal shell is Kumo's Dialog: it renders the backdrop, the portal, the focus trap and
+ * the box. These rules only lay out what goes inside, and leave the surface to the
+ * stylesheet that already decided what a dialog looks like.
  */
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: var(--backdrop);
-  z-index: 10;
+/* Kumo sizes its select by content; inside a parameter row it should take the width the
+   row gives it rather than push the row wider. */
+.ofxhost-select {
+  min-width: 8em;
+  max-width: 100%;
 }
 
-.modal-viewport {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.ofxhost-modal {
+  /* Kumo sets the width by size; the content just needs room to breathe. */
   padding: 16px;
-  z-index: 11;
-}
-
-.modal {
-  width: 420px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 32px);
-  overflow: auto;
-  padding: 16px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
-  /* Base UI sets these while the dialog animates in; without a transition they are
-   * simply the final values. */
-  opacity: 1;
-  outline: none;
-}
-
-.modal--wide {
-  width: 640px;
+  gap: 0;
 }
 
 .modal__body {

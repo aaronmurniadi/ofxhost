@@ -130,25 +130,32 @@ any `z-index` inside the layout can paint over an open popup. Isolating the root
 for every popup at once. Raising each popup's `z-index` until it happens to win is the
 wrong fix and does not scale.
 
-#### Kumo UI — reviewed, not adopted
+#### Kumo UI — adopted for the styled layers
 
-https://kumo-ui.com/llms.txt — Cloudflare's styled component library, built on Base UI.
-Worth reading; not a dependency here.
+https://kumo-ui.com/llms.txt — Cloudflare's styled component library, built on Base UI. It
+provides the dialog, the select and the tooltip. Base UI still provides the number field,
+because Kumo has none and the drag-to-scrub parameter is the centre of this interface. Both
+libraries are installed; keep the two separate rather than reaching for one where the other
+is already in use.
 
-Not adopted, for three concrete reasons:
+Read Kumo's `llms.txt` before changing a component that comes from it. Its props are not
+Base UI's: `Dialog` is the popup, not `Dialog.Popup`; `Select` is one component taking
+`items`, not an assembly of parts; `Tooltip` takes `content` and a `render` trigger.
 
-1. **It has no Number Field**, which is the component this host chose Base UI for. The
-   drag-to-scrub parameter is the centre of the interface.
-2. **It is styled to Cloudflare's design language.** This is a dense editor; adopting it
-   means restyling rather than theming.
-3. **It is Tailwind-based**, including its standalone build, where this project writes
-   plain CSS with tokens.
+Three integration details, each of which cost something to find:
 
-It is still worth consulting when a Base UI question is about behaviour rather than
-appearance. Both defects found on review came from reading rather than guessing: the
-tooltip trigger from Base UI's composition guide, and the stacking-context problem from
-Kumo's installation page. If a decision ever needs revisiting — a Number Field appearing
-there, or a move to Tailwind — this note is the starting point, not the answer.
+- **`data-mode`, not `data-theme`.** Kumo reads `data-mode` for light and dark and reserves
+  `data-theme` for named themes of its own. Setting only `data-theme="dark"` leaves Kumo's
+  components in light mode inside a dark window.
+- **Kumo's stylesheet loads first.** It carries all of Tailwind v4 including preflight,
+  which resets headings and box sizing. It is imported before `styles/app.css` so our rules
+  win on equal specificity. Do not reorder those imports.
+- **`Tooltip` needs `TooltipProvider` at the root** for consecutive tooltips to share one
+  delay. Without it every tooltip waits the full delay again.
+
+Cost, measured: the stylesheet went from 8 KB to 167 KB and the bundle from 406 KB to
+497 KB. That is the price of a design system with its own reset; it is a desktop binary and
+the trade was accepted, but it is the reason not to add another styled library.
 
 ---
 
