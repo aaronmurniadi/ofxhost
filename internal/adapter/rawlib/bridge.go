@@ -19,7 +19,7 @@ package rawlib
 /*
 #cgo CXXFLAGS: -std=c++17
 #cgo CPPFLAGS: -U_OPENMP
-#cgo LDFLAGS: -lraw -lstdc++
+#cgo LDFLAGS: -lraw
 
 #include <stdlib.h>
 #include "raw.h"

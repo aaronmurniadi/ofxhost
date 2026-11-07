@@ -185,6 +185,32 @@ no required module provides package github.com/aaron.murniadi/ofxhost/internal/.
 This looks like a toolchain fault and is not. Read the path in the error message
 character by character. It cost hours here and was twice misdiagnosed as a Go bug.
 
+### Three flags decide the macOS deployment target, and two of them are easy to miss
+
+`go build` links at Go's own default (11.0 on darwin/arm64) unless it is told otherwise, and the
+C++ is compiled at the SDK's default, which on a current machine is several major versions higher.
+Both produce `ld: warning: ... was built for newer 'macOS' version ... than being linked`, dozens
+of lines per link, on a build that is otherwise fine.
+
+- **`CGO_CFLAGS` does not reach C++.** `CGO_CXXFLAGS` does. The build log prints both, and an
+  empty `CGO_CXXFLAGS=""` beside a full `CGO_CFLAGS` is the tell.
+- **`-mmacosx-version-min` is dropped from cgo `#cgo LDFLAGS`.** It is a compiler flag, not a
+  linker one. It must arrive through `-ldflags=... -extldflags=-mmacosx-version-min=12.0`.
+- **Passing `-ldflags` at all replaces the flags Go would otherwise derive.** A production build
+  with `-ldflags="-w -s"` links at 11.0 even though `CGO_LDFLAGS` says 12.0. A development build,
+  which passes no `-ldflags`, links at 12.0 and looks fine — which is why this only shows up
+  after `wails3 build` and not during `wails3 dev`.
+
+`native/CMakeLists.txt` sets `CMAKE_OSX_DEPLOYMENT_TARGET` before `project()`, because CMake reads
+it when it initialises the toolchain. Omit it and the archive is built for the SDK's version.
+
+A bare `go build ./...` still links at Go's default and warns. That is expected; use the tasks.
+
+What remains after all three are set is honest and unfixable here: Homebrew builds its libraries
+for the OS it runs on, so a machine on macOS 26 links dependencies that need 26 while the app
+claims 12. The warning is true. `-Wl,-no_warn_duplicate_libraries` silences all of it — measured:
+65 warnings to 0 — which is exactly why not to use it.
+
 ### CGO cannot compile files outside its package directory
 
 `libofxhost.a` must be built by CMake before `go build`. Run the CMake step after **any**

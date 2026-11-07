@@ -14,7 +14,7 @@ package lcms
 
 /*
 #cgo CXXFLAGS: -std=c++17
-#cgo LDFLAGS: -llcms2 -lstdc++
+#cgo LDFLAGS: -llcms2
 
 #include <stdlib.h>
 #include "lcms.h"

@@ -4,7 +4,7 @@ package ofxhost
 
 /*
 #cgo CPPFLAGS: -I${SRCDIR}/../../../third_party/openfx/include -I${SRCDIR}/../../../third_party/openfx/HostSupport/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../build/ofxhost-native/lib -lofxhost
+#cgo LDFLAGS: -L${SRCDIR}/../../../build/ofxhost-native/lib -lofxhost -lstdc++
 //
 // The host library is built by CMake from native/CMakeLists.txt, because cgo cannot
 // compile translation units outside the package directory and HostSupport is a

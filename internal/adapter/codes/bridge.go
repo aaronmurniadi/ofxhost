@@ -14,7 +14,7 @@ package codes
 
 /*
 #cgo CXXFLAGS: -std=c++17
-#cgo LDFLAGS: -lpng -ltiff -ljpeg -lwebp -lwebpmux -ljxl -ljxl_threads -lstdc++
+#cgo LDFLAGS: -lpng -ltiff -ljpeg -lwebp -lwebpmux -ljxl -ljxl_threads
 #cgo CPPFLAGS: -I/opt/homebrew/include
 
 #include <stdlib.h>

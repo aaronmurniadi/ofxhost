@@ -47,7 +47,7 @@ tasks:
       - wails3 tool prepare-macos-output --dir "{{.BIN_DIR}}"
       - '{{if eq .OBFUSCATED "true"}}garble {{.GARBLE_ARGS}} build{{else}}go build{{end}} {{.BUILD_FLAGS}} -o "{{.OUTPUT}}" ./cmd/ofxhost'
     vars:
-      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s"{{end}}'
+      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s -extldflags=-mmacosx-version-min=12.0"{{end}}'
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
     env:
@@ -55,6 +55,11 @@ tasks:
       CGO_ENABLED: '{{if (has "purego" (splitList "," (.EXTRA_TAGS | default "")))}}0{{else}}1{{end}}'
       GOARCH: '{{.ARCH | default ARCH}}'
       CGO_CFLAGS: "-mmacosx-version-min=12.0"
+      # C++ needs its own variable. CGO_CFLAGS reaches C sources only, so the C++ translation
+      # units in the adapters were compiled against the SDK's default - macOS 27 on a current
+      # machine - and the linker warned about every one of them for being newer than the app
+      # they were being linked into. The build log printed CGO_CXXFLAGS="" and that was the tell.
+      CGO_CXXFLAGS: "-mmacosx-version-min=12.0"
       CGO_LDFLAGS: "-mmacosx-version-min=12.0"
       MACOSX_DEPLOYMENT_TARGET: "12.0"
 

@@ -12,6 +12,16 @@
 # The output is picked up by cgo through the LDFLAGS in the package's darwin and
 # linux files.
 cmake_minimum_required(VERSION 3.20)
+
+# The same floor the Go build declares through -mmacosx-version-min, set BEFORE project() because
+# CMake reads it when it initialises the toolchain. Without it the library inherits the SDK's
+# default, which on a current machine is several major versions above the floor the app claims:
+# the objects came out built for macOS 27 and the linker warned on every one of them. A library
+# that says 27 cannot be linked into an app that says 12 and mean it.
+if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
+endif()
+
 project(ofxhost_native LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
