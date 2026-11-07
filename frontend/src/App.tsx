@@ -345,64 +345,30 @@ export default function App() {
     <div className="app">
       {/* The bar carries actions only. What is open and how it is being shown lives in
           the status bar, and repeating it here made two places say the same thing. */}
+      {/* One bar: the actions on the left, everything about what is on screen on the
+          right, and the process indicator at the far right where it is always in the same
+          place. There is no second line of chrome. */}
       <header className="app__bar">
         <button className="button button--primary" onClick={() => void chooseFile()}>
           Open…
         </button>
-          {lastImage !== "" && !doc?.open ? (
-            <TooltipHint text={lastImage}>
-              <button className="button" onClick={() => setPendingPath(lastImage)}>
-                Reopen last
-              </button>
-            </TooltipHint>
-          ) : null}
-          <TooltipHint text={doc?.open ? "Export the chain at full resolution" : "Open a file first"}>
-            <button className="button" onClick={() => setExporting(true)} disabled={!doc?.open}>
-              Export…
+        {lastImage !== "" && !doc?.open ? (
+          <TooltipHint text={lastImage}>
+            <button className="button" onClick={() => setPendingPath(lastImage)}>
+              Reopen last
             </button>
           </TooltipHint>
-          <button className="button" onClick={() => setSettingsOpen(true)}>
-            Settings
-          </button>
-        <span className="app__version">{version}</span>
-      </header>
-
-      <main className="app__main">
-        {settingsReady ? (
-        <Workspace
-          panels={panels}
-          onPanelsChange={setPanels}
-          preview={
-            <PreviewPanel
-              preview={preview}
-              fileName={doc?.fileName ?? ""}
-              busy={busy}
-              onResize={onResize}
-              onChange={requestRender}
-              onZoomChange={setZoomPercent}
-            />
-          }
-          plugins={<PluginsPanel onChange={requestRender} hasDocument={doc?.open === true} />}
-          parameters={
-            <ParametersPanel selected={chain?.selected ?? -1} onChange={requestRender} />
-          }
-        />
         ) : null}
-      </main>
+        <TooltipHint text={doc?.open ? "Export the chain at full resolution" : "Open a file first"}>
+          <button className="button" onClick={() => void setExporting(true)} disabled={!doc?.open}>
+            Export…
+          </button>
+        </TooltipHint>
+        <button className="button" onClick={() => setSettingsOpen(true)}>
+          Settings
+        </button>
 
-      {/* The status line carries the result of the last action, or why it failed.
-          It is always present so the layout does not jump when a message appears. */}
-      <footer className="app__status">
-        {/* Left: what is open and how it is being shown. */}
-        <span className="app__status-left">
-          {/* A spinner while a render is in flight, a quiet dot when idle. The dot is what
-              makes the spinner mean something: an indicator that is always moving says
-              nothing about whether the program is busy. */}
-          {busy || rendering ? (
-            <span className="app__spinner" role="status" aria-label="Rendering" />
-          ) : (
-            <span className="app__status-idle" aria-hidden />
-          )}
+        <div className="app__status">
           <span className="app__status-name" title={doc?.path ?? ""}>
             {doc?.open ? doc.fileName : "No image"}
           </span>
@@ -423,26 +389,59 @@ export default function App() {
             </>
           ) : null}
           {resolutions.length > 0 ? (
-            <span className="app__status-resolution">
-              <Select
-                id="preview-resolution"
-                label="Preview resolution"
-                value={String(resolution)}
-                onChange={(next) => void chooseResolution(Number(next))}
-                options={resolutions.map((name, index) => ({
-                  label: name,
-                  value: String(index),
-                }))}
-              />
-            </span>
+            <Select
+              id="preview-resolution"
+              label="Preview resolution"
+              value={String(resolution)}
+              onChange={(next) => void chooseResolution(Number(next))}
+              options={resolutions.map((name, index) => ({
+                label: name,
+                value: String(index),
+              }))}
+            />
           ) : null}
-        </span>
 
-        {/* Right: the outcome of the last action, which is what a status line is for. */}
-        <span className="app__status-message" role="status" aria-live="polite">
-          {message}
-        </span>
-      </footer>
+          {/* The outcome of the last action. It truncates rather than pushing the indicator
+              out of its place at the right. */}
+          <span className="app__status-message" role="status" aria-live="polite">
+            {message}
+          </span>
+
+          <span className="app__version">{version}</span>
+
+          {/* A spinner while a render is in flight, a quiet dot when idle. The dot is what
+              makes the spinner mean something: an indicator that always moves says nothing
+              about whether the program is busy. */}
+          {busy || rendering ? (
+            <span className="app__spinner" role="status" aria-label="Rendering" />
+          ) : (
+            <span className="app__status-idle" aria-hidden />
+          )}
+        </div>
+      </header>
+
+      <main className="app__main">
+        {settingsReady ? (
+          <Workspace
+            panels={panels}
+            onPanelsChange={setPanels}
+            preview={
+              <PreviewPanel
+                preview={preview}
+                fileName={doc?.fileName ?? ""}
+                busy={busy}
+                onResize={onResize}
+                onChange={requestRender}
+                onZoomChange={setZoomPercent}
+              />
+            }
+            plugins={<PluginsPanel onChange={requestRender} hasDocument={doc?.open === true} />}
+            parameters={
+              <ParametersPanel selected={chain?.selected ?? -1} onChange={requestRender} />
+            }
+          />
+        ) : null}
+      </main>
 
       {pendingPath !== "" ? (
         <OpenDialog

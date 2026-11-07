@@ -111,11 +111,14 @@ body,
 .app__bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  height: var(--bar-height);
-  padding: 0 12px;
+  gap: 8px;
+  /* Taller than the old action-only bar: it now carries a line of text and a control, and
+     squeezing those into a button's height would make the control unusable. */
+  min-height: var(--bar-height);
+  padding: 4px 12px;
   background: var(--panel);
   border-bottom: 1px solid var(--panel-border);
+  flex: 0 0 auto;
 }
 
 
@@ -307,9 +310,6 @@ body,
   left: 8px;
 }
 
-.app__bar > .app__version {
-  margin-left: auto;
-}
 
 .app__version {
   margin-left: auto;
@@ -962,26 +962,17 @@ body,
   user-select: none;
 }
 
-/* The status line has two sides: what is open on the left, the last outcome on the right. */
+/* The right-hand half of the bar: what is on screen, the last outcome, and the indicator. */
 .app__status {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 10px;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 0.85em;
-  min-height: 2.1em;
-  flex: 0 0 auto;
-}
-
-.app__status-left {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
   min-width: 0;
+  color: var(--muted);
+  font-size: 0.85em;
 }
+
 
 /* A long file name is the one thing here that can overflow, so it truncates rather than
    pushing the render-size control off the bar. */
@@ -1097,4 +1088,24 @@ body,
   .params__reset {
     opacity: 1;
   }
+}
+
+/* The bar's parts must not fight for room. The name and the message give way first; the
+   resolution control and the indicator keep their size, because a control that shrinks is
+   unusable and an indicator that moves is not an indicator. */
+.app__status-name,
+.app__status-message {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.app__status > .select,
+.app__status-idle,
+.app__spinner,
+.app__version {
+  flex: 0 0 auto;
+}
+
+.app__bar > .button {
+  flex: 0 0 auto;
 }
