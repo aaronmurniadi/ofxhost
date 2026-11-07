@@ -97,7 +97,11 @@ func newBindings(t *testing.T) *Document {
 // waitForDocument polls Current until the decode lands, as the frontend does.
 func waitForDocument(t *testing.T, d *Document) DocumentDTO {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
+	// Decoding the 25 MB sample takes well under a second here and over half a minute on a
+	// shared Intel CI runner, so this bound is set for the slowest machine that runs the suite
+	// rather than the fastest. It is not a performance assertion: the test fails on a wrong
+	// document, and this only decides how long it waits before calling it a hang.
+	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
 		current := d.Current()
 		if current.Open {
@@ -171,7 +175,11 @@ func TestPollingAdvancesAfterEachCall(t *testing.T) {
 	}
 
 	// Poll the way the frontend does, with no extra helper that might drain for us.
-	deadline := time.Now().Add(30 * time.Second)
+	// Decoding the 25 MB sample takes well under a second here and over half a minute on a
+	// shared Intel CI runner, so this bound is set for the slowest machine that runs the suite
+	// rather than the fastest. It is not a performance assertion: the test fails on a wrong
+	// document, and this only decides how long it waits before calling it a hang.
+	deadline := time.Now().Add(3 * time.Minute)
 	var seen DocumentDTO
 	for time.Now().Before(deadline) {
 		seen = d.Current()

@@ -46,7 +46,9 @@ jobs:
         include:
           - arch: arm64
             goarch: arm64
-            runner: macos-14
+            # macos-14 resolves to a configuration this repository cannot use; macos-15 is the
+            # current arm64 image and the one that runs.
+            runner: macos-15
           # macos-13 was retired, and a job queued on it waits forever rather than failing.
           # macos-15-intel is the current Intel image.
           - arch: x86_64
