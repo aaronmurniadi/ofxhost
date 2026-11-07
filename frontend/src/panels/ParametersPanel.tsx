@@ -193,6 +193,68 @@ interface RowProps {
 }
 
 /**
+ * ParamSlider is the rough control, and it commits once per gesture.
+ *
+ * A range input fires on every pointer move. Sending each one across the bridge made a drag
+ * write the parameter hundreds of times, and every write made the host re-read all 830
+ * parameters it had just changed one of. The thumb follows the pointer in local state and
+ * the value is sent when the drag ends, so one gesture is one write.
+ *
+ * The visible value still comes from the plugin once the write returns: if the host clamps
+ * what was sent, the thumb moves to the clamped value rather than keeping a number the
+ * plugin does not hold.
+ */
+function ParamSlider({
+  value,
+  min,
+  max,
+  step,
+  disabled,
+  label,
+  onCommit,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step: number | undefined;
+  disabled: boolean;
+  label: string;
+  onCommit: (value: number) => void;
+}) {
+  const [live, setLive] = useState(value);
+
+  // A commit that was clamped, or an edit from elsewhere, wins over the local guess.
+  useEffect(() => {
+    setLive(value);
+  }, [value]);
+
+  const commit = () => {
+    if (live !== value) {
+      onCommit(live);
+    }
+  };
+
+  return (
+    <input
+      className="input params__slider"
+      type="range"
+      min={min}
+      max={max}
+      step={step ?? "any"}
+      value={live}
+      disabled={disabled}
+      aria-label={`${label} slider`}
+      onChange={(event) => setLive(Number(event.target.value))}
+      // The pointer is released, or a key is released. Arrow keys commit per press, which
+      // is one deliberate change rather than a stream.
+      onPointerUp={commit}
+      onKeyUp={commit}
+      onBlur={commit}
+    />
+  );
+}
+
+/**
  * ResetOne is the per-parameter reset.
  *
  * It sits at the end of the row rather than in a menu, because "put this back" is asked
@@ -324,16 +386,14 @@ function ParamRow({ param, onEdit, onEditText, onReset }: RowProps) {
       </ParamScrubLabel>
       <div className="params__controls">
         {single ? (
-          <input
-            className="input params__slider"
-            type="range"
+          <ParamSlider
+            value={values[0]}
             min={param.displayMin}
             max={param.displayMax}
-            step={isInt ? 1 : "any"}
-            value={values[0]}
+            step={isInt ? 1 : undefined}
             disabled={disabled}
-            aria-label={`${param.label} slider`}
-            onChange={(event) => onEdit([Number(event.target.value)])}
+            label={param.label}
+            onCommit={(next) => onEdit([next])}
           />
         ) : null}
         {values.map((value, component) => (

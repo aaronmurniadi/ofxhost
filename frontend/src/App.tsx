@@ -14,8 +14,9 @@
  *   M5       the settings panel and the saved layout
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, chainApi, type ChainDTO, type DocumentDTO } from "./api/document";
+import { createDebounced, type Debounced } from "./api/debounce";
 import { DEFAULT_PANELS, sessionApi, type PanelsDTO } from "./api/session";
 import Workspace from "./layout/Workspace";
 import ExportDialog from "./panels/ExportDialog";
@@ -26,6 +27,16 @@ import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
 import SettingsDialog from "./panels/SettingsDialog";
 import Select from "./widgets/Select";
 import TooltipHint from "./widgets/Tooltip";
+
+/**
+ * How long a render request waits for the input to settle.
+ *
+ * Long enough to swallow a drag's worth of pointer moves, short enough that a single click
+ * feels immediate. A drag produces events every few milliseconds, so anything above about
+ * 80 ms collapses them; this leaves a little room for a jerky trackpad without the result
+ * arriving late enough to notice.
+ */
+const RENDER_DEBOUNCE_MS = 140;
 
 /** How often the shell asks whether a decode has landed. */
 const POLL_INTERVAL_MS = 120;
@@ -48,6 +59,10 @@ export default function App() {
   // renderTick asks for another preview, which is what every chain and parameter
   // edit does.
   const [renderTick, setRenderTick] = useState(0);
+  // rendering is true while the chain is being run for a preview. It is separate from busy,
+  // which is a decode: the status bar shows the spinner for either, because from the user's
+  // side both mean the program is working and the frame on screen is not final.
+  const [rendering, setRendering] = useState(false);
   // pendingPath is the file waiting for a colour space. Decision D8: the space is an
   // input to the decode, so it is asked before the file opens.
   const [pendingPath, setPendingPath] = useState("");
@@ -214,9 +229,21 @@ export default function App() {
     chainApi.current().then(setChain).catch(() => setChain(null));
   }, []);
 
+  // A parameter drag asks for a render per pointer move. Each one re-runs the plugin chain
+  // and replaces the frame, so the preview flickers while the user is still moving. The
+  // request is collapsed into one render per quiet period instead; the edit itself still
+  // lands immediately, so nothing lags behind the pointer.
+  const renderDebouncer = useRef<Debounced | null>(null);
+  if (renderDebouncer.current === null) {
+    renderDebouncer.current = createDebounced(() => setRenderTick((tick) => tick + 1), RENDER_DEBOUNCE_MS);
+  }
+
   const requestRender = useCallback(() => {
-    setRenderTick((tick) => tick + 1);
+    renderDebouncer.current?.call();
   }, []);
+
+  // A pending render must not fire after the window has gone.
+  useEffect(() => () => renderDebouncer.current?.cancel(), []);
 
   // A chain or parameter change republishes the preview. The Go side runs the chain
   // and encodes the frame, so the frontend only swaps the URL.
@@ -225,13 +252,18 @@ export default function App() {
       return;
     }
     void (async () => {
-      const published = await api.publishPreview();
-      if (published.error) {
-        setMessage(published.error);
-        return;
+      setRendering(true);
+      try {
+        const published = await api.publishPreview();
+        if (published.error) {
+          setMessage(published.error);
+          return;
+        }
+        setPreview({ url: published.url, width: published.width, height: published.height });
+        reloadChain();
+      } finally {
+        setRendering(false);
       }
-      setPreview({ url: published.url, width: published.width, height: published.height });
-      reloadChain();
     })();
   }, [renderTick, reloadChain]);
 
@@ -322,7 +354,7 @@ export default function App() {
           {/* A spinner while a render is in flight, a quiet dot when idle. The dot is what
               makes the spinner mean something: an indicator that is always moving says
               nothing about whether the program is busy. */}
-          {busy ? (
+          {busy || rendering ? (
             <span className="app__spinner" role="status" aria-label="Rendering" />
           ) : (
             <span className="app__status-idle" aria-hidden />
