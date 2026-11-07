@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
+
 	"github.com/aaronmurniadi/ofxhost/internal/port"
 	chainsvc "github.com/aaronmurniadi/ofxhost/internal/service/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/service/document"
@@ -37,6 +38,12 @@ type Document struct {
 	// lastCameraPath and lastCamera keep the sink from being called on every poll.
 	lastCameraPath string
 	lastCamera     port.CameraInfo
+	// images receives each opened path, or nil.
+	images ImageSink
+	// chainStore is where a chain is recorded, and lastImagePath is the image it belongs to.
+	// The document.Store below is a different thing: it is the read side of the session.
+	chainStore    ChainStore
+	lastImagePath string
 	// store reads the state directory for LastSession, so the frontend can reopen the
 	// image that was open before. It is nil when persistence is not configured.
 	store document.Store
@@ -95,6 +102,25 @@ func (d *Document) PickFile() string {
 	}
 	return path
 }
+
+// ImageSink receives the path of each opened image, so a chain can be recorded against it.
+//
+// The store is passed as the concrete state-directory store, which both the graph and this
+// binding already understand: describing the same two methods in two packages is how they
+// drift into incompatible types.
+type ImageSink interface {
+	SetStore(store SidecarStore, imagePath string)
+}
+
+// SidecarStore is the state directory, as the sinks use it.
+type SidecarStore = ChainStore
+
+// ChainStore records a chain under an image path.
+//
+// It is the graph's own interface, aliased rather than restated. Two identical interface
+// declarations in two packages are not interchangeable in Go, and writing the second one is
+// how a binding comes to hold a value the service cannot accept.
+type ChainStore = chainsvc.ChainStore
 
 // CameraSink receives the capture metadata of an opened image.
 //
@@ -195,6 +221,7 @@ func (d *Document) pump() {
 func (d *Document) Current() DocumentDTO {
 	d.pump()
 	d.publishCamera()
+	d.publishImage()
 	state := d.docs.State()
 	out := DocumentDTO{
 		Open:         state.Path != "",
@@ -404,4 +431,32 @@ func (d *Document) publishCamera() {
 	d.lastCameraPath = state.Path
 	d.lastCamera = state.Camera
 	d.camera.SetCamera(state.Camera)
+}
+
+// SetImageSink gives the binding somewhere to report each opened path.
+func (d *Document) SetImageSink(sink ImageSink) {
+	d.images = sink
+	if d.chainStore != nil {
+		sink.SetStore(d.chainStore, "")
+	}
+}
+
+// SetChainStore gives the binding the store a chain is recorded in.
+func (d *Document) SetChainStore(store ChainStore) {
+	d.chainStore = store
+}
+
+// publishImage hands the opened path to the sink, once per image.
+func (d *Document) publishImage() {
+	if d.images == nil || d.chainStore == nil {
+		return
+	}
+	state := d.docs.State()
+	if state.Path == d.lastImagePath {
+		return
+	}
+	d.lastImagePath = state.Path
+	// A closed document clears the recording, so a chain edited with nothing open is not
+	// filed against the image that was open before.
+	d.images.SetStore(d.chainStore, state.Path)
 }

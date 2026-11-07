@@ -45,6 +45,9 @@ type Graph struct {
 	noise port.NoiseProfiler
 	// camera is the capture the open image came from, if it came from a RAW.
 	camera port.CameraInfo
+	// store records the chain between launches, and imagePath is the key it is filed under.
+	store     ChainStore
+	imagePath string
 }
 
 // New returns a graph over a host.
@@ -105,6 +108,7 @@ func (g *Graph) AddWithInputSpace(pluginIndex int, space string) (int, error) {
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	defer g.persistLocked()
 
 	initialiseInputSpace(instance, space)
 	seedNoise(instance, g.camera, g.noise)
@@ -147,6 +151,7 @@ func (g *Graph) SetCamera(camera port.CameraInfo) {
 func (g *Graph) Move(from, to int) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	defer g.persistLocked()
 	// A move only reorders the model. The instances are keyed by node identity, so
 	// they follow their nodes without any work.
 	return g.chain.Move(from, to)
@@ -156,6 +161,7 @@ func (g *Graph) Move(from, to int) error {
 func (g *Graph) Remove(index int) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	defer g.persistLocked()
 	node := g.chain.Node(index)
 	if node == nil {
 		return fmt.Errorf("chain: node %d is out of range", index)
@@ -177,6 +183,7 @@ func (g *Graph) Remove(index int) error {
 func (g *Graph) SetEnabled(index int, on bool) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	defer g.persistLocked()
 	return g.chain.SetEnabled(index, on)
 }
 
@@ -309,6 +316,9 @@ func (g *Graph) refreshParams(index int, instance port.Instance) {
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	defer g.persistLocked()
+	defer g.persistLocked()
+	defer g.persistLocked()
 	node := g.chain.Node(index)
 	if node == nil {
 		return

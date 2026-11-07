@@ -1216,7 +1216,23 @@ Settle that before writing code, not after.
 
 Packaging work over ports that already exist. Nothing here changes behaviour.
 
-**5. Project save and load.**
+**5. Project save and load. — done, in the state directory.**
+
+The chain is recorded after every change, under the image's absolute path, in the state
+directory the settings already use - `mirrorPath(StateDir(), abs) + ".json"`, which
+`paths.SidecarPath` has always returned. Nothing is written beside the user's photograph; the
+word "sidecar" in the code names the record, not its location.
+
+Restoring matches plugins by identifier rather than by index, because a plugin list changes
+between launches. A node whose plugin is no longer installed is skipped: a chain half rebuilt
+from what is available is more useful than an empty one, and the skipped node could not have
+rendered anyway.
+
+Recording happens where the lock is already held, so a save cannot interleave with the change
+it records. A failed write is ignored rather than surfaced: losing the record of a chain is
+annoying, and refusing an edit because a state file could not be written is worse.
+
+The original entry follows.
 
 The previous host writes the whole chain, its parameters and the GUI state to disk. This one
 persists the interface only, and writes an optional sidecar at export, defaulting to not

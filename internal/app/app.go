@@ -193,6 +193,11 @@ func New(opts Options) (*App, error) {
 	// it. A nil graph leaves the sink unset, which is what a build with no plugins has.
 	if graph != nil {
 		documentBinding.SetCameraSink(graph)
+		// The chain is recorded in the state directory under the image's own path, and
+		// restored when that image is opened again. The same directory holds the settings;
+		// nothing is written beside the user's photograph.
+		documentBinding.SetImageSink(graph)
+		documentBinding.SetChainStore(docStore)
 	}
 	window.Application().RegisterService(
 		application.NewService(documentBinding))
