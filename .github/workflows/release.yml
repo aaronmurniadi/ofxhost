@@ -2,6 +2,11 @@ name: Release
 
 # Builds the macOS application and attaches it to a release.
 #
+# The actions are pinned to exact versions, not major-version tags. A release build should
+# change because the code changed; a floating tag lets an action update itself under a green
+# pipeline. The pins are also what the runner support for Node 24 requires - an action left on a
+# Node 20 build still runs, but it is forced onto Node 24 and warns on every job.
+#
 # Two things make this workflow look the way it does, and both are worth stating.
 #
 # The native library is built first and by hand. `wails3 build` runs `go build`, and cgo links
@@ -64,20 +69,20 @@ jobs:
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           # The OpenFX headers and HostSupport are a submodule, and the host does not
           # compile without them.
           submodules: recursive
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
           cache: npm
@@ -166,7 +171,7 @@ jobs:
             > "bin/${APP_NAME}-macOS-${{ matrix.arch }}.zip.sha256"
 
       - name: Upload the build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ env.APP_NAME }}-macOS-${{ matrix.arch }}
           path: |
@@ -180,10 +185,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Collect the builds
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with:
           path: dist
           merge-multiple: true
@@ -192,7 +197,7 @@ jobs:
         run: ls -la dist
 
       - name: Publish
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.4
         with:
           # A tag push names itself. A manual run needs the tag, and refusing without one
           # keeps a release from being published against the default branch.
