@@ -40,15 +40,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `arch` names the artifact, `goarch` is what the toolchain is told. They are not the
+        # same word for Intel: Go calls it amd64, and GOARCH=x86_64 is not a GOOS/GOARCH pair
+        # at all, so `go env` fails before a single file is compiled.
         include:
           - arch: arm64
+            goarch: arm64
             runner: macos-14
           # macos-13 was retired, and a job queued on it waits forever rather than failing.
           # macos-15-intel is the current Intel image.
           - arch: x86_64
+            goarch: amd64
             runner: macos-15-intel
     env:
-      GOARCH: ${{ matrix.arch }}
+      GOARCH: ${{ matrix.goarch }}
       # The cgo link line is generated per architecture, so the deployment target has to
       # match what the Go toolchain was told.
       MACOSX_DEPLOYMENT_TARGET: '12.0'
