@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { TooltipProvider } from "@cloudflare/kumo";
+import { TooltipProvider } from "@cloudflare/kumo/components/tooltip";
 import App from "./App";
 
 // Kumo's compiled stylesheet first, ours second.

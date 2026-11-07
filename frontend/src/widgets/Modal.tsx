@@ -14,7 +14,10 @@
  * first time Kumo changed a breakpoint.
  */
 
-import { Dialog } from "@cloudflare/kumo";
+// Imported from its own module rather than the barrel. The barrel pulls every Kumo
+// component, chart and icon into the bundle whether it is used or not, which took the
+// production bundle from 497 KB to 1 MB.
+import { Dialog } from "@cloudflare/kumo/components/dialog";
 import type { ReactNode } from "react";
 
 export interface ModalProps {

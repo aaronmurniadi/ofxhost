@@ -17,7 +17,7 @@
  * the action — then it behaves like any other and this exception does not apply.
  */
 
-import { Tooltip } from "@cloudflare/kumo";
+import { Tooltip } from "@cloudflare/kumo/components/tooltip";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 
 export interface TooltipProps {

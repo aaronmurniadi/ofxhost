@@ -16,7 +16,7 @@
  * control never offers, so null is ignored rather than read as a choice of nothing.
  */
 
-import { Select as KumoSelect } from "@cloudflare/kumo";
+import { Select as KumoSelect } from "@cloudflare/kumo/components/select";
 
 export interface SelectOption {
   /** The display text. */
