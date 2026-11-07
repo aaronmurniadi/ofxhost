@@ -33,6 +33,9 @@ internal/
   app/                the composition root. The only place that knows every layer.
 frontend/             React + TypeScript. Built into frontend/dist, embedded by go:embed.
 tools/layerguard/     enforces the rule below. Runs in go test.
+plugins/              Transform, Auto Exposure, Denoise (profiled), built into
+                      OfxHost.ofx.bundle. Not linked: OpenFX loads them at runtime.
+cmake/                PatchOfxSupport.cmake, the plugin-side support library.
 third_party/openfx/   OFX headers and HostSupport, built into libofxhost.a.
 ```
 
@@ -56,9 +59,11 @@ logic-level tests in the service package with fakes.
 ## 3. Build and verify
 
 ```sh
-# 1. Native library. Required before any go build after C++ changes.
+# 1. Native library and the bundled plugins. Required before any go build after C++ changes.
 cmake -S internal/adapter/ofxhost/native -B build/ofxhost-native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/ofxhost-native -j
+#    -> build/ofxhost-native/lib/libofxhost.a          the host
+#    -> build/ofxhost-native/bundled/OfxHost.ofx.bundle  the plugins shipped with it
 
 # 2. Frontend, for the real UI. go:embed picks up whatever is in frontend/dist.
 cd frontend && npm run build && cd ..
@@ -277,6 +282,20 @@ pointer, a missing action. Every crash so far was host-side.
 - Prefer a test that fails without the fix. Verify it fails, then fix.
 - Measure rather than assume. Claimed speedups, bit depths and colour behaviour in
   `PLAN.md` all carry numbers from the real sample file.
+
+### The bundled plugins
+
+`plugins/` holds the three effects this project ships: Transform, Auto Exposure, and Denoise
+(profiled). They are built by `plugins/CMakeLists.txt` into
+`build/ofxhost-native/bundled/OfxHost.ofx.bundle` and loaded at runtime, so they are not part
+of the host binary and a missing bundle is not a link error.
+
+`internal/adapter/ofxhost/bundled.go` says where to look: `OFXHOST_BUNDLED_PLUGINS`, then the
+development build directory beside the binary, then the macOS `Resources` directory.
+
+**The host links HostSupport; a plugin links Support.** They are different libraries in the
+same submodule, and mixing them up produces link errors that read like missing source.
+`cmake/PatchOfxSupport.cmake` builds the second one.
 
 ### The fixture plugin
 

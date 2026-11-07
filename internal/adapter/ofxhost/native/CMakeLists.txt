@@ -128,3 +128,16 @@ if(EXISTS "${OFX_SUPPORT_LIB}/ofxsImageEffect.cpp")
 else()
   message(WARNING "OpenFX Support sources not found; the fixture plugin will not be built")
 endif()
+
+# The bundled plugins live in their own bundle, built by the same configure. A plugin is
+# loaded at runtime, not linked, so this is a separate target with its own dependencies -
+# the Support library rather than HostSupport.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../../plugins/CMakeLists.txt")
+  set(OFX_ROOT "${OFX_ROOT}" CACHE INTERNAL "OpenFX submodule root, shared with the plugins")
+  # Not EXCLUDE_FROM_ALL: a build that skips it produces a host with no bundled plugins,
+  # and the failure then looks like the plugins are broken rather than not built.
+  add_subdirectory(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../plugins"
+    "${CMAKE_BINARY_DIR}/bundled"
+  )
+endif()

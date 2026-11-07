@@ -100,7 +100,9 @@ func New(opts Options) (*App, error) {
 		logger.Warn("the OpenFX host could not start", "err", hostErr)
 		sink.Report("Plugins are unavailable: " + hostErr.Error())
 	} else {
-		if discoverErr := pluginHostConcrete.Discover(nil); discoverErr != nil {
+		// The bundled plugins ship beside the binary; the installed ones live in the
+		// platform directory the adapter already knows about. Both are searched.
+		if discoverErr := pluginHostConcrete.Discover(ofxhost.BundledPluginDirs()); discoverErr != nil {
 			logger.Warn("the plugin scan failed", "err", discoverErr)
 			sink.Report("The plugin scan failed: " + discoverErr.Error())
 		}
