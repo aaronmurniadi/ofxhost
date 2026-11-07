@@ -107,7 +107,6 @@ export default function PluginsPanel({ onChange, hasDocument }: Props) {
                 <li key={plugin.identifier}>
                   <button className="plugins__choice" onClick={() => void add(plugin.index)}>
                     <span>{plugin.label}</span>
-                    {plugin.author ? <span className="plugins__author">{plugin.author}</span> : null}
                   </button>
                 </li>
               ))

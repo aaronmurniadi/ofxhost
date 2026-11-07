@@ -356,11 +356,6 @@ body,
   background: var(--accent);
 }
 
-.plugins__author {
-  color: var(--text-dim);
-  font-size: 11px;
-}
-
 .plugins__chain {
   margin: 0;
   padding: 0;
