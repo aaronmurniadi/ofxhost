@@ -21,6 +21,7 @@ import (
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/decoders"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/gpu"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/lcms"
+	"github.com/aaronmurniadi/ofxhost/internal/adapter/noiseprofiles"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/ofxhost"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/rawlib"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/statefiles"
@@ -121,6 +122,9 @@ func New(opts Options) (*App, error) {
 		}
 		pluginHost = pluginHostConcrete
 		graph = chainsvc.New(pluginHost)
+		// The camera noise database is darktable's data, embedded, and parsed only when a
+		// denoiser is added. A machine that never opens a RAW pays nothing for it.
+		graph.SetNoiseProfiler(noiseprofiles.New())
 		docs.SetChain(graph)
 		if count := len(pluginHost.Plugins()); count > 0 {
 			sink.Report(fmt.Sprintf("%d plugins found", count))
@@ -184,8 +188,14 @@ func New(opts Options) (*App, error) {
 	// Registering after the window exists is what lets the document binding hold the
 	// window's file picker, so the frontend can ask for a file without this package
 	// exporting a dialog of its own.
+	documentBinding := binds.NewDocument(ctx, docs, renderer, graph, pluginHost, window.FilePicker(), docStore)
+	// The chain seeds a denoiser from the camera, so the document reports each capture to
+	// it. A nil graph leaves the sink unset, which is what a build with no plugins has.
+	if graph != nil {
+		documentBinding.SetCameraSink(graph)
+	}
 	window.Application().RegisterService(
-		application.NewService(binds.NewDocument(ctx, docs, renderer, graph, pluginHost, window.FilePicker(), docStore)))
+		application.NewService(documentBinding))
 	window.Application().RegisterService(application.NewService(binds.NewChain(graph, pluginHost,
 		func() bool { return docs.State().Path != "" },
 		func() string { return docs.State().InputSpace.String() })))

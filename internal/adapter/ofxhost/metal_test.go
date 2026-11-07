@@ -1,6 +1,7 @@
 package ofxhost
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,10 +59,13 @@ func TestTheFixtureDeclaresMetalSupport(t *testing.T) {
 
 // TestDeviceMatchesCPU is the gate for the handover.
 //
-// One frame, rendered twice: once on the CPU and once through the device, with everything
-// else identical. The tolerance is the one float32 arithmetic needs, not a number chosen to
-// make the test pass - both paths run the same multiply, so a difference larger than
-// rounding means the handover is losing or misplacing pixels.
+// One host, one instance, two passes: the first through the device, the second after the
+// instance is moved back to the CPU path. Doing it this way is not only cheaper - creating a
+// second host re-discovers a bundle the process has already loaded, and that crashed
+// intermittently when this test ran beside the others.
+//
+// The tolerance is the one float32 arithmetic needs. Both passes run the same multiply, so a
+// difference larger than rounding means the handover is losing or misplacing pixels.
 func TestDeviceMatchesCPU(t *testing.T) {
 	backend := gpu.New()
 	if !backend.Available() {
@@ -78,22 +82,27 @@ func TestDeviceMatchesCPU(t *testing.T) {
 		input[i*4+3] = 1.0
 	}
 
-	render := func(options Options) []float32 {
-		host, err := New(options)
-		if err != nil {
-			t.Fatalf("New: %v", err)
-		}
-		defer host.Close()
-		if err := host.Discover([]string{fixtureBundle(t)}); err != nil {
-			t.Fatalf("Discover: %v", err)
-		}
+	host, err := New(Options{GPU: backend})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer host.Close()
+	if err := host.Discover([]string{fixtureBundle(t)}); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
 
-		instance, err := host.Create(fixtureIndex(t, host))
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		defer func() { _ = instance.Close() }()
+	created, err := host.Create(fixtureIndex(t, host))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer func() { _ = created.Close() }()
 
+	instance, ok := created.(*Instance)
+	if !ok {
+		t.Fatalf("the host returned a %T, want an *Instance", created)
+	}
+
+	render := func() []float32 {
 		out, _, renderErr := instance.Render(port.RenderRequest{
 			In:         image.Raster{Pixels: append([]float32(nil), input...), W: width, H: height},
 			OutW:       width,
@@ -109,17 +118,17 @@ func TestDeviceMatchesCPU(t *testing.T) {
 		return out.Pixels
 	}
 
-	cpu := render(Options{})
-	device := render(Options{GPU: backend})
-
-	// The two must differ, or the device path was never taken and the comparison is empty.
-	differ := 0
-	for i := range cpu {
-		if cpu[i] != device[i] {
-			differ++
-		}
+	if !instance.metalCapable {
+		t.Skip("the fixture does not declare device support in this build")
 	}
-	_ = differ // Floating point: equal outputs are expected and are the proof, not a problem.
+	device := render()
+	if !instance.metalActive() {
+		t.Skip("the device pass could not be prepared, so there is nothing to compare")
+	}
+
+	// Move the instance back to the CPU path and render the same frame again.
+	instance.disableMetal(errNoDeviceTest)
+	cpu := render()
 
 	const tolerance = 1e-6
 	mismatches := 0
@@ -150,3 +159,6 @@ func TestDeviceMatchesCPU(t *testing.T) {
 		t.Fatal("the device render produced an empty frame")
 	}
 }
+
+// errNoDeviceTest is the reason the test gives when it moves an instance back to the CPU.
+var errNoDeviceTest = errors.New("test: compare against the CPU path")

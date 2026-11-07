@@ -1184,7 +1184,24 @@ the plugin that will want it. Gate it on the plugin's declaration so it stays in
 write the CPU-versus-device comparison test first: this is the render path that has regressed
 twice.
 
-**3. Camera noise profile DB.**
+**3. Camera noise profile DB. — done.**
+
+darktable's `noiseprofiles.json` is embedded at
+`internal/adapter/noiseprofiles/data/`, with its `COPYING` beside it: the file is data under
+GPL-3.0, the program is not, and the directory is the only GPL material bundled. The loader
+parses on first use, so a machine that never adds a denoiser pays nothing.
+
+Lookup matches make and model case-insensitively with surrounding space trimmed, because
+LibRaw reports the file's spelling and the database holds a contributor's. It reads the green
+channel, interpolates between neighbouring ISO settings, and clamps outside the measured range
+rather than extrapolating a fit into numbers nobody measured.
+
+Seeding follows the rule the colour space seeding already uses: a node's `noiseSlope` and
+`noiseOffset` are written only where the parameter still equals the plugin's default. A user
+who set a value keeps it, which is what makes a chain reproducible across images. The seed
+runs when a node is added and again when the open image changes under a chain that stays.
+
+The original entry follows.
 
 The previous host ships darktable's `noiseprofiles.json`, reads the camera make, model and
 ISO from the RAW, and fills Denoise's *Noise Slope* and *Noise Offset* before the first

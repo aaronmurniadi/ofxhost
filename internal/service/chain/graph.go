@@ -40,6 +40,11 @@ type Graph struct {
 	instances map[uint64]port.Instance
 	// lastErr records why an instance could not be created, so the panel can say.
 	lastErr error
+	// noise seeds a denoiser's sensor model. Nil leaves every plugin on its own defaults,
+	// which is what a build without the database gets.
+	noise port.NoiseProfiler
+	// camera is the capture the open image came from, if it came from a RAW.
+	camera port.CameraInfo
 }
 
 // New returns a graph over a host.
@@ -102,12 +107,40 @@ func (g *Graph) AddWithInputSpace(pluginIndex int, space string) (int, error) {
 	defer g.mu.Unlock()
 
 	initialiseInputSpace(instance, space)
+	seedNoise(instance, g.camera, g.noise)
 
 	node := chain.NewNode(pluginIndex, info.Identifier, info.Label)
 	position := g.chain.Append(node)
 	g.instances[node.ID] = instance
 	g.lastErr = nil
 	return position, nil
+}
+
+// SetNoiseProfiler gives the graph the database a denoiser's model is seeded from.
+func (g *Graph) SetNoiseProfiler(profiler port.NoiseProfiler) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.noise = profiler
+}
+
+// SetCamera records the capture the open image came from and re-seeds the nodes already in
+// the chain.
+//
+// The re-seed matters: a chain built before the image was opened, or kept while a different
+// image is opened, is describing a sensor it has not been told about. Nodes the user has
+// tuned keep their numbers, because seeding only writes where a parameter still holds its
+// default.
+func (g *Graph) SetCamera(camera port.CameraInfo) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.camera = camera
+	if g.noise == nil {
+		return
+	}
+	for id, instance := range g.instances {
+		_ = id
+		seedNoise(instance, camera, g.noise)
+	}
 }
 
 // Move relocates a node and keeps its instance with it.

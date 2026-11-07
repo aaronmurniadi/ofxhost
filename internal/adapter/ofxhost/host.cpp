@@ -568,6 +568,22 @@ class InstanceImpl : public OFX::Host::ImageEffect::Instance {
     if (action != kOfxImageEffectActionRender || !metalEnabled_) {
       return;
     }
+    /* The render arguments are a fresh property set for every action, so a property the host
+     * has not created is not there to write. Writing it anyway throws, and the throw comes back
+     * as kOfxStatFailed with no message - which looks like the plugin refusing to render. */
+    try {
+      const OFX::Host::Property::PropSpec enabledSpec = {
+          kOfxImageEffectPropMetalEnabled, OFX::Host::Property::eInt, 1, false, "0"};
+      inArgs.createProperty(enabledSpec);
+    } catch (...) {
+    }
+    try {
+      const OFX::Host::Property::PropSpec queueSpec = {
+          kOfxImageEffectPropMetalCommandQueue, OFX::Host::Property::ePointer, 1, false, nullptr};
+      inArgs.createProperty(queueSpec);
+    } catch (...) {
+    }
+
     inArgs.setIntProperty(kOfxImageEffectPropMetalEnabled, 1);
     inArgs.setPointerProperty(kOfxImageEffectPropMetalCommandQueue, metalQueue_);
   }

@@ -32,6 +32,11 @@ type Document struct {
 	chain   *chainsvc.Graph
 	host    port.EffectHost
 	picker  Picker
+	// camera receives the capture metadata of each opened image, or nil.
+	camera CameraSink
+	// lastCameraPath and lastCamera keep the sink from being called on every poll.
+	lastCameraPath string
+	lastCamera     port.CameraInfo
 	// store reads the state directory for LastSession, so the frontend can reopen the
 	// image that was open before. It is nil when persistence is not configured.
 	store document.Store
@@ -89,6 +94,15 @@ func (d *Document) PickFile() string {
 		return ""
 	}
 	return path
+}
+
+// CameraSink receives the capture metadata of an opened image.
+//
+// It exists so the chain can seed a denoiser from the camera without the document
+// package knowing that a chain exists. Nil is fine: a build with no plugin host still
+// opens images.
+type CameraSink interface {
+	SetCamera(camera port.CameraInfo)
 }
 
 // CameraDTO is the capture metadata, flattened for the frontend.
@@ -180,6 +194,7 @@ func (d *Document) pump() {
 // Current returns the open document.
 func (d *Document) Current() DocumentDTO {
 	d.pump()
+	d.publishCamera()
 	state := d.docs.State()
 	out := DocumentDTO{
 		Open:         state.Path != "",
@@ -365,4 +380,28 @@ func (d *Document) LastSession() LastSessionDTO {
 		return LastSessionDTO{}
 	}
 	return LastSessionDTO{Found: true, Path: path}
+}
+
+// SetCameraSink gives the binding somewhere to report the capture metadata.
+func (d *Document) SetCameraSink(sink CameraSink) {
+	d.camera = sink
+}
+
+// publishCamera hands the current capture to the sink, once per image.
+//
+// It runs from Current because that is where the decode's result becomes visible: the
+// service decodes on its own goroutine and publishes on a poll, so there is no other
+// moment at which the camera is known. The last value is remembered so a poll that happens
+// every few frames does not re-seed a chain that has not changed.
+func (d *Document) publishCamera() {
+	if d.camera == nil {
+		return
+	}
+	state := d.docs.State()
+	if state.Path == d.lastCameraPath && d.lastCameraPath != "" {
+		return
+	}
+	d.lastCameraPath = state.Path
+	d.lastCamera = state.Camera
+	d.camera.SetCamera(state.Camera)
 }
