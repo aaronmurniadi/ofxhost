@@ -7,6 +7,7 @@
  * previous value in place rather than showing one the file does not contain.
  */
 
+import { Button } from "@cloudflare/kumo/components/button";
 import { useEffect, useState } from "react";
 import { sessionApi } from "../api/session";
 import Modal from "../widgets/Modal";
@@ -90,9 +91,9 @@ export default function SettingsDialog({ onClose, onAppearanceChange }: Settings
       onClose={onClose}
       title="Settings"
       actions={
-        <button className="button button--primary" onClick={onClose}>
+        <Button variant="primary" size="sm" onClick={onClose}>
           Done
-        </button>
+        </Button>
       }
     >
       {error !== "" ? <p className="plugins__error">{error}</p> : null}
@@ -101,13 +102,14 @@ export default function SettingsDialog({ onClose, onAppearanceChange }: Settings
         <span className="field__label">Theme</span>
         <div className="settings__row">
           {THEMES.map((name) => (
-            <button
+            <Button
               key={name}
-              className={theme === name ? "button button--selected" : "button"}
+              variant={theme === name ? "primary" : "secondary"}
+              size="sm"
               onClick={() => void applyAppearance(name, fontPt)}
             >
               {name}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -140,9 +142,9 @@ export default function SettingsDialog({ onClose, onAppearanceChange }: Settings
           options={CHANNELS.map((name) => ({ label: name, value: name }))}
         />
         <div className="settings__row">
-          <button className="button" onClick={() => void checkForUpdate()}>
+          <Button variant="secondary" size="sm" onClick={() => void checkForUpdate()}>
             Check for updates
-          </button>
+          </Button>
           {update !== "" ? <span className="field__value">{update}</span> : null}
         </div>
       </div>

@@ -24,6 +24,8 @@ import ParametersPanel from "./panels/ParametersPanel";
 import PluginsPanel from "./panels/PluginsPanel";
 import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
 import SettingsDialog from "./panels/SettingsDialog";
+import { Button } from "@cloudflare/kumo/components/button";
+import { Toolbar } from "@cloudflare/kumo/components/toolbar";
 import TooltipHint from "./widgets/Tooltip";
 
 /** How often the shell asks whether a decode has landed. */
@@ -247,24 +249,31 @@ export default function App() {
         <span className="app__hint">
           {doc?.open ? `${doc.fileName} — ${doc.width}×${doc.height}` : "No image open"}
         </span>
-        <button className="button" onClick={() => void chooseFile()}>
-          Open…
-        </button>
-        {lastImage !== "" && !doc?.open ? (
-          <TooltipHint text={lastImage}>
-            <button className="button" onClick={() => setPendingPath(lastImage)}>
-              Reopen last
-            </button>
+        <Toolbar>
+          <Button variant="primary" size="sm" onClick={() => void chooseFile()}>
+            Open…
+          </Button>
+          {lastImage !== "" && !doc?.open ? (
+            <TooltipHint text={lastImage}>
+              <Button variant="secondary" size="sm" onClick={() => setPendingPath(lastImage)}>
+                Reopen last
+              </Button>
+            </TooltipHint>
+          ) : null}
+          <TooltipHint text={doc?.open ? "Export the chain at full resolution" : "Open a file first"}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setExporting(true)}
+              disabled={!doc?.open}
+            >
+              Export…
+            </Button>
           </TooltipHint>
-        ) : null}
-        <TooltipHint text={doc?.open ? "Export the chain at full resolution" : "Open a file first"}>
-          <button className="button" onClick={() => setExporting(true)} disabled={!doc?.open}>
-            Export…
-          </button>
-        </TooltipHint>
-        <button className="button" onClick={() => setSettingsOpen(true)}>
-          Settings
-        </button>
+          <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
+            Settings
+          </Button>
+        </Toolbar>
         <span className="app__version">{version}</span>
       </header>
 

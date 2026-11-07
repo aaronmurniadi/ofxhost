@@ -11,6 +11,7 @@
  * same in WebKit, WebView2 and WebKitGTK.
  */
 
+import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/document";
 import Select from "../widgets/Select";
@@ -126,7 +127,7 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
       : 1;
 
   return (
-    <section className="panel panel--preview" aria-label="Preview">
+    <LayerCard render={<section aria-label="Preview" />} className="panel panel--preview">
       <div
         ref={canvasRef}
         className="preview__canvas"
@@ -173,6 +174,6 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
           </span>
         ) : null}
       </div>
-    </section>
+    </LayerCard>
   );
 }

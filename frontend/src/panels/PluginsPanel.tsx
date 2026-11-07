@@ -10,6 +10,9 @@
  */
 
 import TooltipHint from "../widgets/Tooltip";
+import { Button } from "@cloudflare/kumo/components/button";
+import { Input } from "@cloudflare/kumo/components/input";
+import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import { useEffect, useState } from "react";
 import { chainApi, type ChainDTO, type PluginDTO } from "../api/document";
 
@@ -75,26 +78,27 @@ export default function PluginsPanel({ onChange, hasDocument }: Props) {
   });
 
   return (
-    <section className="panel panel--plugins" aria-label="Plugins">
+    <LayerCard render={<section aria-label="Plugins" />} className="panel panel--plugins">
       <h2 className="panel__title">Plugins</h2>
 
       <div className="plugins__actions">
         <TooltipHint text={hasDocument ? "Add a plugin to the chain" : "Open an image first"}>
-          <button
-            className="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setPickerOpen((open) => !open)}
             disabled={!hasDocument}
           >
             Add plugin
-          </button>
+          </Button>
         </TooltipHint>
       </div>
 
       {pickerOpen && hasDocument ? (
         <div className="plugins__picker">
-          <input
-            className="input"
+          <Input
             autoFocus
+            aria-label="Search plugins"
             placeholder="Search…"
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
@@ -105,10 +109,15 @@ export default function PluginsPanel({ onChange, hasDocument }: Props) {
             ) : (
               visible.map((plugin) => (
                 <li key={plugin.identifier}>
-                  <button className="plugins__choice" onClick={() => void add(plugin.index)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="plugins__choice"
+                    onClick={() => void add(plugin.index)}
+                  >
                     <span>{plugin.label}</span>
                     {plugin.author ? <span className="plugins__author">{plugin.author}</span> : null}
-                  </button>
+                  </Button>
                 </li>
               ))
             )}
@@ -128,54 +137,64 @@ export default function PluginsPanel({ onChange, hasDocument }: Props) {
               key={`${node.index}-${node.identifier}`}
               className={node.selected ? "plugins__node plugins__node--selected" : "plugins__node"}
             >
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 className="plugins__name"
                 onClick={() => void run(() => chainApi.select(node.index))}
               >
                 {node.label}
-              </button>
+              </Button>
               <TooltipHint text={node.enabled ? "Disable this plugin" : "Enable this plugin"}>
-                <button
-                  className="icon"
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  shape="square"
                   aria-label={node.enabled ? "Disable this plugin" : "Enable this plugin"}
                   onClick={() => void run(() => chainApi.setEnabled(node.index, !node.enabled))}
                 >
                   {node.enabled ? "On" : "Off"}
-                </button>
+                </Button>
               </TooltipHint>
               <TooltipHint text="Move up">
-                <button
-                  className="icon"
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  shape="square"
                   aria-label="Move up"
                   disabled={node.index === 0}
                   onClick={() => void run(() => chainApi.move(node.index, node.index - 1))}
                 >
                   ↑
-                </button>
+                </Button>
               </TooltipHint>
               <TooltipHint text="Move down">
-                <button
-                  className="icon"
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  shape="square"
                   aria-label="Move down"
                   disabled={node.index === (chain?.nodes?.length ?? 1) - 1}
                   onClick={() => void run(() => chainApi.move(node.index, node.index + 1))}
                 >
                   ↓
-                </button>
+                </Button>
               </TooltipHint>
               <TooltipHint text="Remove from the chain">
-                <button
-                  className="icon"
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  shape="square"
                   aria-label="Remove from the chain"
                   onClick={() => void run(() => chainApi.remove(node.index))}
                 >
                   ✕
-                </button>
+                </Button>
               </TooltipHint>
             </li>
           ))
         )}
       </ul>
-    </section>
+    </LayerCard>
   );
 }

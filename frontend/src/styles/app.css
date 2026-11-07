@@ -212,6 +212,14 @@ body,
   user-select: none;
 }
 
+/*
+ * A panel is laid out here and surfaced by Kumo's LayerCard.
+ *
+ * The background, border and radius that used to live in this rule are gone on purpose.
+ * Kumo supplies the surface, and this stylesheet loads after Kumo's - so leaving them here
+ * would have won the cascade and made the LayerCard invisible, which is exactly the kind of
+ * "it looks the same" that comes from half-adopting a design system.
+ */
 .panel {
   display: flex;
   flex-direction: column;
@@ -219,9 +227,6 @@ body,
   min-height: 0;
   padding: 8px;
   overflow: auto;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius);
 }
 
 /*

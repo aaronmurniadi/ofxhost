@@ -14,6 +14,9 @@
 import Modal from "../widgets/Modal";
 import Select from "../widgets/Select";
 import TooltipHint from "../widgets/Tooltip";
+import { Button } from "@cloudflare/kumo/components/button";
+import { Checkbox } from "@cloudflare/kumo/components/checkbox";
+import { Slider } from "@cloudflare/kumo/components/slider";
 import { useEffect, useState } from "react";
 import { exportApi, type ExportOptionsDTO, type ExportResult, type FormatDTO } from "../api/document";
 
@@ -121,12 +124,12 @@ export default function ExportDialog({ onClose, onExported }: Props) {
       wide
       actions={
         <>
-          <button className="button button--primary" onClick={() => void run()} disabled={busy}>
+          <Button variant="primary" size="sm" onClick={() => void run()} disabled={busy}>
             {busy ? "Exporting…" : "Export"}
-          </button>
-          <button className="button" onClick={onClose} disabled={busy}>
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onClose} disabled={busy}>
             Close
-          </button>
+          </Button>
         </>
       }
     >
@@ -191,26 +194,26 @@ export default function ExportDialog({ onClose, onExported }: Props) {
           />
         </div>
 
-        <label className="field field--inline">
-          <input
-            type="checkbox"
+        <div className="field field--inline">
+          <Checkbox
             checked={writeSidecar}
-            onChange={(event) => setWriteSidecar(event.target.checked)}
+            onCheckedChange={(next) => setWriteSidecar(next === true)}
+            label={
+              <TooltipHint text="Records the plugin chain and the colour spaces beside the file, so the edit can be reproduced">
+                <span>Write sidecar with the chain</span>
+              </TooltipHint>
+            }
           />
-          <TooltipHint text="Records the plugin chain and the colour spaces beside the file, so the edit can be reproduced">
-            <span>Write sidecar with the chain</span>
-          </TooltipHint>
-        </label>
+        </div>
 
         {current?.lossless ? (
-          <label className="field field--inline">
-            <input
-              type="checkbox"
+          <div className="field field--inline">
+            <Checkbox
               checked={lossless}
-              onChange={(event) => setLossless(event.target.checked)}
+              onCheckedChange={(next) => setLossless(next === true)}
+              label="Lossless"
             />
-            <span>Lossless</span>
-          </label>
+          </div>
         ) : null}
 
         {current?.quality && !lossless ? (
@@ -219,14 +222,14 @@ export default function ExportDialog({ onClose, onExported }: Props) {
               Quality
             </label>
             <div className="field__row">
-              <input
+              <Slider
                 id="export-quality"
-                className="input params__slider"
-                type="range"
+                className="params__slider"
                 min={1}
                 max={100}
                 value={quality}
-                onChange={(event) => setQuality(Number(event.target.value))}
+                getAriaLabel={() => "Quality"}
+                onValueChange={(next) => setQuality(Array.isArray(next) ? next[0] : next)}
               />
               <span className="field__value">{quality}</span>
             </div>
