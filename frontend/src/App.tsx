@@ -38,6 +38,18 @@ import TooltipHint from "./widgets/Tooltip";
  */
 const RENDER_DEBOUNCE_MS = 140;
 
+/**
+ * How long a resize waits before the preview is re-rendered.
+ *
+ * Longer than an edit's, because dragging a splitter emits a size for every pixel of the
+ * drag and the user is not looking at the picture while they do it. The frame is refitted on
+ * screen immediately; only the render at the new resolution waits.
+ */
+const RESIZE_DEBOUNCE_MS = 300;
+
+/** The Fit option, whose render size follows the panel rather than a number. */
+const FIT_RESOLUTION = 0;
+
 /** How often the shell asks whether a decode has landed. */
 const POLL_INTERVAL_MS = 120;
 
@@ -242,8 +254,22 @@ export default function App() {
     renderDebouncer.current?.call();
   }, []);
 
+  const resizeDebouncer = useRef<Debounced | null>(null);
+  if (resizeDebouncer.current === null) {
+    resizeDebouncer.current = createDebounced(
+      () => setRenderTick((tick) => tick + 1),
+      RESIZE_DEBOUNCE_MS,
+    );
+  }
+
   // A pending render must not fire after the window has gone.
-  useEffect(() => () => renderDebouncer.current?.cancel(), []);
+  useEffect(
+    () => () => {
+      renderDebouncer.current?.cancel();
+      resizeDebouncer.current?.cancel();
+    },
+    [],
+  );
 
   // A chain or parameter change republishes the preview. The Go side runs the chain
   // and encodes the frame, so the frontend only swaps the URL.
@@ -292,10 +318,28 @@ export default function App() {
     }
   }, [pendingPath]);
 
-  const onResize = useCallback((width: number, height: number) => {
-    // The Go side stores two numbers and nothing else, so a resize stream is cheap.
-    void api.setPreviewPanelSize(width, height);
-  }, []);
+  // The last size reported to the host, so a repeated measurement is not treated as a change.
+  const lastPanelSize = useRef({ width: 0, height: 0 });
+
+  const onResize = useCallback(
+    (width: number, height: number) => {
+      if (width === lastPanelSize.current.width && height === lastPanelSize.current.height) {
+        return;
+      }
+      lastPanelSize.current = { width, height };
+      // The Go side stores two numbers and nothing else, so a resize stream is cheap.
+      void api.setPreviewPanelSize(width, height);
+
+      // Fit means the render follows the panel, so the stored number alone changes nothing:
+      // without a fresh render the frame keeps the size it was last drawn at, and "Fit" only
+      // takes effect the next time something else asks for a frame. A fixed resolution does
+      // not depend on the panel, so it is left alone.
+      if (resolution === FIT_RESOLUTION && doc?.open === true) {
+        resizeDebouncer.current?.call();
+      }
+    },
+    [resolution, doc?.open],
+  );
 
   return (
     <div className="app">

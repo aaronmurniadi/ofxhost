@@ -346,3 +346,38 @@ func TestScaleToLongEdgePreservesAverage(t *testing.T) {
 		t.Fatal("the scaled width is negative")
 	}
 }
+
+// TestAResizeChangesThePublishedFrame is the symptom a user sees.
+//
+// Fit means the frame follows the panel. Storing the new size alone changes nothing: the
+// picture on screen keeps whatever size it was last rendered at until something asks for a
+// frame. This checks the host honours a second size, which is what the frontend's request
+// after a resize relies on.
+func TestAResizeChangesThePublishedFrame(t *testing.T) {
+	r, sink, _ := newRenderer(t)
+	if err := r.SetResolution(Fit); err != nil {
+		t.Fatalf("SetResolution: %v", err)
+	}
+
+	r.SetPanelSize(1200, 900)
+	if _, err := r.Publish(context.Background(), "doc", solid(2000, 1000, 0.5), domainimage.SRGB, domainimage.Perceptual); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	first, _ := sink.last("doc")
+	if first.Width != 1200 {
+		t.Fatalf("the first frame is %d wide, want the panel's 1200", first.Width)
+	}
+
+	// The user drags the splitter; the panel is now narrower.
+	r.SetPanelSize(600, 450)
+	if _, err := r.Publish(context.Background(), "doc", solid(2000, 1000, 0.5), domainimage.SRGB, domainimage.Perceptual); err != nil {
+		t.Fatalf("Publish after the resize: %v", err)
+	}
+	second, _ := sink.last("doc")
+	if second.Width != 600 {
+		t.Fatalf("the frame after the resize is %d wide, want 600", second.Width)
+	}
+	if second.Width >= first.Width {
+		t.Fatalf("the frame did not shrink: %d then %d", first.Width, second.Width)
+	}
+}
