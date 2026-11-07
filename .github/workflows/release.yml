@@ -43,8 +43,10 @@ jobs:
         include:
           - arch: arm64
             runner: macos-14
+          # macos-13 was retired, and a job queued on it waits forever rather than failing.
+          # macos-15-intel is the current Intel image.
           - arch: x86_64
-            runner: macos-13
+            runner: macos-15-intel
     env:
       GOARCH: ${{ matrix.arch }}
       # The cgo link line is generated per architecture, so the deployment target has to
