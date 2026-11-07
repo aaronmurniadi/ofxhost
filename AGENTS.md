@@ -216,6 +216,12 @@ as a text box. One flag blanked 390 of one plugin's 830 parameters.
 Keep the declared type and carry the flag beside it. `port.ParamInfo.RawType` exists for
 exactly this: without the declared string, an unresolved type cannot be diagnosed.
 
+The panel still honours the flag by leaving the parameter out, but it offers a reveal
+toggle: `buildParamTree(params, { includeSecret: true })` keeps the flagged nodes, marks
+them, and nests their members under the real group. spektrafilm flags 390 of its 830
+parameters this way, most of them through one group, so the reveal is the only way to see
+what the plugin is doing.
+
 ### Writing a parameter is only half of setting it
 
 OFX plugins react to a change in `kOfxActionInstanceChanged`. A host that writes the

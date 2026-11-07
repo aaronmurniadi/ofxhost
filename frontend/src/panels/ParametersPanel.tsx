@@ -46,6 +46,10 @@ function isEditable(param: ParamDTO): boolean {
 export default function ParametersPanel({ selected, onChange }: Props) {
   const [params, setParams] = useState<ParamDTO[]>([]);
   const [error, setError] = useState("");
+  // Off by default: the flag means the plugin does not want these drawn. The toggle is
+  // per panel and not per plugin, because it answers a question about this moment, not
+  // about the plugin.
+  const [showHidden, setShowHidden] = useState(false);
 
   const reload = useCallback(async () => {
     if (selected < 0) {
@@ -87,12 +91,13 @@ export default function ParametersPanel({ selected, onChange }: Props) {
     );
   }
 
-  // A secret parameter is not drawn, so it must not be counted here either: the reset
-  // button would otherwise stay enabled for a plugin whose every control is hidden.
-  const editable = params.filter((param) => !param.secret && isEditable(param));
   // The tree is rebuilt on every load, which is once per edit. It is a few passes
   // over at most a few hundred parameters.
-  const tree = buildParamTree(params);
+  const tree = buildParamTree(params, { includeSecret: showHidden });
+  // A secret parameter is not drawn unless the user asked for it, so it must not be
+  // counted here either: the reset button would otherwise stay enabled for a plugin
+  // whose every control is hidden.
+  const editable = params.filter((param) => (showHidden || !param.secret) && isEditable(param));
 
   return (
     <section className="panel panel--parameters" aria-label="Parameters">
@@ -108,7 +113,14 @@ export default function ParametersPanel({ selected, onChange }: Props) {
 
       {tree.hiddenCount > 0 ? (
         <p className="params__hidden">
-          {tree.hiddenCount} parameter{tree.hiddenCount === 1 ? "" : "s"} hidden by the plugin.
+          {tree.hiddenCount} parameter{tree.hiddenCount === 1 ? "" : "s"} hidden by the plugin.{" "}
+          <button
+            className="params__hidden-toggle"
+            aria-pressed={showHidden}
+            onClick={() => setShowHidden((current) => !current)}
+          >
+            {showHidden ? "Hide them" : "Show them"}
+          </button>
         </p>
       ) : null}
 
@@ -154,8 +166,11 @@ function ParamBranch({
   const { param, children } = node;
 
   if (isContainer(param.kind)) {
+    // A secret group keeps its heading so its members stay nested under it. Without the
+    // mark the subtree would look like ordinary parameters the plugin never flagged.
+    const sectionClass = node.hidden ? "params__section params__section--hidden" : "params__section";
     return (
-      <details className="params__section" data-depth={depth}>
+      <details className={sectionClass} data-depth={depth}>
         <summary className="params__group">{param.label}</summary>
         {children.map((child) => (
           <ParamBranch
@@ -177,6 +192,7 @@ function ParamBranch({
   return (
     <ParamRow
       param={param}
+      hidden={node.hidden}
       onEdit={(values) => onEdit(param.name, values)}
       onEditText={(value) => onEditText(param.name, value)}
       onReset={() => onReset(param.name)}
@@ -186,6 +202,8 @@ function ParamBranch({
 
 interface RowProps {
   param: ParamDTO;
+  /** hidden reports that the plugin marked this parameter, or its group, secret. */
+  hidden: boolean;
   onEdit: (values: number[]) => void;
   onEditText: (value: string) => void;
   /** Restores this one parameter to the default its plugin declared. */
@@ -277,13 +295,14 @@ function ResetOne({ label, onReset }: { label: string; onReset: () => void }) {
 }
 
 /** ParamRow draws one control, chosen by the kind the plugin declared. */
-function ParamRow({ param, onEdit, onEditText, onReset }: RowProps) {
+function ParamRow({ param, hidden, onEdit, onEditText, onReset }: RowProps) {
   const disabled = !param.enabled;
+  const rowClass = hidden ? "params__row params__row--hidden" : "params__row";
 
   if (param.kind === "boolean") {
     const checked = (param.nums?.[0] ?? 0) !== 0;
     return (
-      <div className="params__row">
+      <div className={rowClass}>
         <TooltipHint text={param.hint}>
           <span className="params__label">{param.label}</span>
         </TooltipHint>
@@ -304,7 +323,7 @@ function ParamRow({ param, onEdit, onEditText, onReset }: RowProps) {
   if (param.kind === "choice") {
     const current = Math.round(param.nums?.[0] ?? 0);
     return (
-      <div className="params__row">
+      <div className={rowClass}>
         <TooltipHint text={param.hint}>
           <span className="params__label">{param.label}</span>
         </TooltipHint>
@@ -327,7 +346,7 @@ function ParamRow({ param, onEdit, onEditText, onReset }: RowProps) {
 
   if (param.kind === "string" || param.kind === "secret") {
     return (
-      <div className="params__row">
+      <div className={rowClass}>
         <TooltipHint text={param.hint}>
           <span className="params__label">{param.label}</span>
         </TooltipHint>
@@ -380,7 +399,7 @@ function ParamRow({ param, onEdit, onEditText, onReset }: RowProps) {
   };
 
   return (
-    <div className="params__row">
+    <div className={rowClass}>
       <ParamScrubLabel {...scrubProps} labelId={labelId}>
         {param.label}
       </ParamScrubLabel>

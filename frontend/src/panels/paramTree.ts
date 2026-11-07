@@ -15,6 +15,11 @@ import type { ParamDTO } from "../api/document";
 export interface ParamNode {
   param: ParamDTO;
   children: ParamNode[];
+  /**
+   * hidden reports that the plugin marked this parameter, or a group that holds it,
+   * secret. The node is drawn only when the caller asked for the secret ones.
+   */
+  hidden: boolean;
 }
 
 /** ParamTree is what the panel draws. */
@@ -25,6 +30,18 @@ export interface ParamTree {
   hiddenCount: number;
 }
 
+/** ParamTreeOptions changes what the tree keeps. */
+export interface ParamTreeOptions {
+  /**
+   * includeSecret draws the parameters the plugin marked secret.
+   *
+   * The default is to drop them: OpenFX reserves the flag for parameters a plugin
+   * controls through its own overlay. A user who wants to see the whole state anyway
+   * turns it on, and the group kinds are kept so the subtree still nests.
+   */
+  includeSecret?: boolean;
+}
+
 /** isContainer reports whether a kind holds other parameters. */
 export function isContainer(kind: string): boolean {
   return kind === "group" || kind === "page";
@@ -33,21 +50,19 @@ export function isContainer(kind: string): boolean {
 /**
  * buildParamTree nests the parameters the way the plugin declared them.
  *
- * A secret parameter is dropped, together with everything inside it: OpenFX reserves
- * the flag for parameters a plugin controls through its own overlay, and vendors also
- * use it to gate a feature that is not licensed in a given edition. Drawing them would
- * show a password box for a group.
+ * A secret parameter is dropped by default, together with everything inside it: OpenFX
+ * reserves the flag for parameters a plugin controls through its own overlay, and vendors
+ * also use it to gate a feature that is not licensed in a given edition. Drawing them
+ * unasked would show a password box for a group. ParamTreeOptions.includeSecret keeps
+ * them instead, with their real kinds, so a user can inspect the full state.
  *
  * Two things must not lose data. A parameter naming a parent that does not exist is
  * promoted to the top level rather than dropped, and a parent cycle is broken at the
  * point it closes, because a hand-edited settings file or an unusual plugin must not
  * hang the panel.
  */
-export function buildParamTree(params: ParamDTO[]): ParamTree {
-  const byName = new Map<string, ParamDTO>();
-  for (const param of params) {
-    byName.set(param.name, param);
-  }
+export function buildParamTree(params: ParamDTO[], options: ParamTreeOptions = {}): ParamTree {
+  const includeSecret = options.includeSecret === true;
 
   const hidden = new Set<string>();
   for (const param of params) {
@@ -74,10 +89,11 @@ export function buildParamTree(params: ParamDTO[]): ParamTree {
 
   const nodes = new Map<string, ParamNode>();
   for (const param of params) {
-    if (hidden.has(param.name)) {
+    const isHidden = hidden.has(param.name);
+    if (isHidden && !includeSecret) {
       continue;
     }
-    nodes.set(param.name, { param, children: [] });
+    nodes.set(param.name, { param, children: [], hidden: isHidden });
   }
 
   const roots: ParamNode[] = [];

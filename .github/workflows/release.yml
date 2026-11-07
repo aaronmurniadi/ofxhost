@@ -167,8 +167,11 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent \
             "bin/${APP_NAME}.app" \
             "bin/${APP_NAME}-macOS-${{ matrix.arch }}.zip"
-          shasum -a 256 "bin/${APP_NAME}-macOS-${{ matrix.arch }}.zip" \
-            > "bin/${APP_NAME}-macOS-${{ matrix.arch }}.zip.sha256"
+          # Written from inside the directory so the file names only the archive. A checksum
+          # that records "bin/..." cannot be checked by anyone who downloaded the two files
+          # into one folder, which is the only thing a checksum is for.
+          ( cd bin && shasum -a 256 "${APP_NAME}-macOS-${{ matrix.arch }}.zip" \
+              > "${APP_NAME}-macOS-${{ matrix.arch }}.zip.sha256" )
 
       - name: Upload the build
         uses: actions/upload-artifact@v7.0.2

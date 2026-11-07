@@ -838,6 +838,35 @@ body,
   font-style: italic;
 }
 
+/* The toggle sits inside the notice, so it stays next to the number it acts on. */
+.params__hidden-toggle {
+  font: inherit;
+  font-style: normal;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0 0 0 4px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.params__hidden-toggle:hover,
+.params__hidden-toggle:focus-visible {
+  color: var(--text);
+}
+
+/* A secret parameter is dimmed rather than hidden, so the panel can say why it is
+   different from the rest without removing the control the user asked to see. */
+.params__row--hidden,
+.params__section--hidden > .params__group {
+  opacity: 0.6;
+}
+
+.params__section--hidden {
+  border-left: 1px dashed var(--line);
+  padding-left: 8px;
+}
+
 /* A primary action.
    One per dialog at most, so "the thing you probably want" is unambiguous. */
 .button--primary {

@@ -79,6 +79,41 @@ describe("buildParamTree", () => {
     expect(isContainer("group")).toBe(true);
   });
 
+  it("keeps a secret parameter when the caller asks for it", () => {
+    const tree = buildParamTree(
+      [param("colorGroup", "group"), param("hidden", "double", "colorGroup", true)],
+      { includeSecret: true },
+    );
+
+    expect(tree.roots[0].children.map((c) => c.param.name)).toEqual(["hidden"]);
+    expect(tree.roots[0].children[0].hidden).toBe(true);
+    expect(tree.roots[0].hidden).toBe(false);
+    // The count is of the parameters the plugin flagged, not of the ones dropped.
+    expect(tree.hiddenCount).toBe(1);
+  });
+
+  it("keeps the members of a secret group nested under it", () => {
+    // spektrafilm marks 390 of 830 parameters secret, most of them through a group that
+    // holds them. They must come back as a labelled subtree, not as a flat list.
+    const tree = buildParamTree(
+      [
+        param("technicolorGroup", "group", "", true),
+        param("technicolorMatrixGroup", "group", "technicolorGroup", true),
+        param("chem", "double", "technicolorMatrixGroup"),
+      ],
+      { includeSecret: true },
+    );
+
+    expect(tree.roots).toHaveLength(1);
+    expect(tree.roots[0].param.name).toBe("technicolorGroup");
+    expect(tree.roots[0].hidden).toBe(true);
+    const matrix = tree.roots[0].children[0];
+    expect(matrix.param.name).toBe("technicolorMatrixGroup");
+    // The member is not flagged itself, but its container is, so it is marked too.
+    expect(matrix.children[0].param.name).toBe("chem");
+    expect(matrix.children[0].hidden).toBe(true);
+  });
+
   it("promotes a parameter whose parent does not exist", () => {
     const tree = buildParamTree([param("orphan", "double", "missingGroup")]);
     expect(tree.roots.map((n) => n.param.name)).toEqual(["orphan"]);
