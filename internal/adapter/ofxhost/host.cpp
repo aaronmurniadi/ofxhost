@@ -1252,7 +1252,22 @@ void fillPluginInfo(OFX::Host::ImageEffect::ImageEffectPlugin *plugin, ofxh_plug
     supported = false;
   }
   out->supported = supported ? 1 : 0;
-  out->gpu_capable = 0;
+
+  /* A plugin declares device render support on its descriptor, and the two paths are
+   * declared separately: buffers and textures are independent capabilities, and a plugin
+   * may offer either, both or neither. Reading them here turns "does this plugin care about
+   * Metal" from a guess into a fact, which is what decides whether wiring the handover up
+   * would gain anything on this machine. */
+  int gpu = 0;
+  try {
+    const auto &props = desc.getProps();
+    if (props.getStringProperty(kOfxImageEffectPropMetalRenderSupported, 0) == "true") {
+      gpu = 1;
+    }
+  } catch (...) {
+    gpu = 0;
+  }
+  out->gpu_capable = gpu;
 }
 
 }  // namespace

@@ -67,7 +67,8 @@ typedef struct ofxh_plugin_info {
   /* supported is 0 when the plugin declares a context this host does not offer,
    * which for a still-image host means anything but the filter context. */
   int supported;
-  /* gpu_capable is 0 in this build: no device backend exists yet. */
+  /* gpu_capable is 1 when the plugin declared Metal buffer render support on its
+   * descriptor. It says what the plugin can do, not what the host will ask of it. */
   int gpu_capable;
 } ofxh_plugin_info;
 

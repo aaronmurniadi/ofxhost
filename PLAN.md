@@ -1073,7 +1073,21 @@ Three things learned in the doing:
 - **A device is not required.** `Available` reports false on a machine without Metal, and
   the host stays on the CPU path, which is what it did before this existed.
 
-**Still open: the handover.** The backend exists; the render action does not use it yet.
+**The handover is deferred, on evidence.** `port.PluginInfo.GPUCapable` now reports what a
+plugin declares rather than being hard-coded false, and the answer on this machine is **0 of
+6**. Every installed plugin was probed for both Metal paths - buffers
+(`OfxImageEffectPropMetalRenderSupported`) and textures
+(`OfxImageEffectPropMetalTextureSupported`) - and none declares either.
+
+A `strings` scan of the binaries is what suggested otherwise: they contain the property
+*names*, because a plugin reads them to decide what the host can do. Containing a name is not
+declaring a capability. The descriptor property is the declaration, and it is absent.
+
+So the remaining work - declaring support, handing over `id<MTLBuffer>`, comparing a device
+render with a CPU one - would have no effect on any plugin available here. Build it when a
+plugin that wants it is installed, and start with the comparison test.
+
+The rest of this note is the original plan for that work.
 What remains is to set `kOfxImageEffectPropMetalRenderSupported` on the descriptors, hand a
 plugin `id<MTLBuffer>` through `kOfxImagePropData` with `kOfxImageEffectPropMetalEnabled`
 and the command queue, and read the result back - then compare a CPU render with a device

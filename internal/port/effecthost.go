@@ -14,9 +14,9 @@ type PluginInfo struct {
 	Label string
 	// Author is the vendor string, used to group the plugin picker.
 	Author string
-	// GPUCapable reports that the plugin declared a device render it can accept.
-	// Today every discovered plugin reports false, because no device backend
-	// exists yet; the field is here so a consumer can already group on it.
+	// GPUCapable reports that the plugin declared Metal buffer render support on its
+	// descriptor. It is what the plugin says it can do, not what the host will ask of it:
+	// a plugin that reports true still renders on the CPU until the host offers buffers.
 	GPUCapable bool
 }
 
