@@ -129,7 +129,7 @@ jobs:
           # A bundle that opens but discovers no plugins is the failure this catches: the
           # plugin bundle has to be inside Resources, because the upward search for the CMake
           # output does not find anything once the app is installed.
-          find "$APP/Contents/Resources" -name '*.ofx.bundle' -maxdepth 3 | grep -q . \
+          find "$APP/Contents/Resources" -maxdepth 3 -name '*.ofx.bundle' | grep -q . \
             || { echo "the app bundle carries no plugins"; ls -la "$APP/Contents/Resources"; exit 1; }
 
       - name: Verify the signature
