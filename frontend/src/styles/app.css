@@ -1066,3 +1066,28 @@ body,
 .preview__canvas--dragging .preview__image {
   pointer-events: none;
 }
+
+/*
+ * The per-parameter reset.
+ *
+ * Hidden until the row is hovered or something in it has focus: a panel of forty parameters
+ * should not read as a column of buttons. Focus still reaches it, so it is available to a
+ * keyboard, and the row owns the reveal so pointing anywhere on the row shows it.
+ */
+.params__reset {
+  opacity: 0;
+  transition: opacity 90ms ease;
+  flex: 0 0 auto;
+}
+
+.params__row:hover .params__reset,
+.params__row:focus-within .params__reset {
+  opacity: 1;
+}
+
+/* On a touch screen there is no hover, so the control is always visible. */
+@media (hover: none) {
+  .params__reset {
+    opacity: 1;
+  }
+}

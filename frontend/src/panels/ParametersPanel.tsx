@@ -119,6 +119,7 @@ export default function ParametersPanel({ selected, onChange }: Props) {
           depth={0}
           onEdit={(name, values) => void edit(() => chainApi.setParam(selected, name, values))}
           onEditText={(name, value) => void edit(() => chainApi.setParamText(selected, name, value))}
+          onReset={(name) => void edit(() => chainApi.resetParam(selected, name))}
         />
       ))}
     </section>
@@ -142,11 +143,13 @@ function ParamBranch({
   depth,
   onEdit,
   onEditText,
+  onReset,
 }: {
   node: ParamNode;
   depth: number;
   onEdit: (name: string, values: number[]) => void;
   onEditText: (name: string, value: string) => void;
+  onReset: (name: string) => void;
 }) {
   const { param, children } = node;
 
@@ -161,6 +164,7 @@ function ParamBranch({
             depth={depth + 1}
             onEdit={onEdit}
             onEditText={onEditText}
+            onReset={onReset}
           />
         ))}
       </details>
@@ -175,6 +179,7 @@ function ParamBranch({
       param={param}
       onEdit={(values) => onEdit(param.name, values)}
       onEditText={(value) => onEditText(param.name, value)}
+      onReset={() => onReset(param.name)}
     />
   );
 }
@@ -183,26 +188,54 @@ interface RowProps {
   param: ParamDTO;
   onEdit: (values: number[]) => void;
   onEditText: (value: string) => void;
+  /** Restores this one parameter to the default its plugin declared. */
+  onReset: () => void;
+}
+
+/**
+ * ResetOne is the per-parameter reset.
+ *
+ * It sits at the end of the row rather than in a menu, because "put this back" is asked
+ * about the control the pointer is already on. It is drawn only on hover or focus, so a
+ * panel of forty parameters is not a column of buttons, and it stays reachable by keyboard
+ * through the row's own focus order.
+ */
+function ResetOne({ label, onReset }: { label: string; onReset: () => void }) {
+  return (
+    <TooltipHint text={`Reset ${label} to its default`}>
+      <button
+        className="icon params__reset"
+        aria-label={`Reset ${label} to its default`}
+        onClick={onReset}
+      >
+        ↺
+      </button>
+    </TooltipHint>
+  );
 }
 
 /** ParamRow draws one control, chosen by the kind the plugin declared. */
-function ParamRow({ param, onEdit, onEditText }: RowProps) {
+function ParamRow({ param, onEdit, onEditText, onReset }: RowProps) {
   const disabled = !param.enabled;
 
   if (param.kind === "boolean") {
     const checked = (param.nums?.[0] ?? 0) !== 0;
     return (
-      <label className="params__row">
+      <div className="params__row">
         <TooltipHint text={param.hint}>
           <span className="params__label">{param.label}</span>
         </TooltipHint>
-        <input
-          type="checkbox"
-          checked={checked}
-          disabled={disabled}
-          onChange={(event) => onEdit([event.target.checked ? 1 : 0])}
-        />
-      </label>
+        <div className="params__controls">
+          <input
+            type="checkbox"
+            aria-label={param.label}
+            checked={checked}
+            disabled={disabled}
+            onChange={(event) => onEdit([event.target.checked ? 1 : 0])}
+          />
+        </div>
+        <ResetOne label={param.label} onReset={onReset} />
+      </div>
     );
   }
 
@@ -225,24 +258,29 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
             value: String(index),
           }))}
         />
+        <ResetOne label={param.label} onReset={onReset} />
       </div>
     );
   }
 
   if (param.kind === "string" || param.kind === "secret") {
     return (
-      <label className="params__row">
+      <div className="params__row">
         <TooltipHint text={param.hint}>
           <span className="params__label">{param.label}</span>
         </TooltipHint>
-        <input
-          className="input"
-          type={param.kind === "secret" ? "password" : "text"}
-          defaultValue={param.text}
-          disabled={disabled}
-          onBlur={(event) => onEditText(event.target.value)}
-        />
-      </label>
+        <div className="params__controls">
+          <input
+            className="input"
+            type={param.kind === "secret" ? "password" : "text"}
+            aria-label={param.label}
+            defaultValue={param.text}
+            disabled={disabled}
+            onBlur={(event) => onEditText(event.target.value)}
+          />
+        </div>
+        <ResetOne label={param.label} onReset={onReset} />
+      </div>
     );
   }
 
@@ -317,6 +355,7 @@ function ParamRow({ param, onEdit, onEditText }: RowProps) {
           />
         ))}
       </div>
+      <ResetOne label={param.label} onReset={onReset} />
     </div>
   );
 }

@@ -1887,3 +1887,60 @@ extern "C" int ofxh_instance_reset_params(ofxh_instance *handle) {
     return kOfxStatFailed;
   }
 }
+
+/* ofxh_param_default_double reads the value the plugin declared as a parameter's default.
+ *
+ * It is not the same as the current value. The current value is what the host read last
+ * time, which is why a reload after an edit cannot answer "what was this before the user
+ * changed it". Resetting a parameter needs the declared default, and only the plugin knows
+ * it.
+ */
+extern "C" int ofxh_param_default_double(ofxh_instance *handle, const char *name, double *values,
+                                         int count) {
+  if (handle == nullptr || handle->entry == nullptr || name == nullptr || values == nullptr ||
+      count <= 0) {
+    return kOfxStatErrBadHandle;
+  }
+  try {
+    OFX::Host::Param::Instance *param = handle->entry->instance->getParam(name);
+    if (param == nullptr) {
+      return kOfxStatErrBadIndex;
+    }
+    const OFX::Host::Property::Set &props = param->getProperties();
+    const int dimension = props.getDimension(kOfxParamPropDefault);
+    for (int i = 0; i < count; ++i) {
+      // A parameter with fewer components than asked for repeats its last one, which is
+      // what a one-component default means for a two-component parameter.
+      const int index = i < dimension ? i : (dimension > 0 ? dimension - 1 : 0);
+      values[i] = dimension > 0 ? props.getDoubleProperty(kOfxParamPropDefault, index) : 0.0;
+    }
+    return kOfxStatOK;
+  } catch (...) {
+    return kOfxStatFailed;
+  }
+}
+
+/* ofxh_param_default_string copies the declared default of a text parameter into buf. */
+extern "C" int ofxh_param_default_string(ofxh_instance *handle, const char *name, char *buf,
+                                         int bufLen) {
+  if (handle == nullptr || handle->entry == nullptr || name == nullptr || buf == nullptr ||
+      bufLen <= 0) {
+    return kOfxStatErrBadHandle;
+  }
+  buf[0] = '\0';
+  try {
+    OFX::Host::Param::Instance *param = handle->entry->instance->getParam(name);
+    if (param == nullptr) {
+      return kOfxStatErrBadIndex;
+    }
+    const OFX::Host::Property::Set &props = param->getProperties();
+    if (props.getDimension(kOfxParamPropDefault) <= 0) {
+      return kOfxStatOK;
+    }
+    const std::string &value = props.getStringProperty(kOfxParamPropDefault, 0);
+    std::snprintf(buf, static_cast<size_t>(bufLen), "%s", value.c_str());
+    return kOfxStatOK;
+  } catch (...) {
+    return kOfxStatFailed;
+  }
+}

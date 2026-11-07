@@ -173,6 +173,8 @@ type Instance interface {
 	Values(name string) (ParamValue, error)
 	// SetValues writes one parameter and re-clamps it to the plugin's range.
 	SetValues(name string, v ParamValue) error
+	// ResetParam restores one parameter to the value the plugin declared as its default.
+	ResetParam(name string) error
 	// ResetToDefaults restores every parameter to its default and returns the
 	// count that changed.
 	ResetToDefaults() (int, error)

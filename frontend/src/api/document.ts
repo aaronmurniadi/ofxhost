@@ -200,6 +200,10 @@ export const chainApi = {
   setParamText: (nodeIndex: number, name: string, value: string) =>
     callChain<string>("SetParamText", nodeIndex, name, value),
 
+  /** Restores one parameter of a node to the default its plugin declared. */
+  resetParam: (nodeIndex: number, name: string) =>
+    callChain<string>("ResetParam", nodeIndex, name),
+
   /** Restores every parameter of a node to its default. */
   resetParams: (index: number) =>
     callChain<[number, string]>("ResetParams", index),

@@ -98,6 +98,8 @@ func (f *fakeInstance) SetValues(name string, v port.ParamValue) error {
 	return nil
 }
 
+func (f *fakeInstance) ResetParam(string) error { return nil }
+
 func (f *fakeInstance) ResetToDefaults() (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -284,6 +284,17 @@ func (c *Chain) SetParamText(nodeIndex int, name string, value string) string {
 	return ""
 }
 
+// ResetParam restores one parameter of a node to its plugin default.
+func (c *Chain) ResetParam(nodeIndex int, name string) string {
+	if c.graph == nil {
+		return "no plugin host is available"
+	}
+	if err := c.graph.ResetParam(nodeIndex, name); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // ResetParams restores every parameter of a node to its default.
 func (c *Chain) ResetParams(index int) (int, string) {
 	if c.graph == nil {

@@ -165,6 +165,57 @@ func (i *Instance) SetValues(name string, value port.ParamValue) error {
 	return nil
 }
 
+// ResetParam restores one parameter to the value the plugin declared as its default.
+//
+// The default comes from the plugin rather than from the copy this package cached: that
+// copy is refreshed after every write, so by the time a user asks to reset something it
+// holds the value they just set. Asking the plugin is the only answer that survives an
+// edit.
+func (i *Instance) ResetParam(name string) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.closed || i.handle == nil {
+		return errClosed
+	}
+
+	info := i.paramByName(name)
+	if info == nil {
+		return fmt.Errorf("ofxhost: %s has no parameter %q", i.info.Label, name)
+	}
+
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	switch {
+	case info.Kind.IsText():
+		buf := make([]byte, 4096)
+		if status := C.ofxh_param_default_string(i.handle, cName, (*C.char)(unsafe.Pointer(&buf[0])), C.int(len(buf))); status != statusOK {
+			return statusError("read the default of "+name, status)
+		}
+		text := C.GoString((*C.char)(unsafe.Pointer(&buf[0])))
+		if status := C.ofxh_param_set_string(i.handle, cName, cString(text)); status != statusOK {
+			return statusError("reset "+name, status)
+		}
+	case info.Kind.IsNumeric() || info.Kind == port.ParamRGB || info.Kind == port.ParamRGBA:
+		dimension := info.Kind.Dimension()
+		if dimension <= 0 {
+			dimension = 1
+		}
+		buf := make([]C.double, dimension)
+		if status := C.ofxh_param_default_double(i.handle, cName, &buf[0], C.int(dimension)); status != statusOK {
+			return statusError("read the default of "+name, status)
+		}
+		if status := C.ofxh_param_set_double(i.handle, cName, &buf[0], C.int(dimension)); status != statusOK {
+			return statusError("reset "+name, status)
+		}
+	default:
+		return fmt.Errorf("ofxhost: %q cannot be reset", name)
+	}
+
+	i.refreshParams()
+	return nil
+}
+
 // ResetToDefaults implements port.Instance.
 func (i *Instance) ResetToDefaults() (int, error) {
 	i.mu.Lock()

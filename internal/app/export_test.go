@@ -14,6 +14,7 @@ import (
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/rawlib"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/status"
+	"github.com/aaronmurniadi/ofxhost/internal/port"
 	chainsvc "github.com/aaronmurniadi/ofxhost/internal/service/chain"
 	exportservice "github.com/aaronmurniadi/ofxhost/internal/service/export"
 )
@@ -569,4 +570,78 @@ func inputColourSpaceOf(t *testing.T, graph *chainsvc.Graph, node int) int {
 		t.Fatal("the input colour space has no value")
 	}
 	return int(value.Nums[0])
+}
+
+// TestResettingOneParameterRestoresItsDeclaredDefault is the point of the feature.
+//
+// The cached copy of a parameter's value is refreshed after every write, so by the time a
+// user asks to reset something it holds the value they just set. The declared default has
+// to come from the plugin, and this checks that it does - and that only the named
+// parameter moves.
+func TestResettingOneParameterRestoresItsDeclaredDefault(t *testing.T) {
+	bundle := fixtureDir(t)
+	t.Setenv("OFXHOST_OFX_DIRS", bundle)
+	host, err := ofxhost.New(ofxhost.Options{})
+	if err != nil {
+		t.Skipf("no plugin host: %v", err)
+	}
+	defer host.Close()
+	if err := host.Discover([]string{bundle}); err != nil {
+		t.Skipf("the plugin scan failed: %v", err)
+	}
+
+	index := firstRenderablePlugin(t, host)
+	if index < 0 {
+		t.Skip("the fixture plugin is not installed")
+	}
+	graph := chainsvc.New(host)
+	defer graph.Close()
+	node, addErr := graph.Add(index)
+	if addErr != nil {
+		t.Fatalf("add the fixture: %v", addErr)
+	}
+	instance := graph.Instance(node)
+	if instance == nil {
+		t.Fatal("the node has no instance")
+	}
+
+	valueOf := func(name string) float64 {
+		value, readErr := instance.Values(name)
+		if readErr != nil {
+			t.Fatalf("read %s: %v", name, readErr)
+		}
+		if len(value.Nums) == 0 {
+			t.Fatalf("%s has no numeric value", name)
+		}
+		return value.Nums[0]
+	}
+
+	// The fixture declares gain 1.0 and count 3.
+	if got := valueOf("gain"); got != 1 {
+		t.Fatalf("gain starts at %v, want the declared default 1", got)
+	}
+
+	if setErr := graph.SetParam(node, "gain", port.ParamValue{Nums: []float64{2.5}}); setErr != nil {
+		t.Fatalf("set gain: %v", setErr)
+	}
+	if setErr := graph.SetParam(node, "count", port.ParamValue{Nums: []float64{7}}); setErr != nil {
+		t.Fatalf("set count: %v", setErr)
+	}
+	if got := valueOf("gain"); got != 2.5 {
+		t.Fatalf("gain is %v after the edit, want 2.5", got)
+	}
+
+	if resetErr := graph.ResetParam(node, "gain"); resetErr != nil {
+		t.Fatalf("reset gain: %v", resetErr)
+	}
+
+	// The edited parameter is back. Without reading the plugin's default this would stay
+	// at 2.5, because the cache had already been refreshed with the edited value.
+	if got := valueOf("gain"); got != 1 {
+		t.Fatalf("gain is %v after reset, want the declared default 1", got)
+	}
+	// A reset touches one parameter, not the row.
+	if got := valueOf("count"); got != 7 {
+		t.Fatalf("count is %v, want the untouched 7", got)
+	}
 }

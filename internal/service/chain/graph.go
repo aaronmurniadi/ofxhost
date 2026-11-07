@@ -188,6 +188,36 @@ func (g *Graph) Params(index int) []port.ParamInfo {
 	return instance.Params()
 }
 
+// ResetParam restores one parameter of the node at index to its plugin default.
+//
+// The value is written through the instance and then mirrored into the model, so the saved
+// chain and the running plugin agree - the same path every other edit takes.
+func (g *Graph) ResetParam(index int, name string) error {
+	instance := g.instanceAt(index)
+	if instance == nil {
+		return fmt.Errorf("chain: node %d has no instance", index)
+	}
+	if err := instance.ResetParam(name); err != nil {
+		g.mu.Lock()
+		g.lastErr = err
+		g.mu.Unlock()
+		return err
+	}
+
+	if value, err := instance.Values(name); err == nil {
+		g.mu.Lock()
+		if node := g.chain.Node(index); node != nil {
+			if node.Params == nil {
+				node.Params = map[string]chain.ParamValue{}
+			}
+			node.Params[name] = chain.ParamValue{Nums: value.Nums, Text: value.Text}
+		}
+		g.lastErr = nil
+		g.mu.Unlock()
+	}
+	return nil
+}
+
 // ResetParams restores every parameter of the node at index to its default and
 // records the new values in the model.
 func (g *Graph) ResetParams(index int) (int, error) {

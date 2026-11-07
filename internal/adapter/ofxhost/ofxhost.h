@@ -174,6 +174,14 @@ int ofxh_param_get_string(ofxh_instance *instance, const char *name, const char 
 /* Writes a text parameter. */
 int ofxh_param_set_string(ofxh_instance *instance, const char *name, const char *value);
 
+/* ofxh_param_default_double reads the value the plugin declared as the parameter's default.
+ * It is not the current value: after an edit the current value is whatever was written, and
+ * resetting needs to know what it was before. */
+int ofxh_param_default_double(ofxh_instance *instance, const char *name, double *values, int count);
+
+/* ofxh_param_default_string copies the declared default of a text parameter into buf. */
+int ofxh_param_default_string(ofxh_instance *instance, const char *name, char *buf, int bufLen);
+
 /*
  * Writes a choice parameter's option labels into `dst`, separated by newlines.
  *
