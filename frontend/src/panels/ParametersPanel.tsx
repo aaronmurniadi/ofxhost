@@ -236,7 +236,7 @@ function ParamSlider({
 
   return (
     <input
-      className="input params__slider"
+      className="params__slider"
       type="range"
       min={min}
       max={max}
