@@ -62,6 +62,22 @@ int ofxl_convert(float *src, float *dst, size_t count, int from_space, int to_sp
  */
 long ofxl_profile(int space, unsigned char *dst, size_t cap);
 
+/*
+ * Converts a float RGBA frame from a profile carried by a file into one of the four
+ * spaces the pipeline knows.
+ *
+ * A JPEG or a PNG has a space of its own, and it is not one of ours: a file can be in any
+ * gamut its author chose, described by an embedded ICC profile. Converting through the
+ * profile is the only honest way to honour it. Passing `count` pixels of `src` and writing
+ * `dst`; the two may be the same pointer.
+ *
+ * Returns 0 on success and non-zero on failure, storing a static error string in *err. An
+ * absent or unreadable profile is an error rather than a silent assumption, because guessing
+ * sRGB is how a file in a wide gamut gets quietly desaturated.
+ */
+int ofxl_convert_from_profile(float *src, float *dst, size_t count, const unsigned char *icc, size_t iccLen,
+                              int to_space, int intent, const char **err);
+
 /* The lcms2 version string, for a log line and the About panel. */
 const char *ofxl_version(void);
 

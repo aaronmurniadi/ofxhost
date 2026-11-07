@@ -18,6 +18,7 @@ import (
 
 	"github.com/aaronmurniadi/ofxhost/frontend"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/codes"
+	"github.com/aaronmurniadi/ofxhost/internal/adapter/decoders"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/gpu"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/lcms"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/ofxhost"
@@ -71,8 +72,10 @@ func New(opts Options) (*App, error) {
 
 	// Adapters. The decoder and the colour engine are the two that reach a native
 	// library, and both are statically linked.
-	decoder := rawlib.New()
 	color := lcms.New()
+	// Two kinds of file, one port. A RAW needs a develop; a PNG or a JPEG is already pixels
+	// and carries its own profile, which the colour engine converts from on open.
+	decoder := decoders.New(rawlib.New(), codes.NewFileDecoder(color))
 	logger.Info("native libraries ready", "libraw", rawlib.Version(), "lcms2", lcms.Version())
 
 	// The frame server serves preview pixels to the WebView. It is created before

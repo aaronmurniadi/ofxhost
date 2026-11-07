@@ -253,6 +253,68 @@ extern "C" int ofxl_convert(float *src, float *dst, size_t count, int from_space
   return 0;
 }
 
+extern "C" int ofxl_convert_from_profile(float *src, float *dst, size_t count, const unsigned char *icc,
+                                         size_t iccLen, int to_space, int intent, const char **err) {
+  if (err != nullptr) {
+    *err = nullptr;
+  }
+  if (to_space < 0 || to_space > 3) {
+    if (err != nullptr) {
+      *err = kUnknownSpace;
+    }
+    return 1;
+  }
+  if (count == 0) {
+    return 0;
+  }
+  if (src == nullptr || dst == nullptr) {
+    if (err != nullptr) {
+      *err = kNullBuffer;
+    }
+    return 1;
+  }
+  if (icc == nullptr || iccLen == 0) {
+    if (err != nullptr) {
+      *err = kProfileFailed;
+    }
+    return 1;
+  }
+
+  std::lock_guard<std::mutex> lock(state().mutex);
+
+  /* The profile belongs to the caller's buffer, so lcms2 is told it may not free it. */
+  cmsHPROFILE from = cmsOpenProfileFromMem(icc, static_cast<cmsUInt32Number>(iccLen));
+  if (from == nullptr) {
+    if (err != nullptr) {
+      *err = kProfileFailed;
+    }
+    return 1;
+  }
+  cmsHPROFILE to = profileFor(to_space);
+  if (to == nullptr) {
+    cmsCloseProfile(from);
+    if (err != nullptr) {
+      *err = kProfileFailed;
+    }
+    return 1;
+  }
+
+  cmsHTRANSFORM transform =
+      cmsCreateTransform(from, TYPE_RGBA_FLT, to, TYPE_RGBA_FLT, intentFor(intent), cmsFLAGS_COPY_ALPHA);
+  /* The transform owns what it needs from the profiles, so they can close before it runs. */
+  cmsCloseProfile(from);
+  if (transform == nullptr) {
+    if (err != nullptr) {
+      *err = kTransformFailed;
+    }
+    return 1;
+  }
+
+  cmsDoTransform(transform, src, dst, static_cast<cmsUInt32Number>(count));
+  cmsDeleteTransform(transform);
+  return 0;
+}
+
 extern "C" long ofxl_profile(int space, unsigned char *dst, size_t cap) {
   if (space < 0 || space > 3) {
     return -1;

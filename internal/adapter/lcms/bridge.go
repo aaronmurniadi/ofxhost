@@ -124,6 +124,41 @@ func (c *Converter) Convert(r image.Raster, from, to image.ColorSpace, intent im
 	return out, nil
 }
 
+// ConvertFromProfile converts a raster whose space is described by its own ICC profile.
+//
+// It is what a file format needs: a JPEG or a PNG carries the space its author chose, which
+// need not be one of the four this pipeline knows, so the profile is the only description
+// available. The result is the pipeline's layout in `to`.
+func (c *Converter) ConvertFromProfile(r image.Raster, icc []byte, to image.ColorSpace, intent image.RenderIntent) (image.Raster, error) {
+	if len(icc) == 0 {
+		return image.Raster{}, errors.New("lcms: the file carries no colour profile")
+	}
+	target, err := cSpace(to)
+	if err != nil {
+		return image.Raster{}, err
+	}
+	if len(r.Pixels) == 0 {
+		return image.Raster{}, errors.New("lcms: there is nothing to convert")
+	}
+
+	out := make([]float32, len(r.Pixels))
+	var cerr *C.char
+	if status := C.ofxl_convert_from_profile(
+		(*C.float)(unsafe.Pointer(&r.Pixels[0])),
+		(*C.float)(unsafe.Pointer(&out[0])),
+		C.size_t(len(r.Pixels)/4),
+		(*C.uchar)(unsafe.Pointer(&icc[0])),
+		C.size_t(len(icc)),
+		target,
+		cIntent(intent),
+		&cerr,
+	); status != 0 {
+		return image.Raster{}, errors.New("lcms: " + C.GoString(cerr))
+	}
+
+	return image.Raster{Pixels: out, W: r.W, H: r.H}, nil
+}
+
 // Profile implements port.ColorConverter.
 //
 // The ICC profile is measured first and then fetched, so the buffer is allocated

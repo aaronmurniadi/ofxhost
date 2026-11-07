@@ -1119,11 +1119,25 @@ does that this one does not; five are scheduled below and the sixth is recorded 
 of this section. They are ordered by what each costs and what each buys, and the
 order is the recommendation rather than a decree - except where a dependency forces it.
 
-**1. Non-RAW input (PNG, JPEG, TIFF, EXR).**
+**1. Non-RAW input (PNG, JPEG, TIFF, EXR). — done for PNG, JPEG and TIFF.**
 
-`decoder := rawlib.New()` in the composition root is the only implementation of
-`port.ImageDecoder`, so the program opens RAW and nothing else. The previous host opens
-PNG, JPEG, TIFF and EXR through the same interface it uses for RAW.
+`internal/adapter/codes` decodes the three formats through the same libraries the encoders
+already link, and `internal/adapter/decoders` picks a decoder by extension so the document
+service sees one `port.ImageDecoder`. A file's own ICC profile is honoured: a JPEG can be in
+any gamut its author chose, so `ofxl_convert_from_profile` converts through the embedded
+profile rather than assuming sRGB. An untagged file is treated as sRGB, which is what the
+formats specify.
+
+Two traps worth recording:
+
+- **Every format stores rows top-down and the pipeline is bottom-up.** The first version of
+  the test checked that pixels came back; the one that matters checks which row is where, and
+  it fails when the flip is removed.
+- **The open dialog's filter is a hand-kept constant** in the window, because importing the
+  decoders there would pull a native library into the UI layer. `TestImagePatternMatchesTheDecoders`
+  in `internal/app` fails when the two drift, which is what makes hand-keeping safe.
+
+EXR remains open: no dependable pure-Go decoder, and it would add tinyexr.
 
 Small and self-contained, and it buys something beyond the feature: today every end-to-end
 test needs `samples/DSCF0209.RAF`, 25 MB and a pinned camera. A decoder that reads a PNG or

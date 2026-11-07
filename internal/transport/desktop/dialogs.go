@@ -28,13 +28,14 @@ type picker struct {
 // FilePicker returns a picker bound to this window.
 func (a *App) FilePicker() FilePicker { return &picker{app: a.app} }
 
-// rawPattern is the filter the open dialog offers.
+// imagePattern is the filter the open dialog offers.
 //
 // libraw detects a RAW file by its contents, so this list only decides what the
-// dialog shows. It is kept in step with rawlib's extensions by hand, because a
+// dialog shows. It is kept in step with the decoders' extensions by hand, because a
 // dialog filter is a display concern and importing the decoder to build it would
-// pull a native library into the window.
-const rawPattern = "*.3fr;*.ari;*.arw;*.bay;*.cr2;*.cr3;*.crw;*.dcr;*.dng;*.erf;*.fff;*.iiq;*.k25;*.kdc;*.mdc;*.mef;*.mos;*.mrw;*.nef;*.nrw;*.orf;*.pef;*.raf;*.raw;*.rw2;*.rwl;*.srf;*.srw;*.x3f"
+// pull a native library into the window. TestImagePatternMatchesTheDecoders fails
+// the suite when the two drift, which is what makes the hand-keeping safe.
+const imagePattern = "*.3fr;*.ari;*.arw;*.bay;*.cr2;*.cr3;*.crw;*.dcr;*.dng;*.erf;*.fff;*.iiq;*.k25;*.kdc;*.mdc;*.mef;*.mos;*.mrw;*.nef;*.nrw;*.orf;*.pef;*.raf;*.raw;*.rw2;*.rwl;*.srf;*.srw;*.x3f;*.png;*.jpg;*.jpeg;*.tif;*.tiff"
 
 // PickSave implements FilePicker.
 //
@@ -61,8 +62,8 @@ func (p *picker) PickImage() (string, error) {
 		return "", errors.New("desktop: the window is not available")
 	}
 	path, err := p.app.Dialog.OpenFile().
-		SetTitle("Open a RAW image").
-		AddFilter("Camera RAW", rawPattern).
+		SetTitle("Open an image").
+		AddFilter("Images", imagePattern).
 		AddFilter("All files", "*").
 		PromptForSingleSelection()
 	if err != nil {
@@ -70,3 +71,7 @@ func (p *picker) PickImage() (string, error) {
 	}
 	return path, nil
 }
+
+// ImagePattern returns the extensions the open dialog offers, for the test that keeps it in
+// step with the decoders.
+func ImagePattern() string { return imagePattern }
