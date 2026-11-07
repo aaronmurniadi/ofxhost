@@ -415,9 +415,16 @@ body,
   letter-spacing: 0.04em;
 }
 
+/*
+ * Label, control, and the reset.
+ *
+ * Three columns, not two. With two, the reset added at the end of the row became a third
+ * grid item and wrapped onto a line of its own under the label. The third column is `auto`
+ * so the reset sits at the right edge of the row it belongs to.
+ */
 .params__row {
   display: grid;
-  grid-template-columns: 40% 1fr;
+  grid-template-columns: 40% 1fr auto;
   align-items: center;
   gap: 6px;
   margin-bottom: 4px;
