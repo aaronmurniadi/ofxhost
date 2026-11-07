@@ -11,7 +11,7 @@
     !define INFO_COMPANYNAME "OfxHost"
 !endif
 !ifndef INFO_PRODUCTNAME
-    !define INFO_PRODUCTNAME "OFXhost"
+    !define INFO_PRODUCTNAME "OfxHost"
 !endif
 !ifndef INFO_PRODUCTVERSION
     !define INFO_PRODUCTVERSION "0.1.0"

@@ -4,7 +4,7 @@
         <key>CFBundlePackageType</key>
             <string>APPL</string>
         <key>CFBundleName</key>
-            <string>OFXhost</string>
+            <string>OfxHost</string>
         <key>CFBundleExecutable</key>
             <string>ofxhost</string>
         <key>CFBundleIdentifier</key>
