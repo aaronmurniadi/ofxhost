@@ -350,7 +350,7 @@ export default function App() {
           place. There is no second line of chrome. */}
       <header className="app__bar">
         <button className="button button--primary" onClick={() => void chooseFile()}>
-          Open…
+          Open
         </button>
         {lastImage !== "" && !doc?.open ? (
           <TooltipHint text={lastImage}>
@@ -361,7 +361,7 @@ export default function App() {
         ) : null}
         <TooltipHint text={doc?.open ? "Export the chain at full resolution" : "Open a file first"}>
           <button className="button" onClick={() => void setExporting(true)} disabled={!doc?.open}>
-            Export…
+            Export
           </button>
         </TooltipHint>
         <button className="button" onClick={() => setSettingsOpen(true)}>

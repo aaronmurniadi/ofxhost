@@ -117,3 +117,48 @@ func TestBundledPluginRenders(t *testing.T) {
 		t.Fatal("the render produced an empty frame")
 	}
 }
+
+// TestBundledDirsForTheDevelopmentBinary is the layout the build actually produces.
+func TestBundledDirsForTheDevelopmentBinary(t *testing.T) {
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatalf("resolve the repository root: %v", err)
+	}
+	want := filepath.Join(root, "build", "ofxhost-native", "bundled")
+
+	dirs := bundledDirsFor(filepath.Join(root, "bin", "ofxhost"))
+	if len(dirs) == 0 {
+		t.Fatal("no directories were offered")
+	}
+	if dirs[len(dirs)-1] != want {
+		t.Fatalf("the search ended at %q, want %q", dirs[len(dirs)-1], want)
+	}
+}
+
+// TestBundledDirsForTheAppBundle is the layout that failed.
+//
+// The development build puts the binary three levels inside a macOS app bundle, so the
+// `../build` path that works for a plain binary points at bin/ofxhost.dev.app/Contents/build
+// and finds nothing. The bundled plugins were absent from the picker for exactly this reason.
+func TestBundledDirsForTheAppBundle(t *testing.T) {
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatalf("resolve the repository root: %v", err)
+	}
+	want := filepath.Join(root, "build", "ofxhost-native", "bundled")
+	nested := filepath.Join(root, "bin", "ofxhost.dev.app", "Contents", "MacOS", "ofxhost")
+
+	dirs := bundledDirsFor(nested)
+	found := false
+	for _, dir := range dirs {
+		if dir == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the app-bundle layout never offered %q; it offered %v", want, dirs)
+	}
+	if dirs[len(dirs)-1] != want {
+		t.Fatalf("the search ended at %q rather than the bundle", dirs[len(dirs)-1])
+	}
+}
