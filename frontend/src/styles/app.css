@@ -280,7 +280,13 @@ body,
   /* The transform origin is the centre, so zooming keeps the middle still until
    * the user pans. */
   transform-origin: center center;
+  /* Zoom arrives in discrete steps from the wheel, and this turns them into a short
+   * move rather than a jump. It is deliberately not used while dragging: see
+   * .preview__canvas--dragging below. */
   transition: transform 40ms linear;
+  /* A promoted layer is composited rather than repainted, so a pan does not leave a
+   * stripe of backdrop at the edge it just uncovered. */
+  will-change: transform;
   user-select: none;
   -webkit-user-drag: none;
 }
@@ -1131,6 +1137,15 @@ body,
 
 .preview__canvas--dragging .preview__image {
   pointer-events: none;
+  /* The image must be under the pointer on every frame of a drag.
+   *
+   * With the transition left on, each pointermove starts a 40ms animation toward the
+   * new pan while the next move replaces it, so the picture is always chasing where
+   * the cursor already is. At the end of the travel that lag is visible as a bar of
+   * the backdrop on the edge the image has not reached yet - dragged to the right,
+   * the bar is on the left. A drag is a direct manipulation, so nothing may be
+   * interpolated. */
+  transition: none;
 }
 
 /*

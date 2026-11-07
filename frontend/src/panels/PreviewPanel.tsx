@@ -72,10 +72,12 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const box = entry.contentRect;
-        const width = Math.round(box.width);
-        const height = Math.round(box.height);
-        setCanvasSize({ width, height });
-        onResize(width, height);
+        // The exact size is what the geometry uses. A panel edge rarely lands on a whole
+        // pixel, and rounding up grants half a pixel of slack that does not exist, which
+        // is exactly enough to let the image edge sit inside the canvas and show a hairline
+        // of backdrop. The rounded size is still what the rest of the window is told.
+        setCanvasSize({ width: box.width, height: box.height });
+        onResize(Math.round(box.width), Math.round(box.height));
       }
     });
     observer.observe(element);
