@@ -284,9 +284,6 @@ body,
    * move rather than a jump. It is deliberately not used while dragging: see
    * .preview__canvas--dragging below. */
   transition: transform 40ms linear;
-  /* A promoted layer is composited rather than repainted, so a pan does not leave a
-   * stripe of backdrop at the edge it just uncovered. */
-  will-change: transform;
   user-select: none;
   -webkit-user-drag: none;
 }
@@ -1146,6 +1143,11 @@ body,
    * the bar is on the left. A drag is a direct manipulation, so nothing may be
    * interpolated. */
   transition: none;
+  /* Promotion is scoped to the drag, where it pays: the only thing changing is the
+   * offset. It was on the image permanently, and a promoted layer is re-rastered when
+   * the scale changes, so every step of a wheel zoom became a rasterisation of the
+   * picture at its new size. That is the cost this avoids. */
+  will-change: transform;
 }
 
 /*
