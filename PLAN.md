@@ -1259,6 +1259,41 @@ file the user did not ask for is clutter.
 Revisit only if chains become expensive to reconstruct - several nodes with many tuned
 parameters, or a chain that is itself the work rather than a step toward an export.
 
+#### Performance, measured
+
+`internal/app/perf_test.go` holds benchmarks over the real sample, so a claim about speed
+carries a number from the file the plan already quotes. Run them with:
+
+```sh
+go test ./internal/app -bench Benchmark -benchtime 3x -run '^$'
+```
+
+On an M2, before and after the first pass:
+
+| Stage | Before | After | Note |
+|---|---|---|---|
+| Decode 25 MB RAF | 1.85 s | 1.85 s | libraw; not touched |
+| Preview chain at 1600 px | 70 ms | 70 ms | one plugin; not touched |
+| Export PNG 16-bit | 11.6 s, 82.8 MB | 3.5 s, 76.0 MB | |
+| Export TIFF 16-bit | 1.29 s, 121.7 MB | 1.0 s, 114.3 MB | |
+| Export JPEG XL 16-bit | 45.2 s, 60.5 MB | 10.6 s, 60.5 MB | |
+| Export JPEG | 57 ms, 2.0 MB | 57 ms, 2.0 MB | |
+
+Two causes, both worth recording because both were assumptions that a measurement overturned.
+
+**The alpha channel.** Every format wrote four channels, and a photograph's fourth channel is a
+column of 1.0. Dropping it when the frame is fully opaque is lossless in content and took PNG
+from 11.6 s to 3.5 s. A frame with any transparency keeps all four; `frameIsOpaque` is the one
+place that decides.
+
+**The JPEG XL thread pool.** The encoder created one runner thread, with a comment claiming a
+still frame "encodes in a fraction of a second". Measured: 45 seconds. It now uses the machine's
+cores, capped at 16, for the duration of one encode. That is the 4.3x above, with no change to
+the file.
+
+PNG also stopped searching all five row filters. Measured on the same frame: the search costs
+0.7 s to save 2% of file size, which is not a trade worth making on a file the user keeps.
+
 #### Not scheduled: the selftest
 
 A sixth difference, recorded here so it is not lost rather than because it should be built
