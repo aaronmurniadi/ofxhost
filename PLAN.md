@@ -1057,6 +1057,30 @@ that declare the capability. No service or transport change.
 **Gate:** a render through the device path matches the CPU path within the tolerance
 chosen for float32, and the CPU path still works when no device is present.
 
+*Done, in part.* `port.GPUBackend` is implemented over Metal in `internal/adapter/gpu`:
+one device and one command queue for the process, shared-storage buffers, and opaque
+handles so a released buffer is an error rather than a use-after-free. Six tests, run
+against a real device.
+
+Three things learned in the doing:
+
+- **cgo does not compile `.mm`.** `go/build` recognises `.m`, so an Objective-C++ file is
+  left out of the build silently and every symbol it defines is undefined at link time. The
+  backend is written in plain Objective-C for that reason.
+- **A shared buffer still needs a barrier before reading.** The CPU can see the memory, but
+  only once the GPU's writes are ordered; reading without waiting on the queue reads
+  whatever was there before.
+- **A device is not required.** `Available` reports false on a machine without Metal, and
+  the host stays on the CPU path, which is what it did before this existed.
+
+**Still open: the handover.** The backend exists; the render action does not use it yet.
+What remains is to set `kOfxImageEffectPropMetalRenderSupported` on the descriptors, hand a
+plugin `id<MTLBuffer>` through `kOfxImagePropData` with `kOfxImageEffectPropMetalEnabled`
+and the command queue, and read the result back - then compare a CPU render with a device
+render, which is the gate above. That change is inside the render path, the one that
+regressed twice already, so it deserves its own pass with the comparison test written
+first.
+
 #### M7 — Other platforms
 
 Last, and deliberately so. macOS is where this is developed and measured; the other

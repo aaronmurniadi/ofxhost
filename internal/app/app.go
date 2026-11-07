@@ -18,6 +18,7 @@ import (
 
 	"github.com/aaronmurniadi/ofxhost/frontend"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/codes"
+	"github.com/aaronmurniadi/ofxhost/internal/adapter/gpu"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/lcms"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/ofxhost"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/rawlib"
@@ -143,6 +144,17 @@ func New(opts Options) (*App, error) {
 	})
 
 	binds.SetVersion(version)
+
+	// The device backend. It is built whether or not this machine has one: an unavailable
+	// device is the ordinary case on a machine without Metal, and the CPU path is what runs
+	// there. Nothing in the render path uses it yet - see PLAN.md M6 for what remains.
+	device := gpu.New()
+	if device.Available() {
+		logger.Info("device backend ready", "backend", device.Name())
+	} else {
+		logger.Info("no device backend; rendering on the CPU only")
+	}
+	_ = device
 
 	// The store remembers which image of which folder was open. It writes no sidecar:
 	// a chain reaches disk only through an export that asks for one.

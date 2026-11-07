@@ -80,6 +80,9 @@ type GPUBackend interface {
 	Available() bool
 	// Allocate reserves bytes of device memory. The caller releases it.
 	Allocate(bytes int) (DeviceBuffer, error)
+	// Write copies src into buf on the device. It is what lets a caller upload the
+	// frame it wants processed; without it a device buffer is only useful as an output.
+	Write(buf DeviceBuffer, src []byte) error
 	// Read copies count bytes from buf into dst. It blocks until the device has
 	// finished writing that range.
 	Read(buf DeviceBuffer, dst []byte) error
