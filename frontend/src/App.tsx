@@ -26,6 +26,7 @@ import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
 import SettingsDialog from "./panels/SettingsDialog";
 import { Button } from "@cloudflare/kumo/components/button";
 import { Toolbar } from "@cloudflare/kumo/components/toolbar";
+import { Loader } from "@cloudflare/kumo/components/loader";
 import Select from "./widgets/Select";
 import TooltipHint from "./widgets/Tooltip";
 
@@ -269,11 +270,9 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* The bar carries actions only. What is open and how it is being shown lives in
+          the status bar, and repeating it here made two places say the same thing. */}
       <header className="app__bar">
-        <span className="app__title">OfxHost</span>
-        <span className="app__hint">
-          {doc?.open ? `${doc.fileName} — ${doc.width}×${doc.height}` : "No image open"}
-        </span>
         <Toolbar>
           <Button variant="primary" size="sm" onClick={() => void chooseFile()}>
             Open…
@@ -330,6 +329,14 @@ export default function App() {
       <footer className="app__status">
         {/* Left: what is open and how it is being shown. */}
         <span className="app__status-left">
+          {/* A spinner while a render is in flight, a quiet dot when idle. The dot is what
+              makes the spinner mean something: an indicator that is always moving says
+              nothing about whether the program is busy. */}
+          {busy ? (
+            <Loader size="sm" aria-label="Rendering" className="app__status-spinner" />
+          ) : (
+            <span className="app__status-idle" aria-hidden />
+          )}
           <span className="app__status-name" title={doc?.path ?? ""}>
             {doc?.open ? doc.fileName : "No image"}
           </span>
@@ -367,7 +374,6 @@ export default function App() {
 
         {/* Right: the outcome of the last action, which is what a status line is for. */}
         <span className="app__status-message" role="status" aria-live="polite">
-          {busy ? <span className="app__status--busy">Working… </span> : null}
           {message}
         </span>
       </footer>

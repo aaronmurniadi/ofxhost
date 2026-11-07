@@ -125,13 +125,10 @@ body,
   border-bottom: 1px solid var(--panel-border);
 }
 
-.app__title {
-  font-weight: 600;
-}
-
-.app__hint {
-  color: var(--text-dim);
-  font-size: 12px;
+/* The bar holds actions only. The version is the one piece of text left, and it sits at
+   the far right so the buttons stay grouped at the left where the eye starts. */
+.app__bar > .app__version {
+  margin-left: auto;
 }
 
 /* The panel area.
@@ -687,6 +684,30 @@ body,
   flex: 0 0 auto;
 }
 
+/* A quiet dot while idle, in the same footprint as the spinner, so the status line does
+   not shift by a few pixels every time a render starts. */
+.app__status-idle {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.app__status-idle::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.55;
+}
+
+.app__status-spinner {
+  flex: 0 0 auto;
+}
+
 /* The left group answers "what am I looking at": name, zoom, size, render resolution. */
 .app__status-left {
   display: flex;
@@ -723,9 +744,6 @@ body,
   text-align: right;
 }
 
-.app__status--busy {
-  color: var(--accent);
-}
 
 /* An element that is read by a screen reader but not drawn. */
 .visually-hidden {
