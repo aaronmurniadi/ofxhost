@@ -13,6 +13,7 @@
 
 import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { anchoredZoom, clampPan } from "./previewView";
 import { api } from "../api/document";
 import Select from "../widgets/Select";
 
@@ -71,6 +72,10 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
   // inside a 900-wide panel was simply clipped. Zoom is a multiple of the fit, which
   // makes "1" mean "the whole frame is visible" at every panel size.
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  // drag holds where a pan started. It is a ref rather than state because it changes on
+  // every pointer move and nothing renders from it.
+  const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   // A new image resets the view, so the user sees the whole frame rather than a
   // corner of the previous one.
@@ -103,21 +108,6 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
     return () => observer.disconnect();
   }, [onResize]);
 
-  const onWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    // The page must not scroll behind the preview.
-    event.preventDefault();
-    setZoom((current) => {
-      const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
-      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current * factor));
-      return next;
-    });
-  }, []);
-
-  const onDoubleClick = useCallback(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
-
   // fitScale is the factor that puts the whole frame inside the canvas. Zoom
   // multiplies it, so wheel and trackpad change the view without ever losing the
   // frame on the first draw.
@@ -126,13 +116,133 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
       ? Math.min(canvasSize.width / preview.width, canvasSize.height / preview.height)
       : 1;
 
+  /**
+   * clampPan keeps the image from being dragged out of the panel.
+   *
+   * An image smaller than the canvas has no slack, so it stays centred. A larger one may
+   * move until its edge meets the panel's, which is the furthest a user can meaningfully
+   * look. Without this a single fast drag loses the picture with no way back except a
+   * double-click, which is not discoverable.
+   */
+  const limitPan = useCallback(
+    (next: { x: number; y: number }, scale: number) => {
+      if (!preview) {
+        return { x: 0, y: 0 };
+      }
+      return clampPan(
+        next,
+        scale,
+        { width: preview.width, height: preview.height },
+        { width: canvasSize.width, height: canvasSize.height },
+      );
+    },
+    [preview, canvasSize.width, canvasSize.height],
+  );
+
+  const onWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      // The page must not scroll behind the preview.
+      event.preventDefault();
+
+      const current = zoom;
+      const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current * factor));
+      if (next === current) {
+        return;
+      }
+
+      // Zoom about the pointer, not the centre.
+      //
+      // A plain scale keeps the middle still, so whatever the user is looking at drifts
+      // away as they zoom in and has to be chased with a pan. Anchoring means the pixel
+      // under the cursor stays under the cursor, which is what makes zoom-then-pan a
+      // single gesture instead of two.
+      const rect = event.currentTarget.getBoundingClientRect();
+      const offsetX = event.clientX - rect.left - rect.width / 2;
+      const offsetY = event.clientY - rect.top - rect.height / 2;
+      const anchored = anchoredZoom(pan, { x: offsetX, y: offsetY }, next / current);
+
+      setZoom(next);
+      setPan(limitPan(anchored, fitScale * next));
+    },
+    [zoom, pan, fitScale, limitPan],
+  );
+
+  // A panel that grows while the image is panned leaves the pan outside the new limits, so
+  // the image would sit against an edge with slack behind it. Re-clamping on every change
+  // of scale or canvas size keeps the view consistent without asking the user to nudge it.
+  useEffect(() => {
+    setPan((current) => {
+      const next = limitPan(current, fitScale * zoom);
+      if (next.x === current.x && next.y === current.y) {
+        return current;
+      }
+      return next;
+    });
+  }, [limitPan, fitScale, zoom]);
+
+  const onPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      // Only the left button pans, and only when there is an image.
+      if (event.button !== 0 || !preview) {
+        return;
+      }
+      // The render-size control sits inside the canvas; a press on it must not start a
+      // drag that the user did not ask for.
+      if ((event.target as HTMLElement).closest(".preview__overlay--resolution")) {
+        return;
+      }
+      // Pointer capture is what lets a drag continue past the edge of the panel, which
+      // is what a user does when the image is larger than the view.
+      event.currentTarget.setPointerCapture(event.pointerId);
+      drag.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
+      setDragging(true);
+    },
+    [preview, pan],
+  );
+
+  const onPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const started = drag.current;
+      if (started === null) {
+        return;
+      }
+      const next = {
+        x: started.panX + (event.clientX - started.x),
+        y: started.panY + (event.clientY - started.y),
+      };
+      setPan(limitPan(next, fitScale * zoom));
+    },
+    [limitPan, fitScale, zoom],
+  );
+
+  const endDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (drag.current === null) {
+      return;
+    }
+    drag.current = null;
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  const onDoubleClick = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
   return (
     <LayerCard render={<section aria-label="Preview" />} className="panel panel--preview">
       <div
         ref={canvasRef}
-        className="preview__canvas"
+        className={dragging ? "preview__canvas preview__canvas--dragging" : "preview__canvas"}
         onWheel={onWheel}
         onDoubleClick={onDoubleClick}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
       >
         {busy ? (
           <p className="panel__placeholder">Opening…</p>

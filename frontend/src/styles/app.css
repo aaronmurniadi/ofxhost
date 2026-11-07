@@ -282,6 +282,12 @@ body,
   width: 100%;
   height: 100%;
   overflow: hidden;
+  /* A drag anywhere in the panel pans the image, so the cursor says so before the user
+     tries. touch-action is off because the browser would otherwise claim the gesture for
+     scrolling and the drag would never reach the handler. */
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   /* A checkerboard would be misleading here: the preview is opaque, so a flat
    * backdrop is what the user expects behind a photograph. */
   background: var(--preview-bg);
@@ -953,4 +959,15 @@ body,
 .params__label-text {
   cursor: ew-resize;
   user-select: none;
+}
+
+/* While the image is being dragged the cursor is closed, which is the standard signal
+   that the gesture is live. */
+.preview__canvas--dragging {
+  cursor: grabbing;
+}
+
+/* The cursor must not flicker to a text caret while the image is dragged. */
+.preview__canvas--dragging .preview__image {
+  pointer-events: none;
 }
