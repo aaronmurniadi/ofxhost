@@ -1084,8 +1084,13 @@ A `strings` scan of the binaries is what suggested otherwise: they contain the p
 declaring a capability. The descriptor property is the declaration, and it is absent.
 
 So the remaining work - declaring support, handing over `id<MTLBuffer>`, comparing a device
-render with a CPU one - would have no effect on any plugin available here. Build it when a
-plugin that wants it is installed, and start with the comparison test.
+render with a CPU one - would have no effect on any plugin available here.
+
+**Revised in §8.1.** The deferral above is about user-visible effect, and it still holds:
+nothing installed would take the path. But the previous host implements the handover, and
+parity is its own reason. §8.1 item 2 schedules it, gated on the plugin's declaration so it
+stays inert, with the comparison test written first. Read that entry rather than this note
+when deciding what to build.
 
 The rest of this note is the original plan for that work.
 What remains is to set `kOfxImageEffectPropMetalRenderSupported` on the descriptors, hand a
@@ -1106,6 +1111,76 @@ targets are packaging work over adapters that are already behind ports.
 - Only now build CI/CD.
 
 **Gate:** the same binary behaviour on all four targets.
+
+### 8.1 Remaining parity work with OfxRawHost
+
+Measured, not remembered. A comparison of the two trees found six things the previous host
+does that this one does not; five are scheduled below and the sixth is recorded at the end
+of this section. They are ordered by what each costs and what each buys, and the
+order is the recommendation rather than a decree - except where a dependency forces it.
+
+**1. Non-RAW input (PNG, JPEG, TIFF, EXR).**
+
+`decoder := rawlib.New()` in the composition root is the only implementation of
+`port.ImageDecoder`, so the program opens RAW and nothing else. The previous host opens
+PNG, JPEG, TIFF and EXR through the same interface it uses for RAW.
+
+Small and self-contained, and it buys something beyond the feature: today every end-to-end
+test needs `samples/DSCF0209.RAF`, 25 MB and a pinned camera. A decoder that reads a PNG or
+a TIFF makes a fixture that is a few kilobytes and any size the test wants. Do this first
+because it makes everything after it cheaper to verify.
+
+**2. Metal handover.**
+
+The backend exists and is tested; the render action does not use it. What remains is
+`kOfxImageEffectPropMetalRenderSupported` on the descriptors, `id<MTLBuffer>` through
+`kOfxImagePropData` with `kOfxImageEffectPropMetalEnabled` and the command queue, and the
+read-back. The previous host does exactly this in `OfxPlugins.cpp` and it is the reference.
+
+Justified differently than M6 first argued it. It is not for the plugins installed here -
+none declares the capability, and the previous host's own gate (`metalCapable &&
+ofxMetalAvailable()`) leaves its Metal inert on this machine too. It is for parity, and for
+the plugin that will want it. Gate it on the plugin's declaration so it stays inert, and
+write the CPU-versus-device comparison test first: this is the render path that has regressed
+twice.
+
+**3. Camera noise profile DB.**
+
+The previous host ships darktable's `noiseprofiles.json`, reads the camera make, model and
+ISO from the RAW, and fills Denoise's *Noise Slope* and *Noise Offset* before the first
+render - interpolating between ISO steps and clamping outside the camera's range. This host
+seeds nothing, so Denoise runs at the generic defaults on every camera.
+
+Largest of the six and the one that changes results most. It also carries the only licensing
+question: that file stays under darktable's GPL-3.0 while the rest of the program is not.
+Settle that before writing code, not after.
+
+**4. M7 - other platforms and CI.**
+
+Packaging work over ports that already exist. Nothing here changes behaviour.
+
+**5. Project save and load.**
+
+The previous host writes the whole chain, its parameters and the GUI state to disk. This one
+persists the interface only, and writes an optional sidecar at export, defaulting to not
+writing one. That was a deliberate choice and it stands: a chain is cheap to rebuild and a
+file the user did not ask for is clutter.
+
+Revisit only if chains become expensive to reconstruct - several nodes with many tuned
+parameters, or a chain that is itself the work rather than a step toward an export.
+
+#### Not scheduled: the selftest
+
+A sixth difference, recorded here so it is not lost rather than because it should be built
+now. The previous host answers `--selftest` with a report: which plugins loaded, which failed
+and why, and a handful of self-checks. This host has nothing equivalent, so a user whose
+plugin will not appear has only a log line and no way to ask.
+
+Most of what made it necessary is already covered differently: `go test ./...` checks the
+adapters, and the fixture plugin removes the vendor dependency that made a selftest the only
+way to prove anything. What is missing is the user-facing half - a way to ask the installed
+program what it can see. Add it when plugin-discovery problems start arriving as bug reports,
+not before.
 
 ### 9. Definition of done
 
