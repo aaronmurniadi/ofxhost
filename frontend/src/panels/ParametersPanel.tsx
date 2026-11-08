@@ -15,7 +15,7 @@ import { chainApi, type ParamDTO } from "../api/document";
 import ParamNumber, { ParamScrubLabel } from "../widgets/ParamNumber";
 import Select from "../widgets/Select";
 import TooltipHint from "../widgets/Tooltip";
-import { buildParamTree, isContainer, type ParamNode } from "./paramTree";
+import { buildParamTree, filterParamTree, isContainer, type ParamNode } from "./paramTree";
 
 interface Props {
   /** Bumped by the shell when a render should be redone. */
@@ -58,6 +58,10 @@ export default function ParametersPanel({ selected, onChange, documentPath }: Pr
   // per panel and not per plugin, because it answers a question about this moment, not
   // about the plugin.
   const [showHidden, setShowHidden] = useState(false);
+  // query filters the tree. It is cleared when the panel is given another node, because a
+  // search describes what the user was looking for in one plugin's parameters, not in the
+  // next one's.
+  const [query, setQuery] = useState("");
 
   const reload = useCallback(async () => {
     if (selected < 0) {
@@ -69,6 +73,7 @@ export default function ParametersPanel({ selected, onChange, documentPath }: Pr
   }, [selected]);
 
   useEffect(() => {
+    setQuery("");
     void reload();
   }, [reload, documentPath]);
 
@@ -102,6 +107,10 @@ export default function ParametersPanel({ selected, onChange, documentPath }: Pr
   // The tree is rebuilt on every load, which is once per edit. It is a few passes
   // over at most a few hundred parameters.
   const tree = buildParamTree(params, { includeSecret: showHidden });
+  // The search is applied on top, so the full tree survives a keystroke and the hidden
+  // count keeps describing the plugin rather than the search.
+  const filtering = query.trim() !== "";
+  const filtered = filterParamTree(tree.roots, query);
   // A secret parameter is not drawn unless the user asked for it, so it must not be
   // counted here either: the reset button would otherwise stay enabled for a plugin
   // whose every control is hidden.
@@ -115,6 +124,18 @@ export default function ParametersPanel({ selected, onChange, documentPath }: Pr
           Reset all
         </button>
       </div>
+
+      {/* The search. A plugin can declare 830 parameters across 49 groups, and the control a
+          user wants can be three groups deep: typing part of its name is faster than opening
+          groups until it appears. */}
+      <input
+        className="input params__search"
+        type="search"
+        placeholder="Search parameters…"
+        aria-label="Search parameters"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
 
       {error ? <p className="plugins__error">{error}</p> : null}
       {editable.length === 0 ? <p className="panel__placeholder">This plugin has no editable parameters.</p> : null}
@@ -132,11 +153,17 @@ export default function ParametersPanel({ selected, onChange, documentPath }: Pr
         </p>
       ) : null}
 
-      {tree.roots.map((node) => (
+      {filtering && filtered.matches === 0 ? (
+        <p className="panel__placeholder">No parameter matches “{query.trim()}”.</p>
+      ) : null}
+
+      {filtered.roots.map((node) => (
         <ParamBranch
           key={node.param.name}
           node={node}
-          depth={0}
+          // While a search is running every group is drawn open: a match three groups deep
+          // is useless behind three closed headings.
+          forceOpen={filtering}
           onEdit={(name, values) => void edit(() => chainApi.setParam(selected, name, values))}
           onEditText={(name, value) => void edit(() => chainApi.setParamText(selected, name, value))}
           onReset={(name) => void edit(() => chainApi.resetParam(selected, name))}
@@ -160,13 +187,14 @@ export default function ParametersPanel({ selected, onChange, documentPath }: Pr
  */
 function ParamBranch({
   node,
-  depth,
+  forceOpen,
   onEdit,
   onEditText,
   onReset,
 }: {
   node: ParamNode;
-  depth: number;
+  /** forceOpen draws the group expanded, which a search needs to show its matches. */
+  forceOpen: boolean;
   onEdit: (name: string, values: number[]) => void;
   onEditText: (name: string, value: string) => void;
   onReset: (name: string) => void;
@@ -178,18 +206,22 @@ function ParamBranch({
     // mark the subtree would look like ordinary parameters the plugin never flagged.
     const sectionClass = node.hidden ? "params__section params__section--hidden" : "params__section";
     return (
-      <details className={sectionClass} data-depth={depth}>
+      <details className={sectionClass} open={forceOpen ? true : undefined}>
         <summary className="params__group">{param.label}</summary>
-        {children.map((child) => (
-          <ParamBranch
-            key={child.param.name}
-            node={child}
-            depth={depth + 1}
-            onEdit={onEdit}
-            onEditText={onEditText}
-            onReset={onReset}
-          />
-        ))}
+        {/* One wrapper, because the tree lines are drawn against the children container: a
+            per-child rule needs a parent whose edges the last stub can stop at. */}
+        <div className="params__children">
+          {children.map((child) => (
+            <ParamBranch
+              key={child.param.name}
+              node={child}
+              forceOpen={forceOpen}
+              onEdit={onEdit}
+              onEditText={onEditText}
+              onReset={onReset}
+            />
+          ))}
+        </div>
       </details>
     );
   }

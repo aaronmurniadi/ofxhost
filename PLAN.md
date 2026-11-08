@@ -34,7 +34,8 @@ These are settled. Do not reopen them without a written reason in this file.
 | D9 | **Base UI for components, `react-resizable-panels` for layout.** Panels resize and toggle; **docking is out of scope** | One drag-scrub number field instead of a hand-written one; a splitter library instead of the fixed CSS grid. `project.View` loses its three `show*` booleans and gains per-panel sizes, because a boolean that can disagree with a splitter is two sources of truth for one fact |
 | D9b | **Kumo UI was tried and reverted.** Base UI remains the only component library | It was adopted for the dialogs, dropdowns, tooltips, panels and controls, then removed at the project owner's direction. What it cost while it was in: the stylesheet went from 12 KB to 166 KB and the bundle from 408 KB to 587 KB, because Kumo ships all of Tailwind v4 including preflight. What it taught, and what was kept: a portal does not inherit the app's stacking context, so `#root` carries `isolation: isolate`; a tooltip trigger must be the focusable element, not a wrapper; and the number field wants a `ScrubAreaCursor`. Those three fixes came from reading the Kumo and Base UI docs and they stay |
 | D10 | **UI state is persisted; a chain is persisted too, under the image's path** (amended, see §5 item 5) | A user who spent time on a chain expects it back when the same image opens. The record goes in the state directory, never beside the photograph, so no file appears where the user did not ask for one. Restoring matches by plugin identifier, because the plugin list changes between launches |
-| D11 | **A plugin's own input colour space parameter is initialised from the document, once, at add time** | The OFX route is blocked by a support library that predates OFX 1.5 colour. These plugins carry a parameter for exactly that reason, and leaving a Rec.2020 image to be processed as ARRI LogC4 is a wrong render, not a missing nicety. Adding it once initialises the control instead of overriding the user |
+| D11 | **A plugin's own input colour space parameter is initialised from the document, once, at add time** | The OFX route is blocked by a support library that predates OFX 1.5 colour. These plugins carry a parameter for exactly that reason, and leaving a Rec.2020 image to be processed as ARRI LogC4 is a wrong render, not a missing nicety. Adding it once initialises the control instead of overriding the user, and **Reset all** applies it again, because a reset would otherwise put the vendor's space back |
+| D12 | **The window has no top bar. Its actions live in the Plugins panel, and the look follows the previous host's Dear ImGui theme** | The previous host puts Open, Export, the colour space controls, the preview resolution and the status line at the top of the Plugins panel, and keeps the whole window for panels. The same order here removes a line of chrome above the panels and leaves one place where the actions are. The styling follows the Dear ImGui theme the previous host shipped, so the two programs look like the same tool: square corners, one-pixel borders, tight rows, and a dense type scale |
 
 D7 has one exception worth naming: the **on-disk formats** (`docs/workspace-format.md`
 in the old repo) are a reasonable starting shape for the sidecar JSON. Read them as
@@ -457,9 +458,11 @@ a caller buffer across the call.
 - `go build` links that library through `#cgo LDFLAGS`.
 - `expat` is needed by `HostSupport/CMakeLists.txt:17`. Add it to the static
   dependency set for Windows later.
-- **`OfxSupport` is not needed.** That library is the plugin-side helper. We ship
-  no bundled plugins in v1, so `cmake/PatchOfxSupport.cmake` and its `gIndent`
-  thread-safety patch from the old repo are not carried over.
+- **`OfxSupport` is needed, because the project now ships plugins.** That library
+  is the plugin-side helper, and the three bundled plugins in `plugins/` link it.
+  `cmake/PatchOfxSupport.cmake` builds it, including the `gIndent` thread-safety
+  patch. The host links `OfxHost`; a plugin links `OfxSupport`. Mixing the two
+  produces link errors that read like missing source.
 
 ### 6.3 Required behaviour, from the spec
 
@@ -673,6 +676,18 @@ Measured, tree-shaken, with React external: **268 KB minified, 91 KB gzipped** f
 components. That roughly triples the current 181 KB bundle, which is acceptable for a
 frontend embedded in a 16 MB binary.
 
+**Combobox was added later, for the plugin picker.** A plugin list is short on some machines
+and seventy long on others, so the picker has to be a dropdown that also filters. It is a
+`Combobox` with its search box inside the popup and its items in alphabetical order, because
+the order a host discovers plugins in is not an order a user can predict. Grouping by author
+was tried and dropped at the project owner's direction: a heading per author makes a list of
+six entries longer than the list itself.
+
+Measured: `npm run build` went from **411 KB to 448 KB** (135 KB to 148 KB gzipped) when the
+picker replaced the inline list. That is the whole cost of the component, and it removes the
+inline picker's own markup. Written down because a component that arrives with a dependency
+chain is the mistake D9b records.
+
 Two things were checked rather than assumed:
 
 - Base UI depends on `@floating-ui/react-dom`, so it has a JavaScript positioning
@@ -763,6 +778,40 @@ case that actually occurs. The rest of this section is the evidence.
 A node's own input colour space parameter is set from the document's space when the node
 is added. It runs once, at add time, so it initialises a control rather than overriding
 the user: anyone who picks a different value afterwards keeps it.
+
+**Reset all applies it again.** A reset returns every parameter to the value its vendor
+chose, and for spektrafilm that value is ARRI LogC4. Without the second application, one
+button press would take a Rec.2020 image back to being processed as camera log - the same
+wrong render this section exists to prevent, reached through a different control. The same
+reset re-seeds a denoiser's noise model, because both are the host's initialisation and
+neither is a user value.
+
+#### Why Reset all did nothing, and what it exposed
+
+Pressing **Reset all** on spektrafilm put the numbers back and left the picture as it was.
+Two defects, and the second was hiding inside the first:
+
+- **A reset wrote the values and told the plugin nothing.** `kOfxActionInstanceChanged` is
+  what makes a plugin recompute a dependent value, rebuild a menu or apply a preset. The
+  single-parameter write sent it; the reset did not, so a plugin that derives its state from
+  its preset kept the preset it had - the panel showed the defaults and the render was still
+  the old stock. The reset now sends the action for every parameter it changed, values first
+  and choices last: a choice is a driver (a preset, a category, a film stock) and a double is
+  usually the value the plugin computed from one, so the driver has to be the last word.
+  A parameter already at its default is left alone, so a second reset reports nothing and
+  sends nothing.
+- **Every integer, choice and boolean parameter had the wrong default.** `kOfxParamPropDefault`
+  is a single *int* property on those three kinds, and reading it with the double accessor
+  answers zero rather than raising. Integers defaulted to 0, booleans to false, choices to
+  option zero - so a reset set spektrafilm's preset to index 0 and its numeric defaults to
+  the wrong values, and the panel drew those zeros as the defaults too. The read now picks
+  the accessor from the type.
+
+The same double-accessor read filled `port.ParamInfo.Defaults`. It read the *current* value
+and relied on "a fresh instance starts at its defaults", which is false on both counts: the
+list is rebuilt after every edit, so "default" meant "what the user just typed", and the
+noise seeding that compares a value against its default to decide whether the user had
+touched it therefore concluded nothing ever had. It now reads the declared default.
 
 That matters because spektrafilm defaults to **ARRI LogC4**, a log space for ARRI camera
 footage. An image developed into Linear Rec.2020 was therefore being processed as camera
@@ -991,13 +1040,74 @@ What the milestone delivered, against its own list:
   to hidden, and restore. Three sizes replaced three visibility booleans (D9).
 - **Settings.** A panel for theme, text size and update channel. Each change persists
   before it reports success, so there is no Apply button and no unsaved state.
+- **Text size is a number of points, not three presets.** It was Small/Medium/Large, which
+  is a choice between other people's opinions about a display the user is looking at. The
+  field takes any whole number of points from 6 to 36, and **System** follows the operating
+  system size. Three details made it work rather than merely exist:
+  - The stored value was always *called* points and was applied as pixels. It is now
+    applied as `pt`, so a value saved by an earlier build reads one step larger. There is no
+    migration, because the field is an integer either way and the setting is one click to
+    change.
+  - `--font-size` was the only size that scaled. Ten rules carried an absolute `11px`,
+    `12px` or `14px`, so a user who raised the size got bigger paragraphs and unchanged
+    labels. They are in `em` now, against the 13px the interface was designed at.
+  - `project.ClampFontPt` bounds the value in the domain, beside `ClampPanels`, so a
+    hand-edited `settings.json` cannot produce a 2pt window. An out-of-range value is read
+    as zero, which means "follow the system" - clamping 400 to 36 would still be a window
+    the user cannot see the rest of.
 - **Theme.** Every colour became a token, selected by `data-theme` on the root. The light
   theme is not the dark one inverted: the panel is lighter than the page so the work area
   reads as raised, and the accent is darker to keep its contrast. Text size is a separate
   token, because a user who needs larger text should not have to change theme to get it.
+- **Fifteen themes, thirteen of them borrowed.** The styles posted in `ocornut/imgui#707` —
+  Dark (rounded), Forest Green, Amethyst, Sapphire, Amber Yellow, Dracula, Catppuccin Mocha,
+  Gruvbox Hard, Crimson Vesuvius, Rose Quartz, Cyberpunk and Paper and Ink from comment
+  4107169777, Slate Blue from comment 4121907946 — are translated from `ImGuiCol_*` to the
+  tokens above, each in one block in `app.css`. Three rules made the translation:
+  - ImGui composites at draw time, so an alpha below 1 is resolved first, over that theme's
+    `WindowBg`.
+  - `--accent` is the theme's `ButtonHovered`, as in the dark palette. Paper and Ink's is
+    twenty percent alpha over paper, which is invisible, so the accent falls back to that
+    theme's `CheckMark` when its contrast against the window falls below 2:1.
+  - `--danger` has no ImGui equivalent and is not invented per palette. Text on the accent
+    is white unless white falls below 3:1 against it, which is how Dracula's pink and
+    Catppuccin's mauve get near-black text instead of unreadable white.
+  Slate Blue is generated in its comment from three knobs: hue, saturation and transparency.
+  Only the defaults are a theme - a hue is a range, not a style - and its 0.95 window alpha
+  is dropped, because this program has no content behind its window and five percent
+  transparency would only darken the colour its author wrote.
+  Rounding travels with the theme: `--radius` is the theme's `FrameRounding`, because a theme
+  that rounds its frames to 5px and this interface's frames to 0 is not that theme. Padding
+  and spacing do not travel: they belong to the stylesheet's own metrics.
+  The list lives in `panels/themes.ts`, and a test reads `app.css` to prove that every theme
+  the settings panel offers has a block — two hand-edited files that would otherwise drift in
+  silence.
+- **The render spinner sits at the centre of the picture**, and only there. A full chain can
+  take a second, and an unchanged frame with no mark on it reads as a control that did
+  nothing. It takes no pointer, so a pan or a wheel zoom keeps working while a render runs.
+  Its colours are fixed - a black disc with a white arc - because it is drawn over a
+  photograph and a theme describes the chrome rather than the picture underneath it. The
+  status line's copy of the spinner and the idle dot that shared its footprint are gone: two
+  indicators for one fact.
 - **Widgets.** Base UI Dialog for every modal - focus trap, Escape, scroll lock, and focus
   returned to whatever opened it. Seven native dropdowns replaced. Ten `title` attributes
   replaced with real tooltips, each icon button gaining an `aria-label` at the same time.
+- **The parameter tree is drawn the way Dear ImGui draws one.** The reference is a style
+  posted in `ocornut/imgui#2920 (comment 615169533)`: a vertical line down the middle of the
+  fold arrow, a horizontal stub to each child, and no line below the last child. The lines are
+  `#808080` in every theme, as that comment asks, because a tree line is structure and not
+  colour — taken from the palette it would sit on a shaded surface in one theme and vanish in
+  another. The drawing is per child rather than one line per group: a single element cannot
+  stop at the last child's midpoint without knowing that child's height, while a per-child
+  segment can. Rows lost their margins for padding at the same time, both for the compactness
+  this panel needed and because a margin leaves a gap in the vertical run at every row. Group
+  headings lost their upper case and letter spacing: they are ImGui's own plain labels now,
+  with a fold arrow drawn from three borders rather than from a glyph the font may not have.
+- **A parameter search** under the panel's header. A plugin can declare 830 parameters
+  across 49 groups, and the control a user wants can be three groups deep, so the filter
+  matches the name and the label, keeps a match inside its ancestors, opens every group
+  while a search is running, and shows a group's whole contents when the group's own name
+  matches. The query is cleared when the panel is given another node.
 - **Persistence.** The place, the theme and the layout are written, and so is the chain of
   the open image with its parameter values (D10, as amended). Nothing is written beside the
   user's photograph.
@@ -1020,6 +1130,34 @@ Measured on the committed RAF through a real filter plugin:
 
 The filmstrip is dropped. `adapter/film`, the 796-line thumbnail pool built in M1,
 existed only to drive it and had no other caller, so it is gone with it.
+
+**The wheel zoom was re-rendering the window.** Three things compounded, and none of them
+was the picture:
+
+- The zoom percentage lived in the shell's state, so every wheel event re-rendered `App` -
+  and with it the parameter tree, which for a plugin with 830 parameters is hundreds of
+  controls. A gesture became a stream of whole-window renders.
+- Every event applied its own scale change. A trackpad reports a gesture as tens of events
+  a second, and each one made the engine re-rasterise the picture at its new size.
+- A 40 ms CSS transition on the transform, added to smooth discrete steps, animated the
+  scaling layer on top of each update - the most expensive thing to animate.
+
+**The percentage counts from fit, not from the picture's pixel size.** 100% means the whole
+frame is visible, which is what a double-click restores. The old measure multiplied by the fit
+scale, so a frame rendered to fit a 900-pixel panel reported 35% after a reset - the view had
+been restored and the readout said it had not. The pixel ratio is the wrong question here
+anyway: in Fit mode the render follows the panel, so what "real size" means changes with the
+window.
+
+Now the wheel listener is registered by hand with `{ passive: false }`, because React
+registers `wheel` as passive and the `preventDefault` in an `onWheel` handler does nothing;
+the deltas accumulate and one step is applied per animation frame; the transform transition
+is gone, since the steps already arrive at the frame rate; and the percentage has its own
+store (`widgets/zoomStore.ts`) read by one span, so a zoom step re-renders that span and
+nothing else.
+
+This is reasoned from the code and from how a transform is rasterised, not measured: the
+improvement is for the user to confirm in the running window.
 
 - **Base UI** replaces the hand-rolled modal, the native `<select>`, and the
   `title`-attribute tooltips, and provides `NumberField` with drag-scrub for the twelve
@@ -1121,6 +1259,9 @@ does that this one does not; five are scheduled below and the sixth is recorded 
 of this section. They are ordered by what each costs and what each buys, and the
 order is the recommendation rather than a decree - except where a dependency forces it.
 
+A seventh entry sits below them. It was not found by reading the trees; the project owner
+asked for it: the window chrome and the theme follow the previous host (D12).
+
 **1. Non-RAW input (PNG, JPEG, TIFF, EXR). — done for PNG, JPEG and TIFF.**
 
 `internal/adapter/codes` decodes the three formats through the same libraries the encoders
@@ -1202,7 +1343,9 @@ rather than extrapolating a fit into numbers nobody measured.
 Seeding follows the rule the colour space seeding already uses: a node's `noiseSlope` and
 `noiseOffset` are written only where the parameter still equals the plugin's default. A user
 who set a value keeps it, which is what makes a chain reproducible across images. The seed
-runs when a node is added and again when the open image changes under a chain that stays.
+runs when a node is added, again when the open image changes under a chain that stays, and
+again after a **Reset all**, which would otherwise clear the profile back to the plugin's
+generic default.
 
 The original entry follows.
 
@@ -1261,6 +1404,32 @@ file the user did not ask for is clutter.
 
 Revisit only if chains become expensive to reconstruct - several nodes with many tuned
 parameters, or a chain that is itself the work rather than a step toward an export.
+
+**6. The window chrome and the theme. — done.**
+
+Decision D12. The previous host has no bar above its panels. Its actions sit at the top of
+the Plugins panel, in this order: Open image, Open Directory, Export; then the colour space
+choices; then the preview resolution; then a wrapped status line; then the plugin picker
+and the node list. `src/ui/PluginsPanel.cpp` is the reference if the order is ever
+questioned.
+
+What changed here, to match:
+
+- **The top bar is gone.** `App.tsx` no longer draws a header. Open, Reopen last, Export and
+  Settings moved into `PluginsPanel`, above the picker, and so did the preview resolution
+  control.
+- **The status line moved with them.** The file name, its dimensions, the zoom, the last
+  message and the busy indicator now read as one line at the top of the Plugins panel. There
+  is no second place that reports the same facts.
+- **The theme follows Dear ImGui.** Square corners, one-pixel borders, no shadows, tight row
+  heights, and a type scale a step smaller than a web application's. The colours are the
+  ImGui dark defaults, which is what the previous host shipped, so the two programs read as
+  the same tool.
+
+The reference for the look is Dear ImGui's own style defaults rather than a screenshot: the
+window background, the frame background, the border, the header and the accent are the
+values in `imgui.cpp`; a theme file was not copied, because a copy drifts from the upstream
+defaults it claims to follow.
 
 #### Performance, measured
 
@@ -1384,6 +1553,12 @@ wails3 build               # macOS .app
 wails3 package             # last milestone, per target
 ```
 
+A `wails3 dev` session opens the WebView inspector at startup. The guard is Wails' own -
+`app.Env.Info().Debug` - so it costs no build tag of this repository's and it is false in a
+packaged build, which the darwin task builds with `-tags production`. The call is deferred to
+`ApplicationStarted`: a window has no platform window until the message loop runs, and
+`OpenDevTools` on one that has none returns without a word.
+
 The decode tests run against `samples/DSCF0209.RAF`, a Fujifilm X-M1 frame committed
 so the decode is reproducible: the same file decodes to the same pixels in every
 checkout. `OFXHOST_RAW_SAMPLES` points the tests at other camera files, and they fall
@@ -1391,10 +1566,8 @@ back to `~/Downloads` and `~/Pictures` and finally skip when there is none.
 
 ### 13. What is explicitly out of scope for v1
 
-- Metal and any other GPU render path beyond the stub (D6, M6).
-- `kOfxOpenGLRenderSuite`, `kOfxParametricParameterSuite`, interact plugins.
-- Bundled OFX plugins. Only third-party plugins from the system and
-  `OFX_PLUGIN_PATH`.
+- A GPU render path beyond Metal. `kOfxOpenGLRenderSuite` stays declined.
+- `kOfxParametricParameterSuite`, interact plugins.
 - Reading the old `ofxrawhost` state files (D4).
 - Video, animation, timelines, batch processing.
 - CPU-GPU hybrid rendering.

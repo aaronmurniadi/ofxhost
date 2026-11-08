@@ -13,10 +13,26 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { anchoredZoom, clampPan } from "./previewView";
+import { setZoomPercent } from "../widgets/zoomStore";
 
 /** The zoom range, matching what the previous host allowed. */
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 64;
+
+/** How much one notch of the wheel zooms. */
+const ZOOM_STEP = 1.1;
+
+/** The distance one notch of a mouse wheel reports in `deltaY`. */
+const WHEEL_NOTCH = 100;
+
+/**
+ * How many steps one frame may apply.
+ *
+ * A trackpad can report a whole gesture within a few frames. Without a cap, one frame would
+ * take the zoom across its whole range and the user would see the destination but not the
+ * travel.
+ */
+const MAX_STEPS_PER_FRAME = 3;
 
 export interface PreviewState {
   url: string;
@@ -28,15 +44,15 @@ interface Props {
   preview: PreviewState | null;
   fileName: string;
   busy: boolean;
+  /** rendering reports that the chain is being run for a new preview. */
+  rendering: boolean;
   /** Called with the preview area, so "fit" can follow the panel size. */
   onResize: (width: number, height: number) => void;
   /** Asks for a fresh preview after the render size changed. */
   onChange: () => void;
-  /** Reports the zoom percentage, so the status bar can show it. */
-  onZoomChange: (percent: number) => void;
 }
 
-export default function PreviewPanel({ preview, fileName, busy, onResize, onChange, onZoomChange }: Props) {
+export default function PreviewPanel({ preview, fileName, busy, rendering, onResize, onChange }: Props) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -92,11 +108,19 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
       ? Math.min(canvasSize.width / preview.width, canvasSize.height / preview.height)
       : 1;
 
-  // The zoom percentage is shown in the status bar, one line of chrome rather than an
-  // overlay that covers the picture.
+  // The zoom percentage is shown in the status line, one line of chrome rather than an
+  // overlay that covers the picture. It goes into its own small store, not up through the
+  // shell: a wheel changes it many times a second, and a prop would re-render every panel
+  // on every step.
+  //
+  // One hundred percent means the whole frame is visible, which is what a double-click
+  // restores. It is not the picture's pixel ratio: a frame rendered to fit a 900-pixel panel
+  // reports 35% by that measure, so a double-click that had in fact reset the view looked as
+  // though it had done nothing. The ratio is also the wrong question here - the render
+  // follows the panel, so the "real size" changes with the window.
   useEffect(() => {
-    onZoomChange(Math.round(fitScale * zoom * 100));
-  }, [onZoomChange, fitScale, zoom]);
+    setZoomPercent(Math.round(zoom * 100));
+  }, [zoom]);
 
   /**
    * clampPan keeps the image from being dragged out of the panel.
@@ -121,34 +145,92 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
     [preview, canvasSize.width, canvasSize.height],
   );
 
-  const onWheel = useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
-      // The page must not scroll behind the preview.
-      event.preventDefault();
+  // The mirrors the frame callback reads.
+  //
+  // The wheel handler runs outside React's event system, so it cannot close over the values
+  // of the render it was created in: a coalesced update has to see the zoom the user
+  // already reached. A ref holds the current value and the callback stays the same function
+  // for the life of the panel.
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const panRef = useRef(pan);
+  panRef.current = pan;
+  const fitRef = useRef(fitScale);
+  fitRef.current = fitScale;
+  const limitRef = useRef(limitPan);
+  limitRef.current = limitPan;
 
-      const current = zoom;
-      const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
-      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current * factor));
-      if (next === current) {
+  // The wheel accumulates between frames. A trackpad reports a zoom gesture as tens of
+  // events a second, and applying each one meant a scale change - and so a re-raster of the
+  // picture at its new size - per event. One update per frame is the most the screen can
+  // show, and it is a fraction of the work.
+  const wheelState = useRef({ delta: 0, x: 0, y: 0, frame: 0 });
+
+  /** applyWheel turns everything a frame's worth of wheel events said into one step. */
+  const applyWheel = useCallback(() => {
+    const state = wheelState.current;
+    state.frame = 0;
+    const delta = state.delta;
+    state.delta = 0;
+    if (delta === 0) {
+      return;
+    }
+
+    // A mouse notch is one step; a flung trackpad may earn two or three, so fast gestures
+    // still cover ground without one frame jumping the whole range.
+    const steps = Math.min(MAX_STEPS_PER_FRAME, Math.max(1, Math.round(Math.abs(delta) / WHEEL_NOTCH)));
+    const factor = delta < 0 ? Math.pow(ZOOM_STEP, steps) : Math.pow(1 / ZOOM_STEP, steps);
+    const current = zoomRef.current;
+    const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current * factor));
+    if (next === current) {
+      return;
+    }
+
+    // Zoom about the pointer, not the centre.
+    //
+    // A plain scale keeps the middle still, so whatever the user is looking at drifts
+    // away as they zoom in and has to be chased with a pan. Anchoring means the pixel
+    // under the cursor stays under the cursor, which is what makes zoom-then-pan a
+    // single gesture instead of two.
+    const anchored = anchoredZoom(panRef.current, { x: state.x, y: state.y }, next / current);
+
+    setZoom(next);
+    setPan(limitRef.current(anchored, fitRef.current * next));
+  }, []);
+
+  // The wheel listener is added by hand.
+  //
+  // React registers `wheel` as a passive listener, so the `preventDefault` in an onWheel
+  // handler does nothing: the WebView is free to scroll an ancestor while the picture
+  // zooms. `{ passive: false }` is what makes the call count.
+  useEffect(() => {
+    const element = canvasRef.current;
+    if (element === null) {
+      return;
+    }
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const rect = element.getBoundingClientRect();
+      const state = wheelState.current;
+      state.delta += event.deltaY;
+      // The anchor is the last position seen in the frame, which is where the user is
+      // pointing now.
+      state.x = event.clientX - rect.left - rect.width / 2;
+      state.y = event.clientY - rect.top - rect.height / 2;
+      if (state.frame !== 0) {
         return;
       }
-
-      // Zoom about the pointer, not the centre.
-      //
-      // A plain scale keeps the middle still, so whatever the user is looking at drifts
-      // away as they zoom in and has to be chased with a pan. Anchoring means the pixel
-      // under the cursor stays under the cursor, which is what makes zoom-then-pan a
-      // single gesture instead of two.
-      const rect = event.currentTarget.getBoundingClientRect();
-      const offsetX = event.clientX - rect.left - rect.width / 2;
-      const offsetY = event.clientY - rect.top - rect.height / 2;
-      const anchored = anchoredZoom(pan, { x: offsetX, y: offsetY }, next / current);
-
-      setZoom(next);
-      setPan(limitPan(anchored, fitScale * next));
-    },
-    [zoom, pan, fitScale, limitPan],
-  );
+      state.frame = requestAnimationFrame(applyWheel);
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      element.removeEventListener("wheel", onWheel);
+      if (wheelState.current.frame !== 0) {
+        cancelAnimationFrame(wheelState.current.frame);
+        wheelState.current.frame = 0;
+      }
+    };
+  }, [applyWheel]);
 
   // A panel that grows while the image is panned leaves the pan outside the new limits, so
   // the image would sit against an edge with slack behind it. Re-clamping on every change
@@ -214,7 +296,6 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
       <div
         ref={canvasRef}
         className={dragging ? "preview__canvas preview__canvas--dragging" : "preview__canvas"}
-        onWheel={onWheel}
         onDoubleClick={onDoubleClick}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -239,6 +320,16 @@ export default function PreviewPanel({ preview, fileName, busy, onResize, onChan
           <p className="panel__placeholder">Open a RAW file to see the preview.</p>
         )}
 
+        {/* The wait is shown where the user is looking, not only in the status line: a render
+            of a full chain can take a second, and an untouched picture with no mark on it
+            reads as a control that did nothing.
+            The overlay takes no pointer, so panning and zooming keep working while a render
+            runs. */}
+        {rendering ? (
+          <div className="preview__busy" role="status" aria-label="Rendering">
+            <span className="preview__spinner" aria-hidden />
+          </div>
+        ) : null}
       </div>
     </section>
   );

@@ -6,12 +6,13 @@
  * side and a state update from its answer, so there is no second copy of the
  * document in JavaScript.
  *
+ * There is no bar above the panels (D12). The commands and the status line live at the
+ * top of the Plugins panel, so this file draws the panels and the dialogs and nothing
+ * else.
+ *
  * What this shell does not have yet, and where it goes:
  *
- *   MS-peek  the preview URL is fetched, shown, and replaced on demand
- *   M3       the chain list and the parameter controls
- *   M4       the export dialog with the colour space and intent
- *   M5       the settings panel and the saved layout
+ *   M7       Windows and Linux packaging
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -25,8 +26,7 @@ import ParametersPanel from "./panels/ParametersPanel";
 import PluginsPanel from "./panels/PluginsPanel";
 import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
 import SettingsDialog from "./panels/SettingsDialog";
-import Select from "./widgets/Select";
-import TooltipHint from "./widgets/Tooltip";
+import { normaliseTheme } from "./panels/themes";
 
 /**
  * How long a render request waits for the input to settle.
@@ -71,9 +71,9 @@ export default function App() {
   // renderTick asks for another preview, which is what every chain and parameter
   // edit does.
   const [renderTick, setRenderTick] = useState(0);
-  // rendering is true while the chain is being run for a preview. It is separate from busy,
-  // which is a decode: the status bar shows the spinner for either, because from the user's
-  // side both mean the program is working and the frame on screen is not final.
+  // rendering is true while the chain is being run for a preview. Together with busy, which
+  // is a decode, it decides whether the preview draws its spinner: from the user's side both
+  // mean the program is working and the frame on screen is not final.
   const [rendering, setRendering] = useState(false);
   // pendingPath is the file waiting for a colour space. Decision D8: the space is an
   // input to the decode, so it is asked before the file opens.
@@ -94,8 +94,6 @@ export default function App() {
   const [lastImage, setLastImage] = useState("");
   // settingsOpen shows the settings dialog.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // zoomPercent is reported by the preview and shown in the status bar.
-  const [zoomPercent, setZoomPercent] = useState(100);
   // The render size is chrome, not part of the picture, so it lives here beside the other
   // status information rather than floating over the image.
   const [resolutions, setResolutions] = useState<string[]>([]);
@@ -125,11 +123,15 @@ export default function App() {
   // style recalculation and no React re-render of the panels.
   const applyAppearance = useCallback((theme: string, fontPt: number) => {
     const root = document.documentElement;
-    // One attribute drives both our tokens and Kumo's components.
-    root.dataset.mode = theme.toLowerCase();
-    root.dataset.theme = theme.toLowerCase();
+    // The theme name is the value the stylesheet selects on, so it is reduced to that form
+    // here as well as when a settings file is read. A name this build does not know falls
+    // back to the default instead of leaving the window unstyled.
+    root.dataset.theme = normaliseTheme(theme);
     if (fontPt > 0) {
-      root.style.setProperty("--font-size", `${fontPt}px`);
+      // Points, not pixels. The setting says points and the token is read by every
+      // relative size in the stylesheet, so a change here scales the whole interface
+      // rather than the paragraphs that happen to inherit it.
+      root.style.setProperty("--font-size", `${fontPt}pt`);
     } else {
       // Zero means follow the system, which is the stylesheet's own default.
       root.style.removeProperty("--font-size");
@@ -351,89 +353,6 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* The bar carries actions only. What is open and how it is being shown lives in
-          the status bar, and repeating it here made two places say the same thing. */}
-      {/* One bar: the actions on the left, everything about what is on screen on the
-          right, and the process indicator at the far right where it is always in the same
-          place. There is no second line of chrome. */}
-      <header className="app__bar">
-        <button className="button button--primary" onClick={() => void chooseFile()}>
-          Open
-        </button>
-        {lastImage !== "" && !doc?.open ? (
-          <TooltipHint text={lastImage}>
-            <button className="button" onClick={() => setPendingPath(lastImage)}>
-              Reopen last
-            </button>
-          </TooltipHint>
-        ) : null}
-        <TooltipHint text={doc?.open ? "Export the chain at full resolution" : "Open a file first"}>
-          <button className="button" onClick={() => void setExporting(true)} disabled={!doc?.open}>
-            Export
-          </button>
-        </TooltipHint>
-        <button className="button" onClick={() => setSettingsOpen(true)}>
-          Settings
-        </button>
-
-        <div className="app__status">
-          {/* The zoom leads: it is the one value that changes while the user works, and a
-              number that moves should stay in the same place so the eye finds it. */}
-          {doc?.open ? (
-            <>
-              <span className="app__status-zoom" aria-label={`Zoom ${zoomPercent}%`}>
-                {zoomPercent}%
-              </span>
-              <span className="app__status-sep" aria-hidden>
-                ·
-              </span>
-            </>
-          ) : null}
-          <span className="app__status-name" title={doc?.path ?? ""}>
-            {doc?.open ? doc.fileName : "No image"}
-          </span>
-          {doc?.open ? (
-            <>
-              <span className="app__status-sep" aria-hidden>
-                ·
-              </span>
-              <span className="app__status-size">
-                {doc.width}×{doc.height}
-              </span>
-            </>
-          ) : null}
-          {resolutions.length > 0 ? (
-            <Select
-              id="preview-resolution"
-              label="Preview resolution"
-              value={String(resolution)}
-              onChange={(next) => void chooseResolution(Number(next))}
-              options={resolutions.map((name, index) => ({
-                label: name,
-                value: String(index),
-              }))}
-            />
-          ) : null}
-
-          {/* The outcome of the last action. It truncates rather than pushing the indicator
-              out of its place at the right. */}
-          <span className="app__status-message" role="status" aria-live="polite">
-            {message}
-          </span>
-
-          <span className="app__version">{version}</span>
-
-          {/* A spinner while a render is in flight, a quiet dot when idle. The dot is what
-              makes the spinner mean something: an indicator that always moves says nothing
-              about whether the program is busy. */}
-          {busy || rendering ? (
-            <span className="app__spinner" role="status" aria-label="Rendering" />
-          ) : (
-            <span className="app__status-idle" aria-hidden />
-          )}
-        </div>
-      </header>
-
       <main className="app__main">
         {settingsReady ? (
           <Workspace
@@ -444,9 +363,9 @@ export default function App() {
                 preview={preview}
                 fileName={doc?.fileName ?? ""}
                 busy={busy}
+                rendering={rendering}
                 onResize={onResize}
                 onChange={requestRender}
-                onZoomChange={setZoomPercent}
               />
             }
             plugins={
@@ -454,6 +373,22 @@ export default function App() {
                 onChange={requestRender}
                 hasDocument={doc?.open === true}
                 documentPath={doc?.path ?? ""}
+                onOpen={() => void chooseFile()}
+                lastImage={lastImage}
+                onReopenLast={() => setPendingPath(lastImage)}
+                onExport={() => void setExporting(true)}
+                onOpenSettings={() => setSettingsOpen(true)}
+                status={{
+                  fileName: doc?.fileName ?? "",
+                  width: doc?.width ?? 0,
+                  height: doc?.height ?? 0,
+                  space: doc?.workingSpace ?? "",
+                  message,
+                  version,
+                }}
+                resolutions={resolutions}
+                resolution={resolution}
+                onChooseResolution={(index) => void chooseResolution(index)}
               />
             }
             parameters={

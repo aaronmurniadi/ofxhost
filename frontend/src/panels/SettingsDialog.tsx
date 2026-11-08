@@ -10,19 +10,23 @@
 import { useEffect, useState } from "react";
 import { sessionApi } from "../api/session";
 import Modal from "../widgets/Modal";
+import ParamNumber from "../widgets/ParamNumber";
 import Select from "../widgets/Select";
+import { DEFAULT_THEME, normaliseTheme, THEMES } from "./themes";
 
-/** The themes the shell can draw. The names match `data-theme` in app.css. */
-const THEMES = ["Dark", "Light"];
+/**
+ * The text size bounds, in points.
+ *
+ * These are the same numbers as `project.MinFontPt` and `project.MaxFontPt`, which are
+ * where the value is enforced. They are repeated here so the control cannot offer a size
+ * the service would replace with the system default - a box that accepts 4 and then shows
+ * 0 is a control that lies.
+ */
+const MIN_FONT_PT = 6;
+const MAX_FONT_PT = 36;
 
-/** Text sizes offered, in points. Zero follows the operating system. */
-const TEXT_SIZES: { label: string; value: number }[] = [
-  { label: "System", value: 0 },
-  { label: "Small", value: 12 },
-  { label: "Medium", value: 13 },
-  { label: "Large", value: 15 },
-  { label: "Extra large", value: 17 },
-];
+/** The default text size, in points. Zero means follow the operating system. */
+const SYSTEM_FONT_PT = 0;
 
 /** The release channels the update checker can follow. */
 const CHANNELS = ["stable", "prerelease"];
@@ -34,7 +38,7 @@ export interface SettingsProps {
 }
 
 export default function SettingsDialog({ onClose, onAppearanceChange }: SettingsProps) {
-  const [theme, setTheme] = useState("Dark");
+  const [theme, setTheme] = useState(DEFAULT_THEME);
   const [fontPt, setFontPt] = useState(0);
   const [channel, setChannel] = useState("stable");
   const [update, setUpdate] = useState("");
@@ -47,7 +51,7 @@ export default function SettingsDialog({ onClose, onAppearanceChange }: Settings
       try {
         const settings = await sessionApi.settings();
         if (settings?.appearance) {
-          setTheme(settings.appearance.theme || "Dark");
+          setTheme(normaliseTheme(settings.appearance.theme));
           setFontPt(settings.appearance.fontPt ?? 0);
         }
       } catch {
@@ -98,34 +102,50 @@ export default function SettingsDialog({ onClose, onAppearanceChange }: Settings
       {error !== "" ? <p className="plugins__error">{error}</p> : null}
 
       <div className="field">
-        <span className="field__label">Theme</span>
-        <div className="settings__row">
-          {THEMES.map((name) => (
-            <button
-              key={name}
-              className={theme === name ? "button button--selected" : "button"}
-              onClick={() => void applyAppearance(name, fontPt)}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
+        <label className="field__label" htmlFor="settings-theme">
+          Theme
+        </label>
+        {/* A dropdown, not a row of buttons. Fourteen themes as buttons filled the dialog
+            with two lines of chrome and said nothing about which was which; the dropdown
+            also gives the list a scroll context and a keyboard model. */}
+        <Select
+          id="settings-theme"
+          label="Theme"
+          value={theme}
+          onChange={(next) => void applyAppearance(next, fontPt)}
+          options={THEMES.map((option) => ({ label: option.label, value: option.value }))}
+        />
       </div>
 
       <div className="field">
-        <label className="field__label" htmlFor="settings-text-size">
-          Text size
-        </label>
-        <Select
-          id="settings-text-size"
-          label="Text size"
-          value={String(fontPt)}
-          onChange={(next) => void applyAppearance(theme, Number(next))}
-          options={TEXT_SIZES.map((size) => ({
-            label: size.label,
-            value: String(size.value),
-          }))}
-        />
+        {/* The label names the number field through aria-labelledby: the field's input has
+            no id of its own, so a htmlFor here would point at nothing. */}
+        <span className="field__label" id="settings-text-size-label">
+          Text size, in points
+        </span>
+        <div className="settings__row">
+          <ParamNumber
+            value={fontPt === SYSTEM_FONT_PT ? 10 : fontPt}
+            min={MIN_FONT_PT}
+            max={MAX_FONT_PT}
+            integer
+            step={1}
+            disabled={false}
+            label="Text size in points"
+            labelId="settings-text-size-label"
+            onCommit={(next) => void applyAppearance(theme, next)}
+          />
+          <span className="field__value">pt</span>
+          <button
+            className={fontPt === SYSTEM_FONT_PT ? "button button--selected" : "button"}
+            onClick={() => void applyAppearance(theme, SYSTEM_FONT_PT)}
+          >
+            System
+          </button>
+        </div>
+        <p className="field__hint">
+          {MIN_FONT_PT} to {MAX_FONT_PT} points. System follows the operating system size.
+        </p>
       </div>
 
       <div className="field">

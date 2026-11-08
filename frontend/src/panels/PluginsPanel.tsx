@@ -1,5 +1,10 @@
 /**
- * The plugin chain.
+ * The plugin chain, and the commands that act on the open file.
+ *
+ * There is no bar above the panels (D12). The actions that were there live here, at the
+ * top of this panel, in the order the previous host uses: Open, Reopen last, Export,
+ * Settings, then the preview size, then a status line, then the chain itself. One place
+ * for the commands, and the whole window left for the picture.
  *
  * The list is the processing order: the top node runs first. Reordering uses the
  * arrow buttons rather than drag and drop, because the chain is short and a button
@@ -12,6 +17,29 @@
 import TooltipHint from "../widgets/Tooltip";
 import { useEffect, useState } from "react";
 import { chainApi, type ChainDTO, type PluginDTO } from "../api/document";
+import Picker from "../widgets/Picker";
+import Select from "../widgets/Select";
+import ZoomReadout from "../widgets/ZoomReadout";
+
+/**
+ * Status is what the header of this panel reports.
+ *
+ * One object rather than ten props: every field describes the same thing - what is on
+ * screen and whether the program is working - and they are read together, in one line.
+ */
+export interface PanelStatus {
+  /** The open file's name, or the empty string when nothing is open. */
+  fileName: string;
+  /** The image's pixel dimensions, as the document reports them. */
+  width: number;
+  height: number;
+  /** The space the chain works in, chosen when the file opened (D8). */
+  space: string;
+  /** The outcome of the last action. */
+  message: string;
+  /** The build version. */
+  version: string;
+}
 
 interface Props {
   /** Bumped by the shell when a render should be redone. */
@@ -32,13 +60,42 @@ interface Props {
    * any file was open, and a restored chain was never drawn.
    */
   documentPath: string;
+  /** Asks the user for a file, then for the space to develop it into. */
+  onOpen: () => void;
+  /** The file that was open last time, offered as a one-click restore. */
+  lastImage: string;
+  /** Opens the file offered above. */
+  onReopenLast: () => void;
+  /** Opens the export dialog. */
+  onExport: () => void;
+  /** Opens the settings dialog. */
+  onOpenSettings: () => void;
+  /** What the panel header reports. */
+  status: PanelStatus;
+  /** The preview render sizes, by name. Empty hides the control. */
+  resolutions: string[];
+  /** The chosen index into `resolutions`. */
+  resolution: number;
+  /** Changes the preview render size. */
+  onChooseResolution: (index: number) => void;
 }
 
-export default function PluginsPanel({ onChange, hasDocument, documentPath }: Props) {
+export default function PluginsPanel({
+  onChange,
+  hasDocument,
+  documentPath,
+  onOpen,
+  lastImage,
+  onReopenLast,
+  onExport,
+  onOpenSettings,
+  status,
+  resolutions,
+  resolution,
+  onChooseResolution,
+}: Props) {
   const [chain, setChain] = useState<ChainDTO | null>(null);
   const [plugins, setPlugins] = useState<PluginDTO[]>([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
 
   const reload = async () => {
@@ -65,63 +122,110 @@ export default function PluginsPanel({ onChange, hasDocument, documentPath }: Pr
   const add = (pluginIndex: number) =>
     run(async () => {
       const result = await chainApi.add(pluginIndex);
-      setPickerOpen(false);
-      setFilter("");
       return result.error;
     });
 
-  const visible = plugins.filter((plugin) => {
-    if (filter === "") {
-      return true;
-    }
-    const needle = filter.toLowerCase();
-    return (
-      plugin.label.toLowerCase().includes(needle) ||
-      plugin.author.toLowerCase().includes(needle) ||
-      plugin.identifier.toLowerCase().includes(needle)
-    );
-  });
+  // The picker's items carry the author and the identifier as well as the label, so a search
+  // can use any of the three.
+  const choices = plugins.map((plugin) => ({
+    value: String(plugin.index),
+    label: plugin.label,
+    author: plugin.author,
+    identifier: plugin.identifier,
+  }));
 
   return (
     <section className="panel panel--plugins" aria-label="Plugins">
-      <h2 className="panel__title">Plugins</h2>
-
+      {/* The commands. Open and Reopen last are file actions, Export needs a document,
+          and Settings belongs to the program rather than to the picture. */}
       <div className="plugins__actions">
-        <TooltipHint text={hasDocument ? "Add a plugin to the chain" : "Open an image first"}>
-          <button
-            className="button"
-            onClick={() => setPickerOpen((open) => !open)}
-            disabled={!hasDocument}
-          >
-            Add plugin
+        <button className="button button--primary" onClick={onOpen}>
+          Open
+        </button>
+        {lastImage !== "" && !hasDocument ? (
+          <TooltipHint text={lastImage}>
+            <button className="button" onClick={onReopenLast}>
+              Reopen last
+            </button>
+          </TooltipHint>
+        ) : null}
+        <TooltipHint text={hasDocument ? "Export the chain at full resolution" : "Open a file first"}>
+          <button className="button" onClick={onExport} disabled={!hasDocument}>
+            Export
           </button>
         </TooltipHint>
+        <button className="button" onClick={onOpenSettings}>
+          Settings
+        </button>
       </div>
 
-      {pickerOpen && hasDocument ? (
-        <div className="plugins__picker">
-          <input
-            className="input"
-            autoFocus
-            placeholder="Search…"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
+      {resolutions.length > 0 ? (
+        <div className="plugins__control">
+          <Select
+            id="preview-resolution"
+            label="Preview size"
+            value={String(resolution)}
+            onChange={(next) => onChooseResolution(Number(next))}
+            options={resolutions.map((name, index) => ({ label: name, value: String(index) }))}
           />
-          <ul className="plugins__list">
-            {visible.length === 0 ? (
-              <li className="panel__placeholder">No matches</li>
-            ) : (
-              visible.map((plugin) => (
-                <li key={plugin.identifier}>
-                  <button className="plugins__choice" onClick={() => void add(plugin.index)}>
-                    <span>{plugin.label}</span>
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
         </div>
       ) : null}
+
+      {/* What is open, how it is being shown, and what just happened.
+          The busy mark is not here: a render is shown at the centre of the picture, where the
+          user is already looking, and a second one in a line of text said the same thing
+          twice. */}
+      <p className="status">
+        <span className="status__name" title={documentPath}>
+          {hasDocument ? status.fileName : "No image"}
+        </span>
+        {hasDocument ? (
+          <>
+            <span className="status__sep" aria-hidden>
+              ·
+            </span>
+            <span className="status__value">
+              {status.width}×{status.height}
+            </span>
+            <span className="status__sep" aria-hidden>
+              ·
+            </span>
+            <span className="status__value">{status.space}</span>
+            <span className="status__sep" aria-hidden>
+              ·
+            </span>
+            {/* The zoom has its own source of truth: a wheel changes it many times a
+                second, and routing that through this panel's props would re-render the
+                parameter tree on each step. */}
+            <ZoomReadout />
+          </>
+        ) : null}
+        <span className="status__message" role="status" aria-live="polite">
+          {status.message}
+        </span>
+        <span className="status__version">{status.version}</span>
+      </p>
+
+      <h2 className="panel__title">Chain</h2>
+
+      <div className="plugins__actions">
+        {/* A disabled picker cannot receive hover, so the hint that says why lives on a
+            disabled button instead of on the dropdown itself. */}
+        {hasDocument ? (
+          <Picker
+            items={choices}
+            label="Add plugin"
+            placeholder="Search a plugin…"
+            onSelect={(value) => void add(Number(value))}
+          />
+        ) : (
+          <TooltipHint text="Open an image first">
+            <button className="button" disabled>
+              Add plugin
+            </button>
+          </TooltipHint>
+        )}
+      </div>
 
       {error ? <p className="plugins__error">{error}</p> : null}
       {chain?.message ? <p className="panel__placeholder">{chain.message}</p> : null}

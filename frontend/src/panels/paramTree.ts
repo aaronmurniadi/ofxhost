@@ -118,6 +118,77 @@ export function buildParamTree(params: ParamDTO[], options: ParamTreeOptions = {
   return { roots, hiddenCount: hidden.size };
 }
 
+/** ParamFilterResult is a tree cut down to what a search matched. */
+export interface ParamFilterResult {
+  /** The nodes to draw, with the ancestors a match needs to stay in its group. */
+  roots: ParamNode[];
+  /** How many nodes matched the search by their own name or label. */
+  matches: number;
+}
+
+/**
+ * filterParamTree keeps the parameters whose name or label contains the query.
+ *
+ * Two rules, both from what the panel is for:
+ *
+ *   - A match keeps its ancestors, or a control would appear at the top level with no
+ *     indication of the group it belongs to.
+ *   - A group that matches keeps all its members, because a user who types a group's name
+ *     is asking what is inside it. Cutting the group down to the children that happen to
+ *     match the same text would answer a question nobody asked.
+ *
+ * The result holds new nodes. The input tree is what the panel keeps for the next
+ * keystroke, so it must not be rewritten by a search.
+ */
+export function filterParamTree(roots: ParamNode[], query: string): ParamFilterResult {
+  const needle = query.trim().toLowerCase();
+  if (needle === "") {
+    return { roots, matches: 0 };
+  }
+  return walkFilter(roots, needle);
+}
+
+/** walkFilter is filterParamTree for one level, so it can recurse. */
+function walkFilter(nodes: ParamNode[], needle: string): ParamFilterResult {
+  const roots: ParamNode[] = [];
+  let matches = 0;
+
+  for (const node of nodes) {
+    const self = matchesQuery(node, needle);
+    if (self) {
+      matches += 1;
+    }
+
+    if (isContainer(node.param.kind)) {
+      // A group that matches shows everything it holds.
+      if (self) {
+        roots.push({ ...node, children: node.children });
+        continue;
+      }
+      const inner = walkFilter(node.children, needle);
+      if (inner.roots.length > 0) {
+        roots.push({ ...node, children: inner.roots });
+        matches += inner.matches;
+      }
+      continue;
+    }
+
+    if (self) {
+      roots.push(node);
+    }
+  }
+
+  return { roots, matches };
+}
+
+/** matchesQuery reports whether a node's own name or label contains the needle. */
+function matchesQuery(node: ParamNode, needle: string): boolean {
+  return (
+    node.param.label.toLowerCase().includes(needle) ||
+    node.param.name.toLowerCase().includes(needle)
+  );
+}
+
 /**
  * breakCycles flattens any node reachable from itself.
  *

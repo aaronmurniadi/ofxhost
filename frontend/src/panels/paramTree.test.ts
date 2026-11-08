@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildParamTree, isContainer } from "./paramTree";
+import { buildParamTree, filterParamTree, isContainer } from "./paramTree";
 import type { ParamDTO } from "../api/document";
 
 /** param builds the smallest ParamDTO the tree cares about. */
@@ -150,5 +150,69 @@ describe("buildParamTree", () => {
       "colorGroup",
       "filmGroup",
     ]);
+  });
+});
+
+describe("filterParamTree", () => {
+  /** nested builds the shape a plugin like spektrafilm declares: a group inside a group. */
+  function nested() {
+    return buildParamTree([
+      param("effectsGroup", "group"),
+      param("lensGroup", "group", "effectsGroup"),
+      param("lensDistortion", "double", "lensGroup"),
+      param("lensVignette", "double", "lensGroup"),
+      param("exposure", "double", "effectsGroup"),
+      param("grain", "double"),
+    ]).roots;
+  }
+
+  it("keeps a match together with the groups that hold it", () => {
+    const result = filterParamTree(nested(), "distortion");
+    expect(result.matches).toBe(1);
+    // Without its ancestors the control would appear at the top level, in no group.
+    expect(result.roots.map((n) => n.param.name)).toEqual(["effectsGroup"]);
+    expect(result.roots[0].children.map((n) => n.param.name)).toEqual(["lensGroup"]);
+    expect(result.roots[0].children[0].children.map((n) => n.param.name)).toEqual([
+      "lensDistortion",
+    ]);
+  });
+
+  it("shows everything inside a group whose own name matches", () => {
+    // A user who types a group name is asking what is in it, so the members stay.
+    const result = filterParamTree(nested(), "lensgroup");
+    expect(result.matches).toBe(1);
+    expect(result.roots[0].children[0].children.map((n) => n.param.name)).toEqual([
+      "lensDistortion",
+      "lensVignette",
+    ]);
+  });
+
+  it("ignores case and surrounding space", () => {
+    expect(filterParamTree(nested(), "  EXPOSURE ").matches).toBe(1);
+  });
+
+  it("matches the parameter name as well as the label", () => {
+    // A plugin's label can be a phrase while its name is the identifier a search can use.
+    const roots = buildParamTree([param("isoGain", "double")]).roots;
+    expect(filterParamTree(roots, "isogain").matches).toBe(1);
+  });
+
+  it("reports no match rather than dropping the tree silently", () => {
+    const result = filterParamTree(nested(), "kaleidoscope");
+    expect(result.matches).toBe(0);
+    expect(result.roots).toHaveLength(0);
+  });
+
+  it("leaves the tree alone", () => {
+    const roots = nested();
+    filterParamTree(roots, "grain");
+    // The panel keeps the full tree for the next keystroke, so a search must not rewrite it.
+    expect(roots).toHaveLength(2);
+    expect(roots[0].children).toHaveLength(2);
+  });
+
+  it("returns the whole tree for an empty query", () => {
+    const roots = nested();
+    expect(filterParamTree(roots, "   ").roots).toBe(roots);
   });
 });

@@ -37,4 +37,10 @@ export default defineConfig({
     strictPort: true,
   },
   plugins: [react(), wails("./bindings"), embedPlaceholder()],
+  test: {
+    // The theme test reads app.css as text to prove every theme the settings panel offers
+    // has a block in it. Vitest stubs CSS by default, which would make that test compare an
+    // empty string against the list and pass for the wrong reason.
+    css: true,
+  },
 });
