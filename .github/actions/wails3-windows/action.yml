@@ -252,12 +252,20 @@ runs:
         GOARCH: ${{ steps.target.outputs.goarch }}
         APP_NAME: ${{ inputs.build-name }}
       run: |
-        # Paths converted here, where the Windows directories are on PATH, and pasted into the
-        # script that runs in the other shell.
+        # Paths are resolved here, where Go's environment is intact, and pasted into the script
+        # that runs in the other shell. Inside MSYS2 the module cache cannot be found at all:
+        # `go: module cache not found: neither GOMODCACHE nor GOPATH is set`, because the login
+        # shell does not pass the profile that Go would derive them from.
         GO_DIR="$(cygpath -u "$(dirname "$(command -v go)")")"
+        GO_PATH="$(cygpath -m "$(go env GOPATH)")"
+        GO_MODCACHE="$(cygpath -m "$(go env GOMODCACHE)")"
+        GO_CACHE="$(cygpath -m "$(go env GOCACHE)")"
         cat > .ci-build.sh <<SCRIPT
         set -euo pipefail
         export PATH="${GO_DIR}:/mingw64/bin:/usr/bin:\$PATH"
+        export GOPATH="${GO_PATH}"
+        export GOMODCACHE="${GO_MODCACHE}"
+        export GOCACHE="${GO_CACHE}"
         export GOOS=windows
         export GOARCH=${GOARCH}
         export CGO_ENABLED=1
