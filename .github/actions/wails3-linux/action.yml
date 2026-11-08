@@ -161,6 +161,50 @@ runs:
     # `task linux:create:appimage` builds the binary, generates the .desktop file and runs
     # linuxdeploy with its GTK plugin. Its own AppImage is not the one that ships: the plugin
     # bundle is added to the AppDir after it runs, and the AppDir is packed again below.
+    #
+    # linuxdeploy is fetched here, not by the generator. The generator downloads it into its
+    # build directory and skips the download when the file is already there.
+    #
+    # The fetch goes through the GitHub API, not the browser download URL. That URL returned
+    # `504 Gateway Timeout` on every attempt here, for the `continuous` tag and for a pinned
+    # one alike, while the API asset endpoint served the same file: the web download path and
+    # the API path are not the same service. `gh release download` uses the API, needs a token
+    # on a runner, and retries here are ours.
+    - name: Fetch linuxdeploy
+      shell: bash
+      env:
+        TARGET_ARCH: ${{ steps.target.outputs.arch }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        # The generator's build directory, from the Taskfile's -builddir argument.
+        TOOLS_DIR=build/linux/appimage/build
+        LINUXDEPLOY="${TOOLS_DIR}/linuxdeploy-${TARGET_ARCH}.AppImage"
+        mkdir -p "$TOOLS_DIR"
+        if [ -f "$LINUXDEPLOY" ]; then
+          echo "linuxdeploy is already at $LINUXDEPLOY"
+          exit 0
+        fi
+        for attempt in 1 2 3; do
+          if gh release download continuous \
+               --repo linuxdeploy/linuxdeploy \
+               --pattern "linuxdeploy-${TARGET_ARCH}.AppImage" \
+               --output "$LINUXDEPLOY" \
+               --clobber; then
+            break
+          fi
+          echo "linuxdeploy download attempt ${attempt} failed" >&2
+          rm -f "$LINUXDEPLOY"
+          if [ "$attempt" = 3 ]; then
+            exit 1
+          fi
+          sleep 10
+        done
+        # A saved error page would pass the next existence check and fail later with a message
+        # about sudo or a missing ELF header. Check what arrived.
+        file "$LINUXDEPLOY" | grep -q 'ELF' \
+          || { echo "linuxdeploy is not an ELF binary:"; file "$LINUXDEPLOY"; rm -f "$LINUXDEPLOY"; exit 1; }
+        chmod +x "$LINUXDEPLOY"
+
     - name: Build and package the AppImage
       shell: bash
       env:
@@ -191,11 +235,30 @@ runs:
       env:
         APP_NAME: ${{ inputs.build-name }}
         TARGET_ARCH: ${{ steps.target.outputs.arch }}
+        GH_TOKEN: ${{ github.token }}
         APPIMAGE_EXTRACT_AND_RUN: '1'
       run: |
         APPIMAGE="${APP_NAME}-linux-${TARGET_ARCH}.AppImage"
-        curl -fsSL -o /tmp/appimagetool \
-          "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${TARGET_ARCH}.AppImage"
+        # Downloaded the same way as linuxdeploy, and for the same reason: the browser download
+        # URL is not the API path, and the browser one returned 504 here.
+        rm -f /tmp/appimagetool
+        for attempt in 1 2 3; do
+          if gh release download continuous \
+               --repo AppImage/appimagetool \
+               --pattern "appimagetool-${TARGET_ARCH}.AppImage" \
+               --output /tmp/appimagetool \
+               --clobber; then
+            break
+          fi
+          echo "appimagetool download attempt ${attempt} failed" >&2
+          rm -f /tmp/appimagetool
+          if [ "$attempt" = 3 ]; then
+            exit 1
+          fi
+          sleep 10
+        done
+        file /tmp/appimagetool | grep -q 'ELF' \
+          || { echo "appimagetool is not an ELF binary:"; file /tmp/appimagetool; exit 1; }
         chmod +x /tmp/appimagetool
         ARCH="${TARGET_ARCH}" /tmp/appimagetool \
           "${{ steps.appdir.outputs.path }}" \
