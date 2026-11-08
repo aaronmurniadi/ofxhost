@@ -1,0 +1,266 @@
+name: "Build the Windows app (Wails v3)"
+description: >-
+  Builds the application for Windows with the mingw-w64 toolchain and packs the
+  executable with its plugin bundle into a zip. The siblings are wails3-macos and
+  wails3-linux. Read the header comment for the two Windows-only decisions.
+
+# ---------------------------------------------------------------------------------------
+# The toolchain is mingw-w64 from MSYS2, never MSVC.
+#
+# cgo cannot drive MSVC: it passes GCC-style flags and links through the C driver, and the
+# OpenFX host support archive is built by CMake from the same sources on every platform. So
+# CMake is given Ninja from MSYS2 and the same gcc that cgo uses, which keeps one compiler in
+# the build instead of two that disagree about the ABI.
+#
+# The MSYS2 step is `msys2/setup-msys2`, but nothing here runs in its shell. A composite
+# action cannot set `defaults.run.shell: msys2 {0}` - that is a job-level default - and the
+# frontend steps need Git Bash anyway, because `npm` is a shell script there. So the action
+# takes the install location the setup step reports and puts mingw64/bin on PATH instead.
+# Every step is then Git Bash, with one compiler configuration for all of them.
+#
+# The layout is the one internal/adapter/ofxhost/bundled.go already searches:
+#
+#   ofxhost.exe
+#   Resources\OfxHost.ofx.bundle\Contents\Win64\OfxHost.ofx
+#
+# The plugin binary goes in Contents\Win64, the directory OFX discovery reads on this
+# platform. A bundle under Contents\MacOS is found by no host, and the failure is an empty
+# effect picker rather than an error.
+#
+# No `go test ./...`. The adapter tests load the fixture plugin through the OpenFX host, which
+# is compiled here but not yet proven on this platform, and a red Windows job would hide the
+# build failure the job exists to report. PLAN.md §4 records the same reason.
+# ---------------------------------------------------------------------------------------
+
+inputs:
+  build-name:
+    description: "Base name of the archive. Also what the executable is called."
+    required: false
+    default: ofxhost
+  build-platform:
+    description: "Target platform. windows/x86_64 or windows/amd64, nothing else for now."
+    required: false
+    default: windows/x86_64
+  go-version:
+    description: "Go version to install."
+    required: false
+    default: '1.26'
+  node-version:
+    description: "Node version to install."
+    required: false
+    default: '22'
+  wails-version:
+    description: "Wails v3 CLI version to install. Pinned, not latest."
+    required: false
+    default: v3.1.0
+  task-version:
+    description: "go-task version to install."
+    required: false
+    default: v3.54.0
+  package:
+    description: "Write the checksum and upload the zip as an artifact."
+    required: false
+    default: 'true'
+
+outputs:
+  arch:
+    description: "Architecture as the artifact names it: x86_64."
+    value: ${{ steps.target.outputs.arch }}
+  archive:
+    description: "Path to the zip, empty when package is false."
+    value: ${{ steps.package.outputs.path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve the target
+      id: target
+      shell: bash
+      env:
+        BUILD_PLATFORM: ${{ inputs.build-platform }}
+      run: |
+        case "$BUILD_PLATFORM" in
+          windows/x86_64|windows/amd64)
+            arch=x86_64
+            goarch=amd64
+            ;;
+          *)
+            echo "unsupported build-platform: $BUILD_PLATFORM" >&2
+            echo "this workflow builds windows/x86_64 only" >&2
+            exit 1
+            ;;
+        esac
+        echo "arch=$arch" >> "$GITHUB_OUTPUT"
+        echo "goarch=$goarch" >> "$GITHUB_OUTPUT"
+
+    - name: Set up Go
+      uses: actions/setup-go@v7.0.0
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: true
+
+    - name: Set up Node
+      uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+
+    # libraw decodes the RAW, lcms2 does the colour conversion, expat parses the plugin XML and
+    # the rest write the export formats. gcc, cmake and ninja because cgo and CMake both need
+    # one toolchain, and MSVC is not one cgo can drive.
+    - name: Set up MSYS2 and install the toolchain
+      id: msys2
+      uses: msys2/setup-msys2@v2.33.0
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-binutils
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-ninja
+          mingw-w64-x86_64-make
+          mingw-w64-x86_64-pkgconf
+          mingw-w64-x86_64-libraw
+          mingw-w64-x86_64-lcms2
+          mingw-w64-x86_64-expat
+          mingw-w64-x86_64-libpng
+          mingw-w64-x86_64-libtiff
+          mingw-w64-x86_64-libjpeg-turbo
+          mingw-w64-x86_64-libwebp
+          mingw-w64-x86_64-libjxl
+
+    # Everything after this step runs in Git Bash, so the compiler has to be on the Windows
+    # PATH rather than inside an MSYS2 shell.
+    - name: Put the mingw toolchain on PATH
+      shell: pwsh
+      env:
+        MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+      run: |
+        Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:MSYS2_LOCATION 'mingw64\bin')
+
+    - name: Check the toolchain is what the link will use
+      shell: bash
+      run: |
+        gcc --version | head -1
+        cmake --version | head -1
+        # cgo resolves these from PATH. A missing one is a link error much later, in a message
+        # that names the library rather than the missing compiler.
+        command -v gcc > /dev/null || { echo "gcc is not on PATH"; exit 1; }
+        command -v ninja > /dev/null || { echo "ninja is not on PATH"; exit 1; }
+
+    # cgo links build/ofxhost-native/lib/libofxhost.a, which CMake produces. The plugins are
+    # built by the same command, and OFX loads them from a bundle on disk.
+    - name: Build the native library and the bundled plugins
+      shell: bash
+      run: |
+        cmake -S internal/adapter/ofxhost/native \
+              -B build/ofxhost-native \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release
+        cmake --build build/ofxhost-native --parallel
+
+    - name: Verify the native build produced what the link needs
+      shell: bash
+      run: |
+        test -f build/ofxhost-native/lib/libofxhost.a \
+          || { echo "libofxhost.a is missing; the CMake step did not run or failed"; exit 1; }
+        test -f build/ofxhost-native/bundled/OfxHost.ofx.bundle/Contents/Win64/OfxHost.ofx \
+          || { echo "the bundled plugins are not in Contents/Win64"; exit 1; }
+
+    - name: Install build tools
+      shell: bash
+      env:
+        WAILS_VERSION: ${{ inputs.wails-version }}
+        TASK_VERSION: ${{ inputs.task-version }}
+      run: |
+        go install "github.com/go-task/task/v3/cmd/task@${TASK_VERSION}"
+        go install "github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+    - name: Install frontend dependencies
+      shell: bash
+      working-directory: frontend
+      run: npm ci
+
+    - name: Generate the Wails bindings
+      shell: bash
+      run: wails3 generate bindings
+
+    # The layer guard is pure Go and catches the one mistake a build cannot: an import that
+    # points the wrong way across the layers.
+    - name: Check the layer rule
+      shell: bash
+      run: go run ./tools/layerguard
+
+    # CGO_ENABLED=1 is not the Taskfile's default for Windows: its `build` task defaults it to
+    # 0 and would produce a stub without the RAW decoder or the OpenFX host. The production
+    # flags already carry `-H windowsgui`, which keeps the console window away.
+    - name: Build the executable
+      shell: bash
+      env:
+        GOARCH: ${{ steps.target.outputs.goarch }}
+      run: task windows:build CGO_ENABLED=1
+
+    - name: Verify the executable
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+      run: |
+        BIN="bin/${APP_NAME}.exe"
+        test -f "$BIN" || { echo "no executable at $BIN"; ls -la bin; exit 1; }
+        # The two bytes of a PE file. `file` is not on every Git Bash, od is.
+        MAGIC="$(head -c 2 "$BIN" | od -An -tx1 | tr -d ' \n')"
+        test "$MAGIC" = "4d5a" || { echo "$BIN is not a PE executable (magic $MAGIC)"; exit 1; }
+        SIZE="$(stat -c%s "$BIN")"
+        test "$SIZE" -gt 1000000 || { echo "$BIN is only $SIZE bytes; the link did not finish"; exit 1; }
+
+    - name: Package
+      id: package
+      if: inputs.package == 'true'
+      shell: pwsh
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+        TARGET_ARCH: ${{ steps.target.outputs.arch }}
+      run: |
+        $pkg = "$env:APP_NAME-windows-$env:TARGET_ARCH"
+        Remove-Item -Recurse -Force "bin\Resources" -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path "bin\Resources" | Out-Null
+        Copy-Item -Recurse -Force "build\ofxhost-native\bundled\OfxHost.ofx.bundle" "bin\Resources\"
+        if (-not (Test-Path "bin\Resources\OfxHost.ofx.bundle\Contents\Win64\OfxHost.ofx")) {
+          throw "the plugin bundle did not survive the copy"
+        }
+        Compress-Archive -Path "bin\$env:APP_NAME.exe", "bin\Resources" -DestinationPath "bin\$pkg.zip" -Force
+        $hash = (Get-FileHash -Path "bin\$pkg.zip" -Algorithm SHA256).Hash.ToLower()
+        # The sha256sum format, so the file checks with the same command as every other
+        # artefact: hash, two spaces, file name.
+        Set-Content -Path "bin\$pkg.zip.sha256" -Value "$hash  $pkg.zip" -NoNewline -Encoding ascii
+        "path=bin/$pkg.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+    - name: Verify the zip carries the executable and its effects
+      if: inputs.package == 'true'
+      shell: pwsh
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+        TARGET_ARCH: ${{ steps.target.outputs.arch }}
+      run: |
+        $pkg = "$env:APP_NAME-windows-$env:TARGET_ARCH"
+        $archive = Resolve-Path "bin\$pkg.zip"
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+        $names = $zip.Entries | ForEach-Object { $_.FullName }
+        $zip.Dispose()
+        $names | Write-Output
+        if (-not ($names -match "^$env:APP_NAME\.exe$")) { throw "the archive has no $env:APP_NAME.exe at the top" }
+        if (-not ($names -match '^Resources[\\/].*OfxHost\.ofx$')) { throw "the archive carries no plugin binary" }
+
+    - name: Upload the build
+      if: inputs.package == 'true'
+      uses: actions/upload-artifact@v7.0.2
+      with:
+        name: ${{ inputs.build-name }}-windows-${{ steps.target.outputs.arch }}
+        path: |
+          bin/${{ inputs.build-name }}-windows-${{ steps.target.outputs.arch }}.zip
+          bin/${{ inputs.build-name }}-windows-${{ steps.target.outputs.arch }}.zip.sha256
+        if-no-files-found: error

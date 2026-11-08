@@ -1375,17 +1375,17 @@ the Taskfile:
   `BundledPluginDirs` looks. Verified by running a copy of the bundle from `/tmp`: it finds
   the three bundled plugins and the six installed ones.
 
-#### macOS and Linux, one job per runner
+#### macOS, Linux and Windows, one job per runner
 
-A three-platform release was built and then reverted, then brought back one platform at a time.
-`ofxhost-windows-x86_64.zip` stays out until someone can run it. The release now builds the
-macOS app for both architectures and one AppImage for Linux:
+A three-platform release was built and reverted, then brought back one platform at a time, each
+one proved by a run of its own. All three are in the release now:
 
 | Artefact | How |
 |---|---|
 | `ofxhost-macOS-arm64.zip` | `macos-15`, `task darwin:package ARCH=arm64` |
 | `ofxhost-macOS-x86_64.zip` | `macos-15-intel`, `task darwin:package ARCH=amd64` |
 | `ofxhost-linux-x86_64.tar.gz` | `ubuntu-24.04`, `task linux:build`, then the binary and its bundle are tarred |
+| `ofxhost-windows-x86_64.zip` | `windows-latest`, `task windows:build CGO_ENABLED=1`, then zipped |
 
 A manual run takes a `platforms` input, so one platform can be tested without paying for the
 others. A release still needs all of them: the publish job refuses a run that built one.
@@ -1396,8 +1396,8 @@ second Homebrew prefix under Rosetta to get both sets; two jobs get the right bo
 and drop the Rosetta step, the fat CMake configure and the lipo merge. The cost is a second
 runner, and `GOARCH` decides which slice the project builds.
 
-**The work lives in local actions, `.github/actions/wails3-macos` and `wails3-linux`.** The
-Wails v2 cross-platform build guide points at `dAppServer/wails-build-action`, and its shape is
+**The work lives in local actions, `.github/actions/wails3-macos`, `wails3-linux` and
+`wails3-windows`.** The Wails v2 cross-platform build guide points at `dAppServer/wails-build-action`, and its shape is
 what the workflow keeps: pinned Go and Node, one call per runner, `ditto` rather than zip, a
 checksum, an artifact. Its build step cannot be used here, and neither can its v3 branch:
 
@@ -1410,8 +1410,8 @@ checksum, an artifact. Its build step cannot be used here, and neither can its v
 - The action's `v3` branch is an orchestration skeleton whose only stack is `wails2`, calling
   the same `wails build --platform`. Its README lists a `wails3` stack as "coming soon".
 
-The local actions therefore replace the two v2 steps and keep the rest. Both build the CMake
-archive first, which no Wails project needs and this one cannot link without.
+The local actions therefore replace the two v2 steps and keep the rest. All three build the
+CMake archive first, which no Wails project needs and this one cannot link without.
 
 **The first Linux build failed in three places, all of them real.** `go test` there compiles
 against Ubuntu's libraries, not Homebrew's, and it met two APIs that only exist in the newer
@@ -1420,9 +1420,6 @@ Both call sites now guard on the version and keep the output identical. The thir
 `gcc: cannot execute 'cc1obj'`: cgo compiles every non-Go file in a package on every platform,
 so the Metal backend's Objective-C file reached a Linux compiler. It is now `metal_darwin.m`
 and the stubs are in `metal_stub.c`.
-
-The Windows note below is kept because the code still builds by hand that way.
-They describe packaging, not a pipeline that runs.
 
 **Linux ships a tarball, not an AppImage.** An AppImage was built, and it needed two downloads
 at run time that this repository does not control: `wails3 generate appimage` fetches
@@ -1446,12 +1443,18 @@ The binary is linked against the runner's GTK4 and WebKitGTK 6.0, so the CI job 
 for unresolved libraries: a binary that starts for the person who built it and fails for
 nobody else is the failure that check exists to prevent.
 
-**Windows needs mingw.** cgo cannot drive MSVC, so the toolchain is MSYS2's mingw-w64: gcc, the
-OpenFX host archive from CMake with Ninja, and import libraries for libraw, lcms2, expat and the
-encoders. The packaged layout is the executable at the top of the zip and `Resources\` beside
-it, which is where `BundledPluginDirs` looks on that platform. The plugin bundle's binary goes in
-`Contents/Win64/`, the name OFX discovery reads there; a plugin under `Contents/MacOS` is found by
-no host, and the failure is an empty picker rather than an error.
+**Windows needs mingw, and runs no Go tests.** cgo cannot drive MSVC, so the toolchain is
+MSYS2's mingw-w64: gcc, the OpenFX host archive from CMake with Ninja, and import libraries for
+libraw, lcms2, expat and the encoders. The packaged layout is the executable at the top of the
+zip and `Resources\` beside it, which is where `BundledPluginDirs` looks on that platform. The
+plugin bundle's binary goes in `Contents/Win64/`, the name OFX discovery reads there; a plugin
+under `Contents/MacOS` is found by no host, and the failure is an empty picker rather than an
+error.
+
+The job builds the executable and does not run `go test ./...`: the adapter tests load the
+fixture plugin through the OpenFX host, that path is compiled here but not yet proven on this
+platform, and a red Windows job would hide the build failure it exists to report. The layer
+guard does run, because it is pure Go and catches the one mistake a build cannot.
 
 **5. Project save and load. — done, in the state directory.**
 

@@ -38,8 +38,7 @@ Download the build for your system from [Releases](https://github.com/aaronmurni
 | macOS, Apple Silicon | `ofxhost-macOS-arm64.zip` |
 | macOS, Intel | `ofxhost-macOS-x86_64.zip` |
 | Linux, x86_64 | `ofxhost-linux-x86_64.tar.gz` |
-
-Windows is not published yet. The program builds there; build it from source.
+| Windows, x86_64 | `ofxhost-windows-x86_64.zip` |
 
 On macOS, unzip it and drag **OfxHost** onto **Applications**. The app is ad-hoc signed, so on
 first launch right-click it and choose **Open**, or clear the quarantine flag:
@@ -59,12 +58,17 @@ tar -xzf ofxhost-linux-x86_64.tar.gz
 There is no AppImage and nothing to install. The binary needs GTK4 and WebKitGTK 6.0 on the
 machine: `libgtk-4-1` and `libwebkitgtk-6.0-4` on Debian and Ubuntu.
 
+On Windows, unzip the archive and run `ofxhost.exe`. Keep the `Resources` folder beside it, for
+the same reason. WebView2 is required and ships with Windows 11; on Windows 10 the installer is
+at https://developer.microsoft.com/microsoft-edge/webview2/.
+
 Each archive has a `.sha256` file beside it. Download both into one folder and check
 the archive:
 
 ```sh
 shasum -a 256 -c ofxhost-macOS-arm64.zip.sha256     # macOS
 sha256sum -c ofxhost-linux-x86_64.tar.gz.sha256     # Linux
+sha256sum -c ofxhost-windows-x86_64.zip.sha256      # Windows, in Git Bash or MSYS2
 ```
 
 The host reads plugins from the same directory every other OpenFX host uses, so a

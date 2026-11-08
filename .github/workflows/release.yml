@@ -39,6 +39,7 @@ on:
           - all
           - macos
           - linux
+          - windows
   # A pull request that changes the pipeline itself, and nothing else. Three builds take a
   # while, so it is not something every pull request should pay for; a manual run does the
   # same job with a button.
@@ -130,9 +131,37 @@ jobs:
           wails-version: ${{ env.WAILS_VERSION }}
           task-version: ${{ env.TASK_VERSION }}
 
+  # One job. The zip is the only Windows artefact, and the runner is x86_64 to match it.
+  windows:
+    name: Windows (${{ matrix.arch }})
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'windows'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            goarch: amd64
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+
+      - name: Build, verify and package
+        uses: ./.github/actions/wails3-windows
+        with:
+          build-name: ${{ env.APP_NAME }}
+          build-platform: windows/${{ matrix.arch }}
+          go-version: ${{ env.GO_VERSION }}
+          node-version: ${{ env.NODE_VERSION }}
+          wails-version: ${{ env.WAILS_VERSION }}
+          task-version: ${{ env.TASK_VERSION }}
+
   release:
     name: Publish the release
-    needs: [macos, linux]
+    needs: [macos, linux, windows]
     # A release needs every platform, so a manual run that built one of them does not publish.
     # Without the all-platforms test, this job would fail against the artifacts it did not build.
     if: |
