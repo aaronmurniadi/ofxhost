@@ -2,7 +2,7 @@ package port
 
 import "github.com/aaronmurniadi/ofxhost/internal/domain/project"
 
-// ProjectStore reads and writes the three documents OfxHost persists.
+// ProjectStore reads and writes the documents OfxHost persists.
 //
 // Paths are absolute. An implementation creates a missing parent directory rather
 // than failing, because the state directory is created on first save and a user
@@ -25,6 +25,11 @@ type ProjectStore interface {
 	// returns an empty entry and no error.
 	LoadDirectoryEntry(dir string) (project.DirectoryEntry, error)
 	SaveDirectoryEntry(dir string, e project.DirectoryEntry) error
+
+	// LoadSession reads the folder whose entry a relaunch should reopen. A missing
+	// file returns an empty session and no error.
+	LoadSession() (project.Session, error)
+	SaveSession(s project.Session) error
 }
 
 // Release is one published build the update checker found.

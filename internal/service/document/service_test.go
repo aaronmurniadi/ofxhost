@@ -515,12 +515,13 @@ func TestRenderAtDoesNotScaleUp(t *testing.T) {
 	}
 }
 
-// fakePlaceStore records directory entries in memory.
+// fakePlaceStore records directory entries and the session record in memory.
 //
-// It deliberately has no sidecar methods: the document must not need them, because a
-// chain is not written by the document (D10).
+// It deliberately has no sidecar methods: the document must not need them, because the
+// chain service records its own.
 type fakePlaceStore struct {
 	entries map[string]project.DirectoryEntry
+	session project.Session
 	saves   int
 }
 
@@ -536,6 +537,15 @@ func (f *fakePlaceStore) SaveDirectoryEntry(dir string, entry project.DirectoryE
 
 func (f *fakePlaceStore) LoadDirectoryEntry(dir string) (project.DirectoryEntry, error) {
 	return f.entries[dir], nil
+}
+
+func (f *fakePlaceStore) SaveSession(session project.Session) error {
+	f.session = session
+	return nil
+}
+
+func (f *fakePlaceStore) LoadSession() (project.Session, error) {
+	return f.session, nil
 }
 
 // TestPersistRemembersThePlaceNotTheChain pins decision D10. Opening a file records the
@@ -606,6 +616,43 @@ func TestRestoreReportsTheFileThatWasOpen(t *testing.T) {
 	}
 }
 
+// TestRestoreAfterRelaunchFindsTheFolder is the defect this test was written for: the folder
+// used to live only in memory, so a fresh process restored nothing and the "Reopen last" offer
+// never appeared.
+func TestRestoreAfterRelaunchFindsTheFolder(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shot.cr3")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	decoder := newFakeDecoder()
+	decoder.frames[path] = image.New(8, 8)
+	first := newService(t, decoder)
+	store := newFakePlaceStore()
+	first.SetStore(store)
+
+	if _, err := first.Open(context.Background(), OpenRequest{Path: path, Space: image.SRGB}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, first)
+	if err := first.Persist(); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+
+	// A second service over the same store is what a relaunch is.
+	second := newService(t, newFakeDecoder())
+	second.SetStore(store)
+
+	got, ok, err := second.Restore(store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if !ok || got != path {
+		t.Fatalf("Restore = %q ok=%v, want %q", got, ok, path)
+	}
+}
+
 // TestRestoreSkipsADeletedFile keeps a relaunch from failing on something that is gone.
 func TestRestoreSkipsADeletedFile(t *testing.T) {
 	dir := t.TempDir()
@@ -613,12 +660,10 @@ func TestRestoreSkipsADeletedFile(t *testing.T) {
 	// The entry is recorded but the file never exists.
 	store := newFakePlaceStore()
 	store.entries[dir] = project.DirectoryEntry{Format: project.FormatTag, Version: project.Version, ActiveImage: "gone.cr3"}
+	store.session = project.Session{Format: project.FormatTag, Version: project.Version, LastDirectory: dir}
 
 	s := newService(t, newFakeDecoder())
 	s.SetStore(store)
-	s.mu.Lock()
-	s.lastDirectory = dir
-	s.mu.Unlock()
 
 	got, ok, err := s.Restore(store)
 	if err != nil {

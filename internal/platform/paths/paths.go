@@ -164,6 +164,18 @@ func DirectoryEntryPath(dir string) (string, error) {
 	return filepath.Join(mirrorPath(stateDir, abs), "_directory.json"), nil
 }
 
+// SessionPath returns the file that names the folder a relaunch should reopen.
+//
+// It sits at the root of the state directory, because it points at one folder
+// entry among the many that directory holds and belongs to no folder of its own.
+func SessionPath() (string, error) {
+	dir, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "_session.json"), nil
+}
+
 // mirrorPath appends an absolute path to a base directory, one element at a
 // time.
 //

@@ -220,8 +220,12 @@ func (d *Document) pump() {
 // Current returns the open document.
 func (d *Document) Current() DocumentDTO {
 	d.pump()
-	d.publishCamera()
+	// The image is published before the capture metadata: the chain is swapped to the record of
+	// the image that just opened, and only then is the sensor it was shot on reported. The other
+	// order seeds the previous image's chain, and the record it writes then belongs to the wrong
+	// file.
 	d.publishImage()
+	d.publishCamera()
 	state := d.docs.State()
 	out := DocumentDTO{
 		Open:         state.Path != "",

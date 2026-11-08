@@ -24,9 +24,17 @@ interface Props {
    * visible rather than only enforced.
    */
   hasDocument: boolean;
+  /**
+   * The path of the open document.
+   *
+   * Opening a file replaces the chain with the one recorded for it, so the list has to be
+   * read again when this changes. Without it the panel kept the empty chain it read before
+   * any file was open, and a restored chain was never drawn.
+   */
+  documentPath: string;
 }
 
-export default function PluginsPanel({ onChange, hasDocument }: Props) {
+export default function PluginsPanel({ onChange, hasDocument, documentPath }: Props) {
   const [chain, setChain] = useState<ChainDTO | null>(null);
   const [plugins, setPlugins] = useState<PluginDTO[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -41,7 +49,7 @@ export default function PluginsPanel({ onChange, hasDocument }: Props) {
 
   useEffect(() => {
     void reload();
-  }, []);
+  }, [documentPath]);
 
   const run = async (action: () => Promise<string | unknown>) => {
     const result = await action();

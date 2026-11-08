@@ -33,6 +33,7 @@ type Store struct {
 	sidecarPath        func(string) (string, error)
 	exportSidecarPath  func(string) (string, error)
 	directoryEntryPath func(string) (string, error)
+	sessionPath        func() (string, error)
 }
 
 // New returns a store that uses the real per-user directories.
@@ -42,6 +43,7 @@ func New() *Store {
 		sidecarPath:        paths.SidecarPath,
 		exportSidecarPath:  paths.ExportSidecarPath,
 		directoryEntryPath: paths.DirectoryEntryPath,
+		sessionPath:        paths.SessionPath,
 	}
 }
 
@@ -79,6 +81,9 @@ func NewIn(dir string) *Store {
 				return "", err
 			}
 			return filepath.Join(name, "_directory.json"), nil
+		},
+		sessionPath: func() (string, error) {
+			return filepath.Join(abs, "state", "_session.json"), nil
 		},
 	}
 }
@@ -214,6 +219,37 @@ func (s *Store) SaveDirectoryEntry(dir string, entry project.DirectoryEntry) err
 	entry.Format = project.FormatTag
 	entry.Version = project.Version
 	return writeJSON(path, entry)
+}
+
+// LoadSession reads the folder whose entry a relaunch should reopen.
+func (s *Store) LoadSession() (project.Session, error) {
+	path, err := s.sessionPath()
+	if err != nil {
+		return project.Session{}, err
+	}
+	var out project.Session
+	found, err := readJSON(path, &out)
+	if err != nil {
+		return project.Session{}, err
+	}
+	if !found {
+		return project.Session{}, nil
+	}
+	if out.Format != project.FormatTag {
+		return project.Session{}, fmt.Errorf("session %s: unknown format %q", path, out.Format)
+	}
+	return out, nil
+}
+
+// SaveSession writes the folder a relaunch should reopen.
+func (s *Store) SaveSession(session project.Session) error {
+	path, err := s.sessionPath()
+	if err != nil {
+		return err
+	}
+	session.Format = project.FormatTag
+	session.Version = project.Version
+	return writeJSON(path, session)
 }
 
 // normaliseSettings fills in a field a hand-edited or older file left out.

@@ -6,6 +6,7 @@ import (
 
 	"github.com/aaronmurniadi/ofxhost/internal/domain/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/project"
+	"github.com/aaronmurniadi/ofxhost/internal/port"
 )
 
 // newTestGraph builds a graph over the package's fake host.
@@ -127,3 +128,119 @@ func TestAnUninstalledPluginIsSkipped(t *testing.T) {
 		t.Fatalf("restored %d nodes from a plugin that is not installed", got)
 	}
 }
+
+// TestAParameterChangeIsRecorded is the defect this test was written for: adding a plugin
+// was recorded, and changing one of its parameters was not, so a relaunch brought back the
+// plugin with the values it had before the user touched it.
+func TestAParameterChangeIsRecorded(t *testing.T) {
+	graph, _ := newTestGraph(t)
+	store := &memoryStore{}
+	graph.SetStore(store, "/photos/sample.RAF")
+	if _, err := graph.Add(0); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if err := graph.SetParam(0, "gain", port.ParamValue{Nums: []float64{0.25}}); err != nil {
+		t.Fatalf("SetParam: %v", err)
+	}
+
+	saved, ok := store.byPath["/photos/sample.RAF"].Chain.Nodes[0].Params["gain"]
+	if !ok {
+		t.Fatalf("the record holds no gain: %+v", store.byPath["/photos/sample.RAF"].Chain.Nodes[0].Params)
+	}
+	if len(saved.Nums) != 1 || saved.Nums[0] != 0.25 {
+		t.Fatalf("recorded gain = %v, want 0.25", saved.Nums)
+	}
+}
+
+// TestRestoringReplacesTheChain: a graph outlives a document, so opening another image must
+// not stack the new chain on the old one.
+func TestRestoringReplacesTheChain(t *testing.T) {
+	store := &memoryStore{}
+	graph, host := newTestGraph(t)
+	store.byPath = map[string]project.Sidecar{
+		"/photos/second.RAF": {Chain: chainSnapshotWith(host.Plugins()[1].Identifier)},
+	}
+
+	graph.SetStore(store, "/photos/first.RAF")
+	if _, err := graph.Add(0); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if got := len(graph.Chain().Nodes); got != 1 {
+		t.Fatalf("the first image holds %d nodes, want 1", got)
+	}
+
+	// The second image has one saved node of its own, so the chain must hold exactly one.
+	graph.SetStore(store, "/photos/second.RAF")
+	if got := len(graph.Chain().Nodes); got != 1 {
+		t.Fatalf("the second image holds %d nodes, want 1", got)
+	}
+}
+
+// TestAnImageWithNoRecordStartsEmpty: the chain of the previous image must not follow the
+// user into a file that has never been edited.
+func TestAnImageWithNoRecordStartsEmpty(t *testing.T) {
+	graph, _ := newTestGraph(t)
+	store := &memoryStore{}
+
+	graph.SetStore(store, "/photos/first.RAF")
+	if _, err := graph.Add(0); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	graph.SetStore(store, "/photos/untouched.RAF")
+	if got := len(graph.Chain().Nodes); got != 0 {
+		t.Fatalf("a file with no record holds %d nodes, want 0", got)
+	}
+}
+
+// TestSeededNoiseIsRecorded: a denoiser added and not touched must come back on the same
+// camera profile. The seeding writes into the plugin, so without a copy into the model the
+// record would hold no noise values at all and the restored node would use the vendor default.
+func TestSeededNoiseIsRecorded(t *testing.T) {
+	host := &noiseHost{instance: &noiseInstance{}}
+	graph := New(host)
+	t.Cleanup(graph.Close)
+	graph.SetNoiseProfiler(&fixedProfiler{
+		profile: port.NoiseProfile{A: 2.5e-05, B: 8e-08},
+		found:   true,
+	})
+	store := &memoryStore{}
+	graph.SetStore(store, "/photos/sample.RAF")
+	graph.SetCamera(port.CameraInfo{Make: "Fujifilm", Model: "X-M1", ISO: 1600})
+
+	if _, err := graph.Add(0); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	saved := store.byPath["/photos/sample.RAF"].Chain.Nodes[0].Params
+	slope, ok := saved[noiseParams.slope]
+	if !ok {
+		t.Fatalf("the record holds no noise slope: %+v", saved)
+	}
+	if len(slope.Nums) != 1 || slope.Nums[0] != 2.5e-05 {
+		t.Fatalf("recorded slope = %v, want 2.5e-05", slope.Nums)
+	}
+	offset, ok := saved[noiseParams.offset]
+	if !ok {
+		t.Fatalf("the record holds no noise offset: %+v", saved)
+	}
+	if len(offset.Nums) != 1 || offset.Nums[0] != 8e-08 {
+		t.Fatalf("recorded offset = %v, want 8e-08", offset.Nums)
+	}
+}
+
+// noiseHost is a host whose one plugin is a denoiser with a noise model.
+type noiseHost struct {
+	instance port.Instance
+}
+
+func (h *noiseHost) Discover([]string) error { return nil }
+
+func (h *noiseHost) Plugins() []port.PluginInfo {
+	return []port.PluginInfo{{Index: 0, Identifier: "test.denoise", Label: "denoise"}}
+}
+
+func (h *noiseHost) Create(int) (port.Instance, error) { return h.instance, nil }
+
+func (h *noiseHost) Close() error { return nil }

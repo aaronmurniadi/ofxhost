@@ -1,19 +1,28 @@
 # State files
 
-OfxHost writes three kinds of file. Each has one owner and one purpose, and none of
+OfxHost writes four kinds of file. Each has one owner and one purpose, and none of
 them is written on a timer.
 
-All three are JSON, all three carry `"format": "ofxhost"`, and all three carry a
+All four are JSON, all four carry `"format": "ofxhost"`, and all four carry a
 `version`. A reader that meets an unknown `format` rejects the file rather than guessing,
 so a file from another tool is never half-applied.
 
-The state directory is per user, under the platform config directory:
+The configuration directory is per user, under the platform convention:
 
 | Platform | Location |
 |---|---|
 | macOS | `~/Library/Application Support/OfxHost/` |
 | Windows | `%APPDATA%\OfxHost\` |
 | Linux | `$XDG_CONFIG_HOME/ofxhost/` |
+
+The state directory holds what belongs to a file or a folder and not to the user's
+preferences, so a user can reset one without losing the other:
+
+| Platform | Location |
+|---|---|
+| macOS | `~/Library/Application Support/OfxHost/` |
+| Windows | `%LOCALAPPDATA%\OfxHost\` |
+| Linux | `$XDG_STATE_HOME/ofxhost/` |
 
 ---
 
@@ -37,7 +46,7 @@ image.
 
 ### `view.panels`
 
-Three **numbers**, not three booleans. A zero means the panel is hidden, so a panel
+Two **numbers**, not two booleans. A zero means the panel is hidden, so a panel
 dragged shut and a panel hidden from the View menu are the same value and cannot
 disagree.
 
@@ -45,7 +54,6 @@ disagree.
 |---|---|
 | `right` | width of the plugins and parameters column, as a percentage of the window |
 | `plugins` | height of the plugins panel inside that column |
-| `filmstrip` | **removed.** The feature was dropped; a file that still has the key is read and the key ignored |
 
 **An absent `panels` key means the defaults.** This is distinct from a stored zero,
 which means the user hid the panel. Decoding into a struct cannot tell those apart for a
@@ -55,12 +63,29 @@ defaults itself.
 A stored value outside the range the window can draw is clamped on load rather than
 rejected: a hand-edited file should not produce an unusable window.
 
-`panels` may be usefully empty. A `view` written before panels were resizable has no
-`panels` key at all, and reads as the defaults.
+---
+
+## 2. `_session.json` — which folder to reopen
+
+Written by `service/document` when a file opens. It sits at the root of the state
+directory, because it points at one folder entry among the many that directory holds.
+
+```json
+{
+  "format": "ofxhost",
+  "version": 1,
+  "lastDirectory": "/Users/me/Pictures/2026-11"
+}
+```
+
+The folder is recorded rather than the image, because the image is named by that
+folder's `_directory.json`, relative to the folder. A folder that moves therefore keeps
+working once it is opened again. Without this record a relaunch has no way to choose
+between the folders that hold an entry.
 
 ---
 
-## 2. `_directory.json` — a place the user was
+## 3. `_directory.json` — a place the user was
 
 Written by `service/document` when a file opens. It lives **under the state directory**,
 mirroring the image's folder, not beside the image.
@@ -82,22 +107,17 @@ that is not there.
 
 ---
 
-## 3. The sidecar — how a file was produced
+## 4. The chain record — how an image is being processed
 
-Written **only by an export, and only when the user asks for it** (decision D10). The
-export dialog has a "Write sidecar with the chain" box and it starts unchecked.
-
-It is written beside the **exported** file and named after it, because a record belongs
-to the file it explains.
+Written by `service/chain` after **every** change to the chain: an add, a remove, a move,
+an enable toggle, a reset, or a parameter edit. It is written under the state directory,
+at the image's mirrored path, and never beside the photograph.
 
 ```json
 {
   "format": "ofxhost",
   "version": 1,
   "sourcePath": "/Users/me/Pictures/DSCF0209.RAF",
-  "fileSpace": "sRGB",
-  "chainSpace": "Linear Rec.2020",
-  "exportedAt": "2026-11-07T02:31:00Z",
   "chain": {
     "nodes": [
       {
@@ -113,25 +133,45 @@ to the file it explains.
 }
 ```
 
-### Why a chain is not saved with the image
+The record is read back when that image is opened again, and it is the only thing that
+restores a chain: no dialog asks, and nothing else applies an edit on the user's behalf.
 
-A chain is a processing decision, not a place the user was. It is also only meaningful
-with the exact plugin versions that built it: `pluginIndex` is the position in the host's
-list and changes when a plugin is installed or removed, which is why `identifier` is
-recorded next to it.
+Restoring matches a node to a plugin by `identifier` first, because `pluginIndex` is the
+position in the host's list and changes when a plugin is installed or removed. A node
+whose plugin is no longer installed is skipped: a chain half rebuilt from what is
+available is more useful than an empty one, and the skipped node could not have rendered
+anyway.
 
-Writing one beside every image the user ever opens would leave a trail of small files
-nobody asked for, and restoring one silently would apply an edit the user did not request
-in this session.
+The chain of the previous image is cleared before the record of the new one is read, so a
+file that has never been edited opens with an empty chain.
 
-An export is different. The question "how was this file made" is exactly what a sidecar
-should answer, and it is asked at a moment when the user can say yes or no.
+A failed write is ignored rather than surfaced. Losing the record of a chain is annoying;
+refusing an edit because a state file could not be written is worse.
 
-### Restoring a sidecar by hand
+---
 
-A node is matched to a plugin by `identifier` first and by `pluginIndex` second. A node
-whose plugin cannot be found keeps its place in the chain with no instance, so the user
-sees what is missing rather than finding it deleted.
+## 5. The export sidecar — how a file was produced
+
+Written **only by an export, and only when the user asks for it** (decision D10). The
+export dialog has a "Write sidecar with the chain" box and it starts unchecked.
+
+It is written beside the **exported** file and named after it, because a record belongs
+to the file it explains. The shape is the same as the chain record, plus three fields:
+
+```json
+{
+  "format": "ofxhost",
+  "version": 1,
+  "sourcePath": "/Users/me/Pictures/DSCF0209.RAF",
+  "fileSpace": "sRGB",
+  "chainSpace": "Linear Rec.2020",
+  "exportedAt": "2026-11-07T02:31:00Z",
+  "chain": { "nodes": [] }
+}
+```
+
+`exportedAt` is set on an export sidecar only, and `chainSpace` names the space the user
+handed to the first plugin.
 
 ---
 

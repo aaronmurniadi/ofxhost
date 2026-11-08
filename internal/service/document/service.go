@@ -111,14 +111,15 @@ type Service struct {
 	chain ChainRunner
 
 	// store remembers which image of which folder is open, so a relaunch returns the
-	// user to the picture they were looking at. It never holds a plugin chain: that is
-	// written only by export, and only on request.
+	// user to the picture they were looking at. It holds no plugin chain: the chain
+	// service records its own, under the image's path.
 	store Store
 
 	mu    sync.RWMutex
 	state State
 	// lastDirectory is the folder of the open document, recorded so a relaunch can
-	// find the directory entry that names the image.
+	// find the directory entry that names the image. It is empty until a document
+	// has been persisted, so Restore falls back to the session record on disk.
 	lastDirectory string
 
 	// generation counts requests, so a decode that finished after a newer one
@@ -284,8 +285,8 @@ func (s *Service) apply(outcome Outcome) {
 	s.state.WorkingSpace = outcome.decoded.FileSpace
 	s.state.InputSpace = outcome.decoded.FileSpace
 
-	// A new file starts a new chain. A saved chain is not applied here: a chain is a
-	// processing decision, not a place the user was, and it is written only by export.
+	// A new file starts a new chain in this document. The chain service replaces its own
+	// when it is handed the new image's path.
 	s.state.Chain = chain.New()
 	s.mu.Unlock()
 

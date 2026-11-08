@@ -115,7 +115,14 @@ func (g *Graph) AddWithInputSpace(pluginIndex int, space string) (int, error) {
 
 	node := chain.NewNode(pluginIndex, info.Identifier, info.Label)
 	position := g.chain.Append(node)
-	g.instances[node.ID] = instance
+	// Append mints the identity when the caller left it zero, so read the node back from the
+	// chain rather than from the value handed in.
+	added := &g.chain.Nodes[position]
+	g.instances[added.ID] = instance
+	// The seeded noise model is part of what makes this chain what it is, so it is copied
+	// into the model and recorded. A restore that found no values would bring the plugin
+	// back with its own default model instead of this camera's.
+	recordNoise(added, instance)
 	g.lastErr = nil
 	return position, nil
 }
@@ -141,9 +148,18 @@ func (g *Graph) SetCamera(camera port.CameraInfo) {
 	if g.noise == nil {
 		return
 	}
-	for id, instance := range g.instances {
-		_ = id
+	defer g.persistLocked()
+	for index := 0; index < g.chain.Len(); index++ {
+		node := g.chain.Node(index)
+		if node == nil {
+			continue
+		}
+		instance := g.instances[node.ID]
+		if instance == nil {
+			continue
+		}
 		seedNoise(instance, camera, g.noise)
+		recordNoise(node, instance)
 	}
 }
 
@@ -299,11 +315,12 @@ func (g *Graph) SetParam(index int, name string, value port.ParamValue) error {
 	}
 
 	g.mu.Lock()
+	defer g.mu.Unlock()
+	defer g.persistLocked()
 	if node.Params == nil {
 		node.Params = map[string]chain.ParamValue{}
 	}
 	node.Params[name] = chain.ParamValue{Nums: append([]float64(nil), value.Nums...), Text: value.Text}
-	g.mu.Unlock()
 	return nil
 }
 
@@ -316,8 +333,6 @@ func (g *Graph) refreshParams(index int, instance port.Instance) {
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	defer g.persistLocked()
-	defer g.persistLocked()
 	defer g.persistLocked()
 	node := g.chain.Node(index)
 	if node == nil {

@@ -164,8 +164,9 @@ func New(opts Options) (*App, error) {
 
 	binds.SetVersion(version)
 
-	// The store remembers which image of which folder was open. It writes no sidecar:
-	// a chain reaches disk only through an export that asks for one.
+	// The store remembers which image of which folder was open, and records the chain
+	// the user built for it under the image's path. Nothing is written beside the user's
+	// photograph.
 	docStore := statefiles.New()
 	docs.SetStore(docStore)
 

@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"github.com/aaronmurniadi/ofxhost/internal/domain/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/port"
 )
 
@@ -63,5 +64,26 @@ func setIfStillDefault(instance port.Instance, params []port.ParamInfo, name str
 		}
 		_ = instance.SetValues(name, port.ParamValue{Nums: []float64{value}})
 		return
+	}
+}
+
+// recordNoise copies a node's noise model into the chain model.
+//
+// Seeding writes into the instance and the model knows nothing about it, so a chain of "add a
+// denoiser, touch nothing" would be recorded without the profile it rendered with. The copy is
+// what makes the restored node describe the same sensor as the saved one.
+func recordNoise(node *chain.Node, instance port.Instance) {
+	if node == nil || instance == nil {
+		return
+	}
+	for _, name := range []string{noiseParams.slope, noiseParams.offset} {
+		value, err := instance.Values(name)
+		if err != nil {
+			continue
+		}
+		if node.Params == nil {
+			node.Params = map[string]chain.ParamValue{}
+		}
+		node.Params[name] = chain.ParamValue{Nums: append([]float64(nil), value.Nums...), Text: value.Text}
 	}
 }

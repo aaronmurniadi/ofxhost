@@ -175,6 +175,14 @@ export default function App() {
     })();
   }, [applyAppearance]);
 
+  // reloadChain reads the chain the Go side holds now.
+  //
+  // It is declared before the effects that use it, because a dependency array is read
+  // during the render that follows this declaration.
+  const reloadChain = useCallback(() => {
+    chainApi.current().then(setChain).catch(() => setChain(null));
+  }, []);
+
   // Poll while a decode is in flight.
   //
   // The Go side decodes on its own goroutine, so the window never blocks on a RAW
@@ -224,20 +232,20 @@ export default function App() {
       setPreview({ url: published.url, width: published.width, height: published.height });
       setMessage("");
       setBusy(false);
+      // The chain of the image that just landed is the one recorded for it, rebuilt by
+      // the Go side while the decode was finishing. The list on screen was read before
+      // any file was open, so it is empty and has to be read again here.
+      reloadChain();
     };
 
     window.setTimeout(tick, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
     };
-  }, [busy]);
+  }, [busy, reloadChain]);
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => setVersion(""));
-    chainApi.current().then(setChain).catch(() => setChain(null));
-  }, []);
-
-  const reloadChain = useCallback(() => {
     chainApi.current().then(setChain).catch(() => setChain(null));
   }, []);
 
@@ -441,9 +449,19 @@ export default function App() {
                 onZoomChange={setZoomPercent}
               />
             }
-            plugins={<PluginsPanel onChange={requestRender} hasDocument={doc?.open === true} />}
+            plugins={
+              <PluginsPanel
+                onChange={requestRender}
+                hasDocument={doc?.open === true}
+                documentPath={doc?.path ?? ""}
+              />
+            }
             parameters={
-              <ParametersPanel selected={chain?.selected ?? -1} onChange={requestRender} />
+              <ParametersPanel
+                selected={chain?.selected ?? -1}
+                onChange={requestRender}
+                documentPath={doc?.path ?? ""}
+              />
             }
           />
         ) : null}

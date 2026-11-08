@@ -314,6 +314,35 @@ func TestDirectoryEntryRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSessionRoundTrip is what lets a relaunch find the folder to reopen. The folder used
+// to live only in the process's memory, so nothing named it after a restart.
+func TestSessionRoundTrip(t *testing.T) {
+	store, dir := newStore(t)
+
+	fresh, err := store.LoadSession()
+	if err != nil {
+		t.Fatalf("LoadSession on a fresh install: %v", err)
+	}
+	if fresh.LastDirectory != "" {
+		t.Fatalf("a fresh session names %q", fresh.LastDirectory)
+	}
+
+	workspaceDir := filepath.Join(dir, "photos")
+	if err := store.SaveSession(project.Session{LastDirectory: workspaceDir}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	got, err := store.LoadSession()
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got.LastDirectory != workspaceDir {
+		t.Fatalf("LastDirectory = %q, want %q", got.LastDirectory, workspaceDir)
+	}
+	if got.Format != project.FormatTag || got.Version != project.Version {
+		t.Fatalf("header = %q v%d", got.Format, got.Version)
+	}
+}
+
 func TestTwoFilesWithTheSameNameDoNotShareASidecar(t *testing.T) {
 	// The state layout mirrors the absolute path, so two folders that each hold a
 	// "photo.cr3" must not collide.

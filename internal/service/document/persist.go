@@ -14,11 +14,12 @@ var ErrNoStore = errors.New("document: no project store is configured")
 // Store is what the document needs to remember where the user was.
 //
 // It is deliberately the narrow half of port.ProjectStore: a sidecar holds a plugin
-// chain, and the document does not write one. Only export does, and only when the user
-// asks for it.
+// chain, and the document does not write one. The chain service records its own.
 type Store interface {
 	SaveDirectoryEntry(dir string, entry project.DirectoryEntry) error
 	LoadDirectoryEntry(dir string) (project.DirectoryEntry, error)
+	SaveSession(session project.Session) error
+	LoadSession() (project.Session, error)
 }
 
 // SetStore installs the store that remembers the open image.
@@ -34,13 +35,12 @@ func (s *Service) SetStore(store Store) {
 
 // Persist remembers which image of which folder is open.
 //
-// That is UI state: it is what makes a relaunch return the user to the picture they
-// were looking at. The plugin chain is not written here. A chain is a processing
-// decision rather than a place the user was, it is only meaningful with the exact
-// plugin versions that produced it, and writing it beside every image would leave a
-// trail of files the user never asked for.
+// Two records are written. The folder's entry names the image, relative to the folder.
+// The session record names the folder, so a relaunch can find that entry again: the
+// folder is not something the process can recover from its own memory after a restart.
 //
-// The sidecar exists for export, where it is created only on request.
+// The plugin chain is not written here. The chain service records its own, under the
+// image's path.
 func (s *Service) Persist() error {
 	s.mu.RLock()
 	store := s.store
@@ -64,6 +64,13 @@ func (s *Service) Persist() error {
 	if err := store.SaveDirectoryEntry(dir, entry); err != nil {
 		return err
 	}
+	if err := store.SaveSession(project.Session{
+		Format:        project.FormatTag,
+		Version:       project.Version,
+		LastDirectory: dir,
+	}); err != nil {
+		return err
+	}
 
 	s.mu.Lock()
 	s.lastDirectory = dir
@@ -80,8 +87,9 @@ func (s *Service) LastDirectory() string {
 
 // Restore reports the image to reopen after a relaunch.
 //
-// It reads the folder the last persist recorded and that folder's directory entry. A
-// file that has since been deleted reports nothing, because a relaunch that fails to
+// It reads the folder the session record names, then that folder's directory entry. The
+// folder comes from disk rather than from memory, because a relaunch starts with neither.
+// A file that has since been deleted reports nothing, because a relaunch that fails to
 // open a missing file is worse than one that starts empty.
 func (s *Service) Restore(store Store) (path string, ok bool, err error) {
 	if store == nil {
@@ -89,7 +97,17 @@ func (s *Service) Restore(store Store) (path string, ok bool, err error) {
 	}
 	dir := s.LastDirectory()
 	if dir == "" {
-		return "", false, nil
+		session, sessionErr := store.LoadSession()
+		if sessionErr != nil {
+			return "", false, sessionErr
+		}
+		dir = session.LastDirectory
+		if dir == "" {
+			return "", false, nil
+		}
+		s.mu.Lock()
+		s.lastDirectory = dir
+		s.mu.Unlock()
 	}
 	entry, entryErr := store.LoadDirectoryEntry(dir)
 	if entryErr != nil || entry.ActiveImage == "" {

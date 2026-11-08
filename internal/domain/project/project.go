@@ -1,11 +1,12 @@
 // Package project holds the documents OfxHost persists and the rules that keep
 // them consistent.
 //
-// Three files exist and each has one owner:
+// Four files exist and each has one owner:
 //
 //   - a sidecar, beside an image's entry under the state directory, holds the
 //     plugin chain and the colour spaces of that image;
 //   - a directory entry records which image of a folder was open;
+//   - a session record names the folder whose entry is the one to reopen;
 //   - the settings file holds what belongs to the user and the machine, never to
 //     a file.
 //
@@ -51,6 +52,19 @@ type DirectoryEntry struct {
 	// ActiveImage is the image path relative to the folder where possible, so a
 	// folder that is moved keeps working.
 	ActiveImage string `json:"activeImage"`
+}
+
+// Session records the folder holding the image that was open, so a relaunch can
+// find that folder's DirectoryEntry.
+//
+// It is one pointer and nothing else. The image itself is named by the folder's
+// entry, relative to the folder, so a folder that moves keeps working. Without this
+// record a relaunch has no way to choose between the folders that have an entry.
+type Session struct {
+	Format  string `json:"format"`
+	Version int    `json:"version"`
+	// LastDirectory is the folder of the image that was open, absolute.
+	LastDirectory string `json:"lastDirectory"`
 }
 
 // Settings is everything that belongs to the user and the machine.

@@ -33,7 +33,7 @@ These are settled. Do not reopen them without a written reason in this file.
 | D8 | **The working space is the user's choice, asked when the file opens.** It becomes the input space of the first plugin. Nothing is compared against the camera's own JPEG | The decoder develops straight into the chosen space at 16 bits; the previous "matches the camera preview" check is dropped |
 | D9 | **Base UI for components, `react-resizable-panels` for layout.** Panels resize and toggle; **docking is out of scope** | One drag-scrub number field instead of a hand-written one; a splitter library instead of the fixed CSS grid. `project.View` loses its three `show*` booleans and gains per-panel sizes, because a boolean that can disagree with a splitter is two sources of truth for one fact |
 | D9b | **Kumo UI was tried and reverted.** Base UI remains the only component library | It was adopted for the dialogs, dropdowns, tooltips, panels and controls, then removed at the project owner's direction. What it cost while it was in: the stylesheet went from 12 KB to 166 KB and the bundle from 408 KB to 587 KB, because Kumo ships all of Tailwind v4 including preflight. What it taught, and what was kept: a portal does not inherit the app's stacking context, so `#root` carries `isolation: isolate`; a tooltip trigger must be the focusable element, not a wrapper; and the number field wants a `ScrubAreaCursor`. Those three fixes came from reading the Kumo and Base UI docs and they stay |
-| D10 | **Only UI state is persisted. A chain reaches disk only through an export, and only on request** | A chain is a processing decision, not a place the user was, and it is only meaningful with the exact plugin versions that built it. Writing one beside every image leaves files the user never asked for. An export records how the file was produced, which is the question a sidecar should answer |
+| D10 | **UI state is persisted; a chain is persisted too, under the image's path** (amended, see §5 item 5) | A user who spent time on a chain expects it back when the same image opens. The record goes in the state directory, never beside the photograph, so no file appears where the user did not ask for one. Restoring matches by plugin identifier, because the plugin list changes between launches |
 | D11 | **A plugin's own input colour space parameter is initialised from the document, once, at add time** | The OFX route is blocked by a support library that predates OFX 1.5 colour. These plugins carry a parameter for exactly that reason, and leaving a Rec.2020 image to be processed as ARRI LogC4 is a wrong render, not a missing nicety. Adding it once initialises the control instead of overriding the user |
 
 D7 has one exception worth naming: the **on-disk formats** (`docs/workspace-format.md`
@@ -741,8 +741,9 @@ Rules:
 | State | Owner | Persisted where |
 |---|---|---|
 | Open document and its pixels | `service/document` | not persisted |
-| Chain of that document | `service/chain` | **not persisted.** Written only by an export that asks for a sidecar (D10) |
+| Chain of that document and its parameter values | `service/chain` | the image's sidecar under the state directory, written after every change and read back when that image opens again |
 | Which image of a directory was open | `service/document` | `_directory.json` |
+| Which directory to reopen | `service/document` | `_session.json`, at the root of the state directory |
 | Theme, font size, panel visibility, export options | `service/session` | `settings.json` |
 | Window geometry | `transport/desktop` | Wails config |
 | Panel sizes and which panels are shown | `service/session` | `settings.json`, under `view`, so the layout follows the user and not the machine |
@@ -997,8 +998,9 @@ What the milestone delivered, against its own list:
 - **Widgets.** Base UI Dialog for every modal - focus trap, Escape, scroll lock, and focus
   returned to whatever opened it. Seven native dropdowns replaced. Ten `title` attributes
   replaced with real tooltips, each icon button gaining an `aria-label` at the same time.
-- **Persistence.** Only UI state is written (D10): the place, the theme, the layout. The
-  plugin chain is not persisted; it reaches disk only through an export that asks for one.
+- **Persistence.** The place, the theme and the layout are written, and so is the chain of
+  the open image with its parameter values (D10, as amended). Nothing is written beside the
+  user's photograph.
 
 **The preview was rendering at full resolution.** The cap was applied to the encoded
 PNG, after every plugin had already run on all 16.3 million pixels, so a smaller
@@ -1034,9 +1036,9 @@ existed only to drive it and had no other caller, so it is gone with it.
   the reader.
 - `docs/state-format.md`.
 
-**Gate:** quit and relaunch restores the open image, the theme, and the panel sizes and
-visibility. It does **not** restore the chain: decision D10 makes a chain an export
-artefact, not saved session state. Dragging a splitter to zero hides that panel and the View
+**Gate:** quit and relaunch offers the image that was open, with the chain and the parameter
+values that were recorded for it. D10 was amended by §5 item 5: a chain is recorded under the
+image's path, so it is session state and no longer only an export artefact. Dragging a splitter to zero hides that panel and the View
 menu shows it again at the size it had. A parameter can be changed by dragging its
 number field, in the real window, on macOS.
 

@@ -21,6 +21,14 @@ interface Props {
   /** Bumped by the shell when a render should be redone. */
   selected: number;
   onChange: () => void;
+  /**
+   * The path of the open document.
+   *
+   * A new file brings its own chain, and that chain can select the same index as the
+   * previous one. Re-reading on the path as well as on the index is what makes the values
+   * of the newly opened file appear instead of the ones still on screen.
+   */
+  documentPath: string;
 }
 
 /** isEditable reports whether a kind has a control the user can change. */
@@ -43,7 +51,7 @@ function isEditable(param: ParamDTO): boolean {
   return false;
 }
 
-export default function ParametersPanel({ selected, onChange }: Props) {
+export default function ParametersPanel({ selected, onChange, documentPath }: Props) {
   const [params, setParams] = useState<ParamDTO[]>([]);
   const [error, setError] = useState("");
   // Off by default: the flag means the plugin does not want these drawn. The toggle is
@@ -62,7 +70,7 @@ export default function ParametersPanel({ selected, onChange }: Props) {
 
   useEffect(() => {
     void reload();
-  }, [reload]);
+  }, [reload, documentPath]);
 
   const edit = async (action: () => Promise<string>) => {
     const result = await action();

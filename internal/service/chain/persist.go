@@ -20,13 +20,34 @@ type ChainStore interface {
 //
 // Passing an empty path stops the recording, which is what happens when nothing is open: a
 // chain with no image is not a thing to save.
+//
+// The chain is cleared before the record of the new image is read. A graph outlives a document:
+// opening a second image, or the same image twice, must not leave the nodes of the previous one
+// in the chain, and must not leave their instances allocated.
 func (g *Graph) SetStore(store ChainStore, imagePath string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.store = store
 	g.imagePath = imagePath
+	g.resetLocked()
 	if store != nil && imagePath != "" {
 		g.restoreLocked()
+	}
+}
+
+// resetLocked frees every instance and starts an empty chain.
+//
+// The caller holds the lock. The instances of the old chain are closed after the model is
+// replaced, so a render already running on them cannot be handed a chain that no longer names
+// them.
+func (g *Graph) resetLocked() {
+	previous := g.instances
+	g.instances = map[uint64]port.Instance{}
+	g.chain = chain.New()
+	for _, instance := range previous {
+		if instance != nil {
+			_ = instance.Close()
+		}
 	}
 }
 

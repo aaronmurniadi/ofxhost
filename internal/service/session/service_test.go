@@ -46,6 +46,8 @@ func (f *fakeStore) LoadDirectoryEntry(string) (project.DirectoryEntry, error) {
 	return project.DirectoryEntry{}, nil
 }
 func (f *fakeStore) SaveDirectoryEntry(string, project.DirectoryEntry) error { return nil }
+func (f *fakeStore) LoadSession() (project.Session, error)                   { return project.Session{}, nil }
+func (f *fakeStore) SaveSession(project.Session) error                       { return nil }
 
 // fakeChecker records how often it was asked, and can fail on demand.
 type fakeChecker struct {
