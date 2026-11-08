@@ -157,6 +157,29 @@ func TestSetThemeKeepsTheRest(t *testing.T) {
 	}
 }
 
+// TestSetThemeRejectsAnUnusableTextSize is the guard on a setting a user types.
+//
+// A size outside the bounds becomes "follow the system" rather than the nearest end of the
+// range: the point is a window that still works, not one that is merely less broken.
+func TestSetThemeRejectsAnUnusableTextSize(t *testing.T) {
+	store := &fakeStore{settings: project.DefaultSettings()}
+	service := newService(t, store, nil)
+
+	if err := service.SetTheme("Dark", 3); err != nil {
+		t.Fatalf("SetTheme: %v", err)
+	}
+	if got := service.Settings().Appearance.FontPt; got != 0 {
+		t.Fatalf("fontPt = %d, want 0 (follow the system)", got)
+	}
+
+	if err := service.SetTheme("Dark", project.MaxFontPt+1); err != nil {
+		t.Fatalf("SetTheme: %v", err)
+	}
+	if got := service.Settings().Appearance.FontPt; got != 0 {
+		t.Fatalf("fontPt = %d, want 0 (follow the system)", got)
+	}
+}
+
 func TestCheckForUpdateWithoutAChecker(t *testing.T) {
 	service := newService(t, &fakeStore{settings: project.DefaultSettings()}, nil)
 

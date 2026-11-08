@@ -187,6 +187,33 @@ func ClampPanels(in Panels) Panels {
 	}
 }
 
+// The interface text size, in points.
+//
+// Whole points, because the setting is a number a user types and a stored integer is what
+// the adapter already reads. The bounds are the range a window can actually be used in: six
+// points is small but legible on a dense display, and thirty-six is all a 720-point-tall
+// window can show more than a line of.
+const (
+	MinFontPt = 6
+	MaxFontPt = 36
+)
+
+// ClampFontPt returns a text size the window can draw.
+//
+// Zero means "follow the operating system", which is the one size that is never wrong, so a
+// value outside the bounds is read as zero rather than as the nearest end of the range.
+// A hand-edited settings file is the reason: clamping 400 to 36 would still be a window the
+// user cannot see the rest of, while zero is always readable.
+func ClampFontPt(fontPt int) int {
+	if fontPt == 0 {
+		return 0
+	}
+	if fontPt < MinFontPt || fontPt > MaxFontPt {
+		return 0
+	}
+	return fontPt
+}
+
 func clampPercent(value, max float64) float64 {
 	if value < 0 {
 		return 0

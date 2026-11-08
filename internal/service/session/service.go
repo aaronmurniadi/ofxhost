@@ -22,7 +22,6 @@ import (
 type Service struct {
 	store    port.ProjectStore
 	checker  port.UpdateChecker
-	current  string
 	version  string
 	mu       sync.RWMutex
 	settings project.Settings
@@ -86,9 +85,7 @@ func (s *Service) Update(change func(*project.Settings)) (project.Settings, erro
 	if next.Appearance.Theme == "" {
 		next.Appearance.Theme = project.DefaultSettings().Appearance.Theme
 	}
-	if next.Appearance.FontPt < 0 {
-		next.Appearance.FontPt = 0
-	}
+	next.Appearance.FontPt = project.ClampFontPt(next.Appearance.FontPt)
 
 	if err := s.store.SaveSettings(next); err != nil {
 		return s.settings, err

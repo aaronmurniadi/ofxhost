@@ -322,9 +322,7 @@ func TestExportHonoursACancelledContext(t *testing.T) {
 }
 
 func TestExportRefusesASecondConcurrentRun(t *testing.T) {
-	service, encoder, _, _ := newService(t)
-	encoder.mu.Lock() // hold the encoder so the first export stays in flight
-	encoder.mu.Unlock()
+	service, _, _, _ := newService(t)
 
 	// Run two exports on one service. The second must be refused while the first
 	// holds the busy flag; the flag is what stops two writes landing on one path.

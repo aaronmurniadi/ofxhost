@@ -130,18 +130,19 @@ func TestEmbeddedPreviewIsKept(t *testing.T) {
 }
 
 func TestPreviewIsCapped(t *testing.T) {
-	for _, path := range samplePaths(t) {
-		raster, err := New().Preview(path, 256)
-		if err != nil {
-			t.Fatalf("Preview: %v", err)
-		}
-		if raster.Empty() {
-			t.Fatal("the preview has no pixels")
-		}
-		if long := raster.LongEdge(); long > 256 {
-			t.Fatalf("the preview long edge is %d, above the cap of 256", long)
-		}
-		return
+	// One sample is enough: the cap is applied after the decode, so a second file
+	// would only repeat the same arithmetic.
+	paths := samplePaths(t)
+	path := paths[0]
+	raster, err := New().Preview(path, 256)
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if raster.Empty() {
+		t.Fatal("the preview has no pixels")
+	}
+	if long := raster.LongEdge(); long > 256 {
+		t.Fatalf("the preview long edge is %d, above the cap of 256", long)
 	}
 }
 

@@ -24,7 +24,6 @@ type formatInfo struct {
 	lossless   bool // offers a lossless switch
 	icc        bool // can carry an ICC profile
 	alpha      bool // can carry an alpha channel
-	multiLayer bool // reserved; false everywhere today
 }
 
 // Ordered by the ExportFormat values above.

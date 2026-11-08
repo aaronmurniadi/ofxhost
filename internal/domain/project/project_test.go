@@ -219,6 +219,25 @@ func TestPanelsZeroMeansHidden(t *testing.T) {
 	}
 }
 
+func TestClampFontPt(t *testing.T) {
+	cases := []struct {
+		in, want int
+	}{
+		{0, 0},   // follow the operating system
+		{10, 10}, // the stylesheet default
+		{6, 6},   // the smallest legible size
+		{36, 36}, // the largest a window can draw
+		{5, 0},   // below the range reads as the system size
+		{400, 0},
+		{-3, 0},
+	}
+	for _, c := range cases {
+		if got := ClampFontPt(c.in); got != c.want {
+			t.Errorf("ClampFontPt(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
 func TestClampPanels(t *testing.T) {
 	cases := []struct {
 		in, want Panels

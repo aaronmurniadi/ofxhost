@@ -21,6 +21,7 @@ import (
 	"log/slog"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // Window defaults. The first launch opens at a size that fits a laptop screen and
@@ -115,6 +116,24 @@ func New(opts Options) *App {
 			TitleBar: application.MacTitleBarDefault,
 		},
 		URL: "/",
+	})
+
+	// The inspector, in a build that has one.
+	//
+	// `Env.Info().Debug` is Wails' own answer: true unless the binary was built with the
+	// `production` tag, so this needs no build tag of its own. In a `wails3 dev` session it is
+	// always true, which is the case it exists for.
+	//
+	// It runs on `ApplicationStarted` rather than here. A window has no platform window until
+	// the message loop runs, and `OpenDevTools` on one that has none returns without a word -
+	// the call would be silently lost a few lines after it was made.
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		if app.Env.Info().Debug {
+			window := app.Window.Current()
+			if window != nil {
+				window.OpenDevTools()
+			}
+		}
 	})
 
 	return &App{app: app, logger: logger, onShutdown: opts.OnShutdown}

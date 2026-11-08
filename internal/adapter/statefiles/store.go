@@ -272,9 +272,9 @@ func normaliseSettings(in project.Settings) project.Settings {
 	if out.Appearance.Theme == "" {
 		out.Appearance.Theme = defaults.Appearance.Theme
 	}
-	if out.Appearance.FontPt < 0 {
-		out.Appearance.FontPt = defaults.Appearance.FontPt
-	}
+	// A size the window cannot draw reads as "follow the system", which is what a
+	// missing key means as well.
+	out.Appearance.FontPt = project.ClampFontPt(out.Appearance.FontPt)
 	if !project.IsKnownUpdateChannel(string(out.Updates.Channel)) {
 		out.Updates.Channel = defaults.Updates.Channel
 	}
