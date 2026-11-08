@@ -57,6 +57,10 @@ inputs:
     description: "go-task version to install."
     required: false
     default: v3.54.0
+  version:
+    description: "Version string to embed with -X main.version. The About panel shows it."
+    required: false
+    default: 'dev'
   package:
     description: "Write the checksum and upload the zip as an artifact."
     required: false
@@ -251,6 +255,7 @@ runs:
         MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         GOARCH: ${{ steps.target.outputs.goarch }}
         APP_NAME: ${{ inputs.build-name }}
+        VERSION: ${{ inputs.version }}
       run: |
         # Paths are resolved here, where Go's environment is intact, and pasted into the script
         # that runs in the other shell. Inside MSYS2 the module cache cannot be found at all:
@@ -273,7 +278,7 @@ runs:
         gcc --version | head -1
         mkdir -p bin
         go build -tags production -trimpath -buildvcs=false \
-          -ldflags="-w -s -H windowsgui" \
+          -ldflags="-w -s -H windowsgui -X main.version=${VERSION}" \
           -o "bin/${APP_NAME}.exe" ./cmd/ofxhost
         SCRIPT
         MSYS_BASH="$(cygpath -u "$MSYS2_LOCATION")/usr/bin/bash.exe"

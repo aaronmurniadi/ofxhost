@@ -57,6 +57,10 @@ inputs:
     description: "go-task version to install."
     required: false
     default: v3.54.0
+  version:
+    description: "Version string to embed with -X main.version. The About panel shows it."
+    required: false
+    default: 'dev'
   package:
     description: "Write the checksum and upload the tarball as an artifact."
     required: false
@@ -175,6 +179,9 @@ runs:
       shell: bash
       env:
         GOARCH: ${{ steps.target.outputs.goarch }}
+        # Read by the Taskfile as -X main.version, so a released build names the tag it came
+        # from instead of saying "dev".
+        VERSION: ${{ inputs.version }}
       run: task linux:build
 
     - name: Verify the binary

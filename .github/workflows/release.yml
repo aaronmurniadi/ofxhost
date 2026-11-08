@@ -1,12 +1,12 @@
 name: Release
 
-# Builds the application for macOS (both architectures) and for Linux, and attaches the
-# artefacts to a release.
+# Builds the application for macOS (both architectures), for Linux and for Windows, and
+# attaches the artefacts to a release.
 #
-# The work is in .github/actions/wails3-macos and .github/actions/wails3-linux, one call per
-# runner. Those actions are the Wails Build Action's shape - pinned Go and Node, a build, a
-# signed .app or an AppImage, a checksum, an artifact - with its two Wails v2 steps replaced
-# by their v3 equivalents. The header of the macOS action records why the upstream action
+# The work is in .github/actions/wails3-macos, wails3-linux and wails3-windows, one call per
+# runner. Those actions are the Wails Build Action's shape - pinned Go and Node, a build, an
+# .app bundle or a tarball or a zip, a checksum, an artifact - with its two Wails v2 steps
+# replaced by their v3 equivalents. The header of the macOS action records why the upstream action
 # cannot build this project: it installs the v2 CLI and calls `wails build --platform ...
 # -o ...`, and the v3 CLI has neither flag.
 #
@@ -53,6 +53,10 @@ permissions:
 
 env:
   APP_NAME: ofxhost
+  # What the About panel reports, injected as -X main.version. A tag push names itself, a
+  # manual run uses the tag it was given, and anything else is "dev" so an unversioned build is
+  # recognisable rather than pretending to be a release.
+  APP_VERSION: ${{ github.event.inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'dev' }}
   # Pinned rather than "latest": a release build should change because the code changed,
   # not because a tool moved under it.
   WAILS_VERSION: v3.1.0
@@ -102,8 +106,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           wails-version: ${{ env.WAILS_VERSION }}
           task-version: ${{ env.TASK_VERSION }}
+          version: ${{ env.APP_VERSION }}
 
-  # One job. The AppImage is the only Linux artefact, and the runner is x86_64 to match it.
+  # One job. The tarball is the only Linux artefact, and the runner is x86_64 to match it.
   linux:
     name: Linux (${{ matrix.arch }})
     if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'linux'
@@ -130,6 +135,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           wails-version: ${{ env.WAILS_VERSION }}
           task-version: ${{ env.TASK_VERSION }}
+          version: ${{ env.APP_VERSION }}
 
   # One job. The zip is the only Windows artefact, and the runner is x86_64 to match it.
   windows:
@@ -158,6 +164,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           wails-version: ${{ env.WAILS_VERSION }}
           task-version: ${{ env.TASK_VERSION }}
+          version: ${{ env.APP_VERSION }}
 
   release:
     name: Publish the release
@@ -188,7 +195,10 @@ jobs:
           # keeps a release from being published against the default branch.
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: ${{ github.event.inputs.tag || github.ref_name }}
-          draft: true
+          # Published, not drafted. The four artefacts have each been built and verified by
+          # the job that produced them, and a release that waits for a person to press a
+          # button is a release nobody pressed. Set this to true to stage it instead.
+          draft: false
           generate_release_notes: true
           files: |
             dist/*.zip

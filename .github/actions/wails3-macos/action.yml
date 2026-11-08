@@ -62,6 +62,10 @@ inputs:
     description: "go-task version to fall back to when Homebrew has no go-task."
     required: false
     default: v3.54.0
+  version:
+    description: "Version string to embed with -X main.version. The About panel shows it."
+    required: false
+    default: 'dev'
   package:
     description: "Archive the .app, write its checksum and upload both as an artifact."
     required: false
@@ -211,6 +215,9 @@ runs:
       shell: bash
       env:
         GOARCH: ${{ steps.target.outputs.goarch }}
+        # Read by the Taskfile as -X main.version, so a released build names the tag it came
+        # from instead of saying "dev".
+        VERSION: ${{ inputs.version }}
         MACOSX_DEPLOYMENT_TARGET: '12.0'
         CGO_CFLAGS: '-mmacosx-version-min=12.0'
         CGO_CXXFLAGS: '-mmacosx-version-min=12.0'

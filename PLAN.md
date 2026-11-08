@@ -1361,7 +1361,7 @@ GPL-3.0. The program is now GPL-3.0-or-later too, which settles it.
 **4. M7 - other platforms and CI. — macOS CI done; Windows and Linux open.**
 
 `.github/workflows/release.yml` builds the macOS app on both architectures, runs the tests,
-verifies the bundle carries its plugins and its signature, and publishes a draft release.
+verifies the bundle carries its plugins and its signature, and publishes the release.
 
 Two facts it had to encode, both found by running the packaging locally rather than by reading
 the Taskfile:
