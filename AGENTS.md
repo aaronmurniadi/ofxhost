@@ -331,7 +331,8 @@ same submodule, and mixing them up produces link errors that read like missing s
 
 ### Windows and Linux
 
-Both build, and both build in CI. The differences that matter when changing adapter code:
+Both build by hand. The release workflow builds macOS only, so a Windows or Linux break shows
+up locally and not in CI. The differences that matter when changing adapter code:
 
 - **cgo tags are per platform and per file.** `cgo_darwin.go`, `cgo_linux.go` and
   `cgo_windows.go` sit in each adapter package. A missing one is a link error on that platform

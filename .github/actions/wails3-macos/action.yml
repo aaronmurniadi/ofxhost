@@ -1,0 +1,278 @@
+name: "Build the macOS app (Wails v3)"
+description: >-
+  Builds the application for one macOS architecture, from a checkout to a signed
+  .app archive with its checksum. This is the Wails Build Action's model
+  (setup, build, package, upload) with the parts that only fit Wails v2 replaced
+  by the v3 equivalent. Read the header comment for the reason.
+
+# ---------------------------------------------------------------------------------------
+# Why this action exists instead of `uses: dAppServer/wails-build-action@v3`
+#
+# The Wails v2 cross-platform build guide points at that action, and it is the right shape
+# for this repository: one input-driven step per runner, a matrix per architecture, and
+# packaging that ends with an artifact. Two of its steps cannot build this project.
+#
+#   - It installs the v2 command: `go install github.com/wailsapp/wails/v2/cmd/wails`.
+#     Wails v3 is a different module and a different binary, `wails3`.
+#   - It builds with `wails build --platform <os>/<arch> -webview2 … -o <name>`. The v3
+#     CLI has no `--platform` and no `-o`: it builds for the host, reading GOOS and GOARCH
+#     from the environment, and its binary is named by the project. Passing those flags to
+#     `wails3` is an unknown-flag failure, so the action cannot be pointed at v3 by inputs.
+#
+# The action's own v3 branch does not close the gap. It is an orchestration skeleton whose
+# only stack is `wails2`; its build sub-action is the same `wails build --platform` call,
+# and the repository lists a `wails3` stack as "coming soon".
+#
+# So the pattern is kept and the two steps are replaced:
+#
+#   - Install `wails3` at a pinned version, and let the project's own tasks drive it.
+#   - Run `task darwin:package ARCH=<goarch>`, which builds for the host architecture and
+#     assembles the .app around the binary. GOARCH is how v3 is told an architecture.
+#
+# Everything else - the pinned Go and Node, `ditto` rather than zip, the checksum, the
+# artifact upload - is the action's approach unchanged.
+#
+# One more step has no counterpart in the Wails action, because a plain Wails project does
+# not have one: the native OpenFX library is C++ built by CMake, and cgo links against it.
+# It is built here, before anything links.
+# ---------------------------------------------------------------------------------------
+
+inputs:
+  build-name:
+    description: "Base name of the archive. Also what the app bundle is called."
+    required: false
+    default: ofxhost
+  build-platform:
+    description: "Target platform. darwin/arm64 or darwin/x86_64, nothing else."
+    required: false
+    default: darwin/arm64
+  go-version:
+    description: "Go version to install."
+    required: false
+    default: '1.26'
+  node-version:
+    description: "Node version to install."
+    required: false
+    default: '22'
+  wails-version:
+    description: "Wails v3 CLI version to install. Pinned, not latest."
+    required: false
+    default: v3.1.0
+  task-version:
+    description: "go-task version to fall back to when Homebrew has no go-task."
+    required: false
+    default: v3.54.0
+  package:
+    description: "Archive the .app, write its checksum and upload both as an artifact."
+    required: false
+    default: 'true'
+
+outputs:
+  arch:
+    description: "Architecture as the artifact names it: arm64 or x86_64."
+    value: ${{ steps.target.outputs.arch }}
+  goarch:
+    description: "Architecture as the Go toolchain names it: arm64 or amd64."
+    value: ${{ steps.target.outputs.goarch }}
+  archive:
+    description: "Path to the zip, empty when package is false."
+    value: ${{ steps.archive.outputs.path }}
+
+runs:
+  using: "composite"
+  steps:
+    # GOARCH is not spelled the same way as the artifact name for Intel. Go calls it amd64,
+    # and there is no GOOS/GOARCH pair called x86_64, so the translation happens once here
+    # rather than once per step.
+    - name: Resolve the target
+      id: target
+      shell: bash
+      env:
+        BUILD_PLATFORM: ${{ inputs.build-platform }}
+      run: |
+        case "$BUILD_PLATFORM" in
+          darwin/arm64)
+            arch=arm64
+            goarch=arm64
+            ;;
+          darwin/x86_64|darwin/amd64)
+            arch=x86_64
+            goarch=amd64
+            ;;
+          *)
+            echo "unsupported build-platform: $BUILD_PLATFORM" >&2
+            echo "this workflow builds darwin/arm64 and darwin/x86_64 only" >&2
+            exit 1
+            ;;
+        esac
+        echo "arch=$arch" >> "$GITHUB_OUTPUT"
+        echo "goarch=$goarch" >> "$GITHUB_OUTPUT"
+
+    # The v3 CLI builds for the machine it runs on, and a Homebrew bottle is built for the
+    # machine that installed it. A runner asked for the other architecture would fail to
+    # link, in a message about a missing symbol rather than about the runner.
+    - name: Check the runner is the target
+      shell: bash
+      env:
+        TARGET_ARCH: ${{ steps.target.outputs.arch }}
+      run: |
+        host="$(uname -m)"
+        if [ "$host" != "$TARGET_ARCH" ]; then
+          echo "this job targets $TARGET_ARCH but the runner is $host" >&2
+          echo "run each architecture on its own runner; there is no cross build here" >&2
+          exit 1
+        fi
+
+    - name: Set up Go
+      uses: actions/setup-go@v7.0.0
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: true
+
+    - name: Set up Node
+      uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+
+    # libraw decodes the RAW; lcms2 does the colour conversion; the rest write the export
+    # formats; expat parses the plugin XML. The link line names all of them, so a missing
+    # one is a link error rather than a feature discovered missing at runtime.
+    - name: Install native dependencies
+      shell: bash
+      run: |
+        brew install \
+          libraw lcms2 libpng libtiff jpeg-turbo webp jpeg-xl expat
+
+    # task comes with the project as a Taskfile; wails3 is the CLI that the Taskfile calls.
+    # Neither is assumed to be on the runner.
+    - name: Install build tools
+      shell: bash
+      env:
+        WAILS_VERSION: ${{ inputs.wails-version }}
+        TASK_VERSION: ${{ inputs.task-version }}
+      run: |
+        if ! command -v task > /dev/null; then
+          if ! brew install go-task; then
+            go install "github.com/go-task/task/v3/cmd/task@${TASK_VERSION}"
+          fi
+        fi
+        go install "github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+        echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+    # cgo links build/ofxhost-native/lib/libofxhost.a, which CMake produces. Skipping this
+    # step fails the Go link, and the failure reads like a Go problem. The plugins are built
+    # by the same command and shipped in the bundle, so the app is not empty at launch.
+    - name: Build the native library and the bundled plugins
+      shell: bash
+      run: |
+        cmake -S internal/adapter/ofxhost/native \
+              -B build/ofxhost-native \
+              -DCMAKE_BUILD_TYPE=Release
+        cmake --build build/ofxhost-native -j "$(sysctl -n hw.ncpu)"
+
+    - name: Verify the native build produced what the link needs
+      shell: bash
+      run: |
+        test -f build/ofxhost-native/lib/libofxhost.a \
+          || { echo "libofxhost.a is missing; the CMake step did not run or failed"; exit 1; }
+        test -d build/ofxhost-native/bundled/OfxHost.ofx.bundle \
+          || { echo "the bundled plugins are missing; the app would ship with fewer effects"; exit 1; }
+        # One architecture, not two. A fat archive links two Go architectures, which is not
+        # what this job asked for.
+        lipo -info build/ofxhost-native/lib/libofxhost.a | grep -q "${{ steps.target.outputs.arch }}" \
+          || { echo "libofxhost.a has no ${{ steps.target.outputs.arch }} slice"; exit 1; }
+
+    - name: Install frontend dependencies
+      shell: bash
+      working-directory: frontend
+      run: npm ci
+
+    # The bindings are generated and .gitignore keeps them out of the repository. The
+    # frontend's Vite config asks for the typed-events module at build start, so a checkout
+    # without this step fails the frontend tests with "Event bindings module not found".
+    - name: Generate the Wails bindings
+      shell: bash
+      run: wails3 generate bindings
+
+    - name: Test
+      shell: bash
+      run: |
+        go test ./...
+        go run ./tools/layerguard
+        cd frontend && npm test
+
+    # `wails3 build` alone produces a bare binary. `task darwin:package` builds it and then
+    # assembles the .app around it, copies the bundled plugins into Resources and ad-hoc
+    # signs the result. ARCH is what tells the build which Go architecture to produce.
+    - name: Build the application bundle
+      shell: bash
+      env:
+        GOARCH: ${{ steps.target.outputs.goarch }}
+        MACOSX_DEPLOYMENT_TARGET: '12.0'
+        CGO_CFLAGS: '-mmacosx-version-min=12.0'
+        CGO_CXXFLAGS: '-mmacosx-version-min=12.0'
+        CGO_LDFLAGS: '-mmacosx-version-min=12.0'
+      run: task darwin:package ARCH="${GOARCH}"
+
+    - name: Verify the app bundle
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+        TARGET_ARCH: ${{ steps.target.outputs.arch }}
+      run: |
+        APP="bin/${APP_NAME}.app"
+        test -d "$APP" || { echo "no app bundle at $APP"; ls -la bin; exit 1; }
+        lipo -info "$APP/Contents/MacOS/${APP_NAME}"
+        lipo -info "$APP/Contents/MacOS/${APP_NAME}" | grep -q "$TARGET_ARCH" \
+          || { echo "the executable has no $TARGET_ARCH slice"; exit 1; }
+        # A bundle that opens but discovers no plugins is the failure this catches: the
+        # plugin bundle has to be inside Resources, because the upward search for the CMake
+        # output finds nothing once the app is installed.
+        find "$APP/Contents/Resources" -maxdepth 3 -name '*.ofx.bundle' | grep -q . \
+          || { echo "the app bundle carries no plugins"; ls -la "$APP/Contents/Resources"; exit 1; }
+        for plugin in "$APP"/Contents/Resources/*.ofx.bundle/Contents/MacOS/*.ofx; do
+          lipo -info "$plugin" | grep -q "$TARGET_ARCH" \
+            || { echo "$plugin has no $TARGET_ARCH slice"; exit 1; }
+        done
+
+    - name: Verify the signature
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+      run: |
+        # The packaging task signs ad hoc, which is what the local build does. Checking it
+        # here means a signing change fails the release, not the user's first launch.
+        codesign --verify --deep --strict "bin/${APP_NAME}.app"
+
+    - name: Package
+      id: archive
+      if: inputs.package == 'true'
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+        TARGET_ARCH: ${{ steps.target.outputs.arch }}
+      run: |
+        # ditto, not zip: it preserves the resource forks and permissions an app bundle
+        # needs, and a bundle unzipped with a plain zip quietly loses them.
+        ARCHIVE="${APP_NAME}-macOS-${TARGET_ARCH}.zip"
+        ditto -c -k --sequesterRsrc --keepParent \
+          "bin/${APP_NAME}.app" \
+          "bin/${ARCHIVE}"
+        # Written from inside the directory so the file names only the archive. A checksum
+        # that records "bin/..." cannot be checked by anyone who downloaded the two files
+        # into one folder, which is the only thing a checksum is for.
+        ( cd bin && shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256" )
+        echo "path=bin/${ARCHIVE}" >> "$GITHUB_OUTPUT"
+
+    - name: Upload the build
+      if: inputs.package == 'true'
+      uses: actions/upload-artifact@v7.0.2
+      with:
+        name: ${{ inputs.build-name }}-macOS-${{ steps.target.outputs.arch }}
+        path: |
+          bin/${{ inputs.build-name }}-macOS-${{ steps.target.outputs.arch }}.zip
+          bin/${{ inputs.build-name }}-macOS-${{ steps.target.outputs.arch }}.zip.sha256
+        if-no-files-found: error

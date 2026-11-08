@@ -1375,34 +1375,52 @@ the Taskfile:
   `BundledPluginDirs` looks. Verified by running a copy of the bundle from `/tmp`: it finds
   the three bundled plugins and the six installed ones.
 
-#### Three platforms, one universal macOS build
+#### macOS only, one job per architecture
 
-Windows and Linux shipped unbuilt for a long time, on the reasoning that release steps for a
-toolchain that never ran here produce scripts that fail on the first user. That held while the
-platform code did not exist. It does now, and the release builds all three:
+A three-platform release was built and then reverted. It produced
+`ofxhost-macOS-universal.zip`, `ofxhost-linux-x86_64.AppImage` and `ofxhost-windows-x86_64.zip`,
+and the Linux and Windows jobs never went green on a tag. The release now builds the macOS app
+for both architectures and publishes nothing else.
 
 | Artefact | How |
 |---|---|
-| `ofxhost-macOS-universal.zip` | One job on `macos-15`, one `.app` with both slices |
-| `ofxhost-linux-x86_64.AppImage` | `wails3 generate appimage`, then it is packed again |
-| `ofxhost-windows-x86_64.zip` | MSYS2 mingw-w64, the only C toolchain cgo can drive |
+| `ofxhost-macOS-arm64.zip` | `macos-15`, `task darwin:package ARCH=arm64` |
+| `ofxhost-macOS-x86_64.zip` | `macos-15-intel`, `task darwin:package ARCH=amd64` |
 
-**One macOS build, not two.** The arm64 and x86_64 slices need two sets of Homebrew libraries,
-because a bottle is built for the machine that installed it. Rather than assemble one universal
-app from two runners and lipo every Mach-O file in it, one job installs the Intel Homebrew under
-Rosetta at `/usr/local` — a prefix the darwin cgo files already name — and configures the C++
-with `CMAKE_OSX_ARCHITECTURES="arm64;x86_64"`, which comes out fat in one pass. Measured: the
-archive and the plugin bundle both report `x86_64 arm64` from a single configure and build.
-`task darwin:package:universal` then builds each Go slice and lipos the executable.
+**Two macOS builds, not one universal build.** Each slice links its own Homebrew bottles,
+because a bottle is built for the machine that installed it. One universal job has to install a
+second Homebrew prefix under Rosetta to get both sets; two jobs get the right bottles for free
+and drop the Rosetta step, the fat CMake configure and the lipo merge. The cost is a second
+runner, and `GOARCH` decides which slice the project builds.
+
+**The work lives in a local action, `.github/actions/wails3-macos`.** The Wails v2
+cross-platform build guide points at `dAppServer/wails-build-action`, and its shape is what the
+workflow keeps: pinned Go and Node, one call per runner, `ditto` rather than zip, a checksum, an
+artifact. Its build step cannot be used here, and neither can its v3 branch:
+
+- It installs `github.com/wailsapp/wails/v2/cmd/wails`. Wails v3 is a different module and a
+  different binary, `wails3`.
+- It builds with `wails build --platform <os>/<arch> -webview2 … -o <name>`. The v3 CLI has no
+  `--platform` and no `-o`: it builds for the host, reads GOOS and GOARCH from the environment,
+  and names its own binary. Those flags are an unknown-flag failure under `wails3`, so no input
+  can point the action at this project.
+- The action's `v3` branch is an orchestration skeleton whose only stack is `wails2`, calling
+  the same `wails build --platform`. Its README lists a `wails3` stack as "coming soon".
+
+The local action therefore replaces the two v2 steps and keeps the rest. It also builds the
+CMake archive first, which no Wails project needs and this one cannot link without.
+
+The Linux and Windows notes below are kept because the code still builds by hand that way.
+They describe packaging, not a pipeline that runs.
 
 **The AppImage is packed twice.** `wails3 generate appimage` runs linuxdeploy with its GTK
 plugin, which is what makes the WebKit helper processes work inside an AppImage, and it has no
 way to carry extra files. The plugin bundle is copied into the AppDir afterwards, at
 `usr/lib/ofxhost`, and the AppImage is packed again with `appimagetool`. The host looks for its
 effects there — a distribution owns `usr/lib`, so the bundle sits under a name no other package
-uses rather than loose among the libraries. The job then extracts the finished AppImage and
-checks both the executable and the bundle are inside it, because a release that opens with an
-empty effect picker is the failure this exists to prevent.
+uses rather than loose among the libraries. The same steps by hand then extract the finished
+AppImage and check both the executable and the bundle are inside it, because a release that
+opens with an empty effect picker is the failure this exists to prevent.
 
 **Windows needs mingw.** cgo cannot drive MSVC, so the toolchain is MSYS2's mingw-w64: gcc, the
 OpenFX host archive from CMake with Ninja, and import libraries for libraw, lcms2, expat and the
