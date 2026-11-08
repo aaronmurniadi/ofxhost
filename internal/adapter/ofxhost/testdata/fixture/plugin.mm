@@ -105,6 +105,7 @@ class FixtureEffect : public OFX::ImageEffect {
    * is unchanged: four floats a pixel, rows in the buffer's order.
    */
   void renderMetal(const OFX::RenderArguments &args) {
+#ifdef __APPLE__
     double gain = 1.0;
     if (gain_ != nullptr) {
       gain_->getValueAtTime(args.time, gain);
@@ -149,6 +150,13 @@ class FixtureEffect : public OFX::ImageEffect {
         out[index + 3] = in[index + 3];
       }
     }
+#else
+    /* The host sets the Metal flag only on a platform that has Metal, so this branch is
+     * unreachable. It exists because the method has to compile here as plain C++, and a
+     * buffer is not a pointer: [(id<MTLBuffer>)handle contents] is Objective-C and says
+     * nothing to a C++ compiler. */
+    (void)args;
+#endif
   }
 
   /* changedParam is where a plugin rebuilds a menu.
