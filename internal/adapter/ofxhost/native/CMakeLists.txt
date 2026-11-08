@@ -135,13 +135,25 @@ if(EXISTS "${OFX_SUPPORT_LIB}/ofxsImageEffect.cpp")
   )
   target_compile_options(ofxhost_fixture PRIVATE -Wall -Wno-unused-parameter)
 
+  # The directory inside Contents/ that OFX discovery reads on each platform. Windows uses
+  # Win64, which is OFX's name for it; a plugin placed under MacOS there is found by nothing.
+  if(APPLE)
+    set(OFX_FIXTURE_ARCH "MacOS")
+  elseif(WIN32)
+    set(OFX_FIXTURE_ARCH "Win64")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    set(OFX_FIXTURE_ARCH "Linux-arm-64")
+  else()
+    set(OFX_FIXTURE_ARCH "Linux-x86-64")
+  endif()
+
   # A plugin entry point is resolved by name at load time, so the symbol has to stay.
   set_target_properties(ofxhost_fixture PROPERTIES
     PREFIX ""
     SUFFIX ".ofx"
     OUTPUT_NAME "HostFixture"
     LIBRARY_OUTPUT_DIRECTORY
-      "${CMAKE_BINARY_DIR}/fixture/HostFixture.ofx.bundle/Contents/MacOS")
+      "${CMAKE_BINARY_DIR}/fixture/HostFixture.ofx.bundle/Contents/${OFX_FIXTURE_ARCH}")
 
   add_custom_command(TARGET ofxhost_fixture POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory

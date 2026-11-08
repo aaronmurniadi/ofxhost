@@ -57,8 +57,13 @@ else()
   target_link_libraries(OfxHostBundled PRIVATE OpenGL::GL)
 endif()
 
+# The directory inside Contents/ that OFX discovery reads on each platform. The names are
+# OFX's own, not this project's: a bundle whose binary sits anywhere else is a bundle no host
+# finds, on that platform and every other.
 if(APPLE)
   set(OFX_PLUGIN_ARCH "MacOS")
+elseif(WIN32)
+  set(OFX_PLUGIN_ARCH "Win64")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
   set(OFX_PLUGIN_ARCH "Linux-arm-64")
 else()

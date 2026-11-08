@@ -45,7 +45,19 @@ func bundledDirsFor(executable string) []string {
 	dirs := make([]string, 0, 6)
 
 	// A packaged app keeps resources beside the binary rather than in the output tree.
+	//
+	// Three layouts, one per platform this ships on, and each is the same rule with a
+	// different distance to walk:
+	//
+	//	bin/ofxhost.app/Contents/MacOS/ofxhost     .. /Resources
+	//	ofxhost.exe + Resources\                    ./Resources
+	//	AppDir/usr/bin/ofxhost                     ../lib/ofxhost
+	//
+	// The AppImage case is a directory of its own because a distribution owns usr/lib: the
+	// bundle sits under a name no other package uses, rather than loose among the libraries.
 	dirs = append(dirs, filepath.Join(dir, "..", "Resources"))
+	dirs = append(dirs, filepath.Join(dir, "Resources"))
+	dirs = append(dirs, filepath.Join(dir, "..", "lib", "ofxhost"))
 
 	current := dir
 	for depth := 0; depth < 5; depth++ {

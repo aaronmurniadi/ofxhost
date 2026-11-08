@@ -329,6 +329,22 @@ development build directory beside the binary, then the macOS `Resources` direct
 same submodule, and mixing them up produces link errors that read like missing source.
 `cmake/PatchOfxSupport.cmake` builds the second one.
 
+### Windows and Linux
+
+Both build, and both build in CI. The differences that matter when changing adapter code:
+
+- **cgo tags are per platform and per file.** `cgo_darwin.go`, `cgo_linux.go` and
+  `cgo_windows.go` sit in each adapter package. A missing one is a link error on that platform
+  only, and the error names the library rather than the file.
+- **Windows is mingw, never MSVC.** cgo cannot drive MSVC. The C++ archive and the Go build use
+  the same gcc from MSYS2, and `-lstdc++` is spelled out because cgo links through the C driver.
+- **A plugin bundle's binary goes in `Contents/<arch>/`**, and the name is the platform's:
+  `MacOS`, `Win64`, `Linux-x86-64`, `Linux-arm-64`. OFX discovery reads only that one.
+- **Where the host looks for its own bundle** is `BundledPluginDirs` in
+  `internal/adapter/ofxhost/bundled.go`: `Contents/Resources` inside a macOS app, `Resources`
+  beside a Windows executable, `usr/lib/ofxhost` inside an AppImage. A new packaging layout
+  needs a line there, and `bundled_test.go` is where that line is proved.
+
 ### The fixture plugin
 
 `internal/adapter/ofxhost/testdata/fixture/plugin.cpp` is an OpenFX plugin **this

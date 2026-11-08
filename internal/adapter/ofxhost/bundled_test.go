@@ -135,6 +135,50 @@ func TestBundledDirsForTheDevelopmentBinary(t *testing.T) {
 	}
 }
 
+// TestBundledDirsForTheWindowsBuild is the zip this project ships for Windows: the executable
+// at the top and the plugin bundle in Resources beside it.
+func TestBundledDirsForTheWindowsBuild(t *testing.T) {
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatalf("resolve the repository root: %v", err)
+	}
+	exe := filepath.Join(root, "bin", "ofxhost.exe")
+	want := filepath.Join(root, "bin", "Resources")
+
+	dirs := bundledDirsFor(exe)
+	found := false
+	for _, dir := range dirs {
+		if dir == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the zip layout never offered %q; it offered %v", want, dirs)
+	}
+}
+
+// TestBundledDirsForTheAppImage is the Linux layout: the executable in usr/bin and the plugin
+// bundle in usr/lib/ofxhost.
+func TestBundledDirsForTheAppImage(t *testing.T) {
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatalf("resolve the repository root: %v", err)
+	}
+	exe := filepath.Join(root, "AppDir", "usr", "bin", "ofxhost")
+	want := filepath.Join(root, "AppDir", "usr", "lib", "ofxhost")
+
+	dirs := bundledDirsFor(exe)
+	found := false
+	for _, dir := range dirs {
+		if dir == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the AppImage layout never offered %q; it offered %v", want, dirs)
+	}
+}
+
 // TestBundledDirsForTheAppBundle is the layout that failed.
 //
 // The development build puts the binary three levels inside a macOS app bundle, so the

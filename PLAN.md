@@ -1375,9 +1375,41 @@ the Taskfile:
   `BundledPluginDirs` looks. Verified by running a copy of the bundle from `/tmp`: it finds
   the three bundled plugins and the six installed ones.
 
-Windows and Linux remain unbuilt. The workflow is deliberately macOS-only: writing release
-steps for toolchains that have never run here produces scripts that fail on the first user
-rather than here.
+#### Three platforms, one universal macOS build
+
+Windows and Linux shipped unbuilt for a long time, on the reasoning that release steps for a
+toolchain that never ran here produce scripts that fail on the first user. That held while the
+platform code did not exist. It does now, and the release builds all three:
+
+| Artefact | How |
+|---|---|
+| `ofxhost-macOS-universal.zip` | One job on `macos-15`, one `.app` with both slices |
+| `ofxhost-linux-x86_64.AppImage` | `wails3 generate appimage`, then it is packed again |
+| `ofxhost-windows-x86_64.zip` | MSYS2 mingw-w64, the only C toolchain cgo can drive |
+
+**One macOS build, not two.** The arm64 and x86_64 slices need two sets of Homebrew libraries,
+because a bottle is built for the machine that installed it. Rather than assemble one universal
+app from two runners and lipo every Mach-O file in it, one job installs the Intel Homebrew under
+Rosetta at `/usr/local` — a prefix the darwin cgo files already name — and configures the C++
+with `CMAKE_OSX_ARCHITECTURES="arm64;x86_64"`, which comes out fat in one pass. Measured: the
+archive and the plugin bundle both report `x86_64 arm64` from a single configure and build.
+`task darwin:package:universal` then builds each Go slice and lipos the executable.
+
+**The AppImage is packed twice.** `wails3 generate appimage` runs linuxdeploy with its GTK
+plugin, which is what makes the WebKit helper processes work inside an AppImage, and it has no
+way to carry extra files. The plugin bundle is copied into the AppDir afterwards, at
+`usr/lib/ofxhost`, and the AppImage is packed again with `appimagetool`. The host looks for its
+effects there — a distribution owns `usr/lib`, so the bundle sits under a name no other package
+uses rather than loose among the libraries. The job then extracts the finished AppImage and
+checks both the executable and the bundle are inside it, because a release that opens with an
+empty effect picker is the failure this exists to prevent.
+
+**Windows needs mingw.** cgo cannot drive MSVC, so the toolchain is MSYS2's mingw-w64: gcc, the
+OpenFX host archive from CMake with Ninja, and import libraries for libraw, lcms2, expat and the
+encoders. The packaged layout is the executable at the top of the zip and `Resources\` beside
+it, which is where `BundledPluginDirs` looks on that platform. The plugin bundle's binary goes in
+`Contents/Win64/`, the name OFX discovery reads there; a plugin under `Contents/MacOS` is found by
+no host, and the failure is an empty picker rather than an error.
 
 **5. Project save and load. — done, in the state directory.**
 

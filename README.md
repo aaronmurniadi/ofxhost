@@ -31,14 +31,15 @@ welcome.
 
 ## Install
 
-Download the build for your Mac from [Releases](https://github.com/aaronmurniadi/ofxhost/releases/latest).
+Download the build for your system from [Releases](https://github.com/aaronmurniadi/ofxhost/releases/latest).
 
-| Mac | File |
+| System | File |
 | --- | --- |
-| Apple Silicon (M1 and later) | `ofxhost-macOS-arm64.zip` |
-| Intel | `ofxhost-macOS-x86_64.zip` |
+| macOS, Apple Silicon and Intel | `ofxhost-macOS-universal.zip` |
+| Linux, x86_64 | `ofxhost-linux-x86_64.AppImage` |
+| Windows, x86_64 | `ofxhost-windows-x86_64.zip` |
 
-Unzip it and drag **OfxHost** onto **Applications**. The app is ad-hoc signed, so on
+On macOS, unzip it and drag **OfxHost** onto **Applications**. The app is ad-hoc signed, so on
 first launch right-click it and choose **Open**, or clear the quarantine flag:
 
 ```sh
@@ -49,8 +50,20 @@ Each archive has a `.sha256` file beside it. Download both into one folder and c
 the archive:
 
 ```sh
-shasum -a 256 -c ofxhost-macOS-arm64.zip.sha256
+shasum -a 256 -c ofxhost-macOS-universal.zip.sha256     # macOS
+sha256sum -c ofxhost-linux-x86_64.AppImage.sha256       # Linux
+sha256sum -c ofxhost-windows-x86_64.zip.sha256          # Windows (in Git Bash or MSYS2)
 ```
+
+On Linux, make the AppImage executable and run it:
+
+```sh
+chmod +x ofxhost-linux-x86_64.AppImage
+./ofxhost-linux-x86_64.AppImage
+```
+
+On Windows, unzip the archive and run `ofxhost.exe`. Keep the `Resources` folder beside it:
+the effects that ship with the program live there.
 
 The host reads plugins from the same directory every other OpenFX host uses, so a
 plugin installed for Resolve or Natron is found without installing it twice:
