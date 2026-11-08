@@ -11,7 +11,7 @@ Source of truth for `github.com/aaronmurniadi/ofxhost`. Read this before any cod
 | Language | Go 1.26, CGO for native libraries |
 | UI | Wails v3.1.0 + React + TypeScript + Vite |
 | OpenFX | `third_party/openfx` (BSD-3-Clause) — **host side uses the official `OfxHost` library** |
-| License | BSD-3-Clause |
+| License | GPL-3.0-or-later |
 | First target | macOS arm64, local build |
 | CI/CD | deferred to the last milestone |
 
@@ -1190,8 +1190,9 @@ twice.
 
 darktable's `noiseprofiles.json` is embedded at
 `internal/adapter/noiseprofiles/data/`, with its `COPYING` beside it: the file is data under
-GPL-3.0, the program is not, and the directory is the only GPL material bundled. The loader
-parses on first use, so a machine that never adds a denoiser pays nothing.
+GPL-3.0-or-later, and the program is under the same licence, so there is no mixing question
+to answer. The loader parses on first use, so a machine that never adds a denoiser pays
+nothing.
 
 Lookup matches make and model case-insensitively with surrounding space trimmed, because
 LibRaw reports the file's spelling and the database holds a contributor's. It reads the green
@@ -1210,9 +1211,9 @@ ISO from the RAW, and fills Denoise's *Noise Slope* and *Noise Offset* before th
 render - interpolating between ISO steps and clamping outside the camera's range. This host
 seeds nothing, so Denoise runs at the generic defaults on every camera.
 
-Largest of the six and the one that changes results most. It also carries the only licensing
-question: that file stays under darktable's GPL-3.0 while the rest of the program is not.
-Settle that before writing code, not after.
+Largest of the six and the one that changes results most. It also carried a licensing
+question while the program was permissively licensed: that file stays under darktable's
+GPL-3.0. The program is now GPL-3.0-or-later too, which settles it.
 
 **4. M7 - other platforms and CI. — macOS CI done; Windows and Linux open.**
 
@@ -1336,21 +1337,22 @@ A milestone is done when:
 | WebP encode | libwebp | static | BSD-3 | attribution |
 | JPEG XL encode | libjxl | static | BSD-3 | attribution |
 | ICC | lcms2 | static | MIT | attribution |
+| Noise profiles | darktable's `noiseprofiles.json` | embedded data | **GPL-3.0-or-later** | attribution | 
 | OpenFX host | `OfxHost` from the submodule | static C++ | BSD-3 | attribution |
 | expat | expat | static | MIT | attribution |
 | UI runtime | Wails v3.1.0 | module | MIT | attribution |
 | Frontend | React | module | MIT | attribution |
 
-**The one obligation that needs action.** libraw is LGPL-2.1. Static linking
-(decision D5) means a user must be able to relink OfxHost against a modified
-libraw. Two compliant routes:
+**The LGPL obligation, and why the program's own licence settles it.** libraw is
+LGPL-2.1, and decision D5 links it statically. LGPL-2.1 §3 lets a work that links
+the library opt into the ordinary GPL instead, and OfxHost is GPL-3.0-or-later, so
+that option is the one taken: the combined work is distributed under the GPL, and
+the GPL's own requirement is to publish the complete corresponding source, which
+this repository is. No separate object archive is needed.
 
-1. Ship the OfxHost object files (or a static archive) plus the build
-   instructions, so a modified libraw can be relinked.
-2. Offer a dynamically linked variant on macOS and Linux.
-
-Pick route 1, and put the objects in the source release. Write this in
-`THIRD_PARTY.md` before M4. It is a compliance task, not a blocker.
+That is also why the program is not permissively licensed. A static link to an
+LGPL library, with the source published as GPL, is one obligation answered once
+instead of two obligations tracked separately.
 
 Everything else in the table is permissive and needs only a notice file.
 
@@ -1360,7 +1362,7 @@ Everything else in the table is permissive and needs only a notice file.
 |---|---|---|---|
 | 1 | **CGO + OFX callbacks from threads Go did not create** | high | §5.2 rules; `recover()` on every `//export`; handle registry; `-race` everywhere |
 | 2 | **`OfxHost` coverage gaps.** Some host virtuals, especially clip images and progress, may need more work than §6.1 suggests | high | M3 starts by subclassing and running one plugin end to end, before any panel is written. Discover the gaps on day one, not day ten |
-| 3 | **libraw static + LGPL** | medium | §10 route 1; write `THIRD_PARTY.md` early |
+| 3 | **libraw static + LGPL** | medium | §10: the program is GPL-3.0-or-later, so the LGPL option is taken and publishing source answers it |
 | 4 | **Memory.** float32 RGBA at 60 MP is about 960 MB per copy | high | One full-resolution buffer; preview derived and capped; streamed thumbnails with a bounded cache |
 | 5 | **Wails v3 is beta.** `v3.1.0` is pinned here, and the project still publishes alpha and beta tags | medium | Pin exactly in `go.mod`; never track `latest`; keep Wails inside `transport/` so it stays replaceable |
 | 6 | **Preview latency** over loopback HTTP | medium | One request per rendered frame, `no-store`, 8-bit PNG, never full resolution |

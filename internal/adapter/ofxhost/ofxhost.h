@@ -15,7 +15,7 @@
  *   - No function retains a pointer the caller passed in, except
  *     ofxh_instance_bind_source, which copies the pixels immediately.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef OFXHOST_OFXHOST_H
 #define OFXHOST_OFXHOST_H

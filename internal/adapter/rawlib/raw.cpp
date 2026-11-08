@@ -10,7 +10,7 @@
  * thumbnail both belong to the ofxr_image and are released by ofxr_free, which
  * means the Go side can never leak one by forgetting a second call.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 /* libraw's headers pull in <omp.h> when the compiler advertises OpenMP. The Go

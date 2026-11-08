@@ -23,7 +23,7 @@
  *   - No pointer the caller passes is retained past the call.
  *   - A failure is a negative status code and a static string, never an exception.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #include "ofxhost.h"

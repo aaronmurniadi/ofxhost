@@ -17,7 +17,7 @@
  *              cannot carry one the encoder refuses rather than writing an
  *              ambiguous file, because a viewer would then guess.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #include "encode.h"

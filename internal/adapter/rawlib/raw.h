@@ -11,7 +11,7 @@
  * returns a pointer the caller has to free except ofx_neww_* below, which name
  * themselves in the doc comment on the Go side.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef OFXHOST_RAW_H
 #define OFXHOST_RAW_H

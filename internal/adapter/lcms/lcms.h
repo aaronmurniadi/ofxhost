@@ -11,7 +11,7 @@
  * Nothing here throws, nothing allocates for the caller, and every failure returns
  * a static error string.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef OFXHOST_LCMS_H
 #define OFXHOST_LCMS_H

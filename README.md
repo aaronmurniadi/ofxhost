@@ -129,7 +129,13 @@ cd frontend && npx tsc --noEmit && npm test
 
 ## License
 
-BSD-3-Clause. See `LICENSE`. The OpenFX SDK in `third_party/openfx` keeps its own
-BSD-3-Clause licence. Every other dependency is permissive; the full list, with the
-one LGPL obligation that needs action before a release, is in `THIRD_PARTY.md` once
-it is written.
+GPL-3.0-or-later. See `LICENSE`.
+
+The program links libraw, which is LGPL-2.1, statically. That is what settles the
+program's own licence: the complete corresponding source is published here, and under
+the GPL the library's relinking condition is answered by that.
+
+The OpenFX SDK in `third_party/openfx` keeps its own BSD-3-Clause licence, and the
+permissive libraries keep theirs. The sensor noise profiles in
+`internal/adapter/noiseprofiles/data` are darktable's data and stay under the
+GPL-3.0-or-later, with its text in `COPYING` beside them.

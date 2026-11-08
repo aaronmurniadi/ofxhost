@@ -12,7 +12,7 @@
  * export worker can both ask for one, and a conversion of a full-resolution frame
  * is long enough that a corrupted profile would be hard to explain.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #include "lcms.h"

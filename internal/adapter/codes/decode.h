@@ -9,7 +9,7 @@
  * and the one the encoder takes. Every format stores rows top-down, so each decoder here
  * flips.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef OFXHOST_DECODE_H
 #define OFXHOST_DECODE_H

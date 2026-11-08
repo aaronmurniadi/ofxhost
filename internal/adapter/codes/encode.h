@@ -6,7 +6,7 @@
  * supports before it calls. Keeping one function means the depth and quality rules
  * are checked in one place instead of five.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef OFXHOST_ENCODE_H
 #define OFXHOST_ENCODE_H

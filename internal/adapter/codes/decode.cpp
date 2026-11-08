@@ -9,7 +9,7 @@
  * The three paths are separate functions because the three libraries share nothing but the
  * shape of the result. A shared front door would be three ifs and no shared logic.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #include "decode.h"
