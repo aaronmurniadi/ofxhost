@@ -1375,17 +1375,20 @@ the Taskfile:
   `BundledPluginDirs` looks. Verified by running a copy of the bundle from `/tmp`: it finds
   the three bundled plugins and the six installed ones.
 
-#### macOS only, one job per architecture
+#### macOS and Linux, one job per runner
 
-A three-platform release was built and then reverted. It produced
-`ofxhost-macOS-universal.zip`, `ofxhost-linux-x86_64.AppImage` and `ofxhost-windows-x86_64.zip`,
-and the Linux and Windows jobs never went green on a tag. The release now builds the macOS app
-for both architectures and publishes nothing else.
+A three-platform release was built and then reverted, then brought back one platform at a time.
+`ofxhost-windows-x86_64.zip` stays out until someone can run it. The release now builds the
+macOS app for both architectures and one AppImage for Linux:
 
 | Artefact | How |
 |---|---|
 | `ofxhost-macOS-arm64.zip` | `macos-15`, `task darwin:package ARCH=arm64` |
 | `ofxhost-macOS-x86_64.zip` | `macos-15-intel`, `task darwin:package ARCH=amd64` |
+| `ofxhost-linux-x86_64.AppImage` | `ubuntu-24.04`, `task linux:create:appimage`, then packed again |
+
+A manual run takes a `platforms` input, so one platform can be tested without paying for the
+others. A release still needs all of them: the publish job refuses a run that built one.
 
 **Two macOS builds, not one universal build.** Each slice links its own Homebrew bottles,
 because a bottle is built for the machine that installed it. One universal job has to install a
@@ -1393,10 +1396,10 @@ second Homebrew prefix under Rosetta to get both sets; two jobs get the right bo
 and drop the Rosetta step, the fat CMake configure and the lipo merge. The cost is a second
 runner, and `GOARCH` decides which slice the project builds.
 
-**The work lives in a local action, `.github/actions/wails3-macos`.** The Wails v2
-cross-platform build guide points at `dAppServer/wails-build-action`, and its shape is what the
-workflow keeps: pinned Go and Node, one call per runner, `ditto` rather than zip, a checksum, an
-artifact. Its build step cannot be used here, and neither can its v3 branch:
+**The work lives in local actions, `.github/actions/wails3-macos` and `wails3-linux`.** The
+Wails v2 cross-platform build guide points at `dAppServer/wails-build-action`, and its shape is
+what the workflow keeps: pinned Go and Node, one call per runner, `ditto` rather than zip, a
+checksum, an artifact. Its build step cannot be used here, and neither can its v3 branch:
 
 - It installs `github.com/wailsapp/wails/v2/cmd/wails`. Wails v3 is a different module and a
   different binary, `wails3`.
@@ -1407,10 +1410,12 @@ artifact. Its build step cannot be used here, and neither can its v3 branch:
 - The action's `v3` branch is an orchestration skeleton whose only stack is `wails2`, calling
   the same `wails build --platform`. Its README lists a `wails3` stack as "coming soon".
 
-The local action therefore replaces the two v2 steps and keeps the rest. It also builds the
-CMake archive first, which no Wails project needs and this one cannot link without.
+The local actions therefore replace the two v2 steps and keep the rest. Both build the CMake
+archive first, which no Wails project needs and this one cannot link without. The Linux action
+also runs every AppImage tool with `APPIMAGE_EXTRACT_AND_RUN=1`: linuxdeploy and appimagetool
+ship as AppImages and need FUSE, which a GitHub runner does not have.
 
-The Linux and Windows notes below are kept because the code still builds by hand that way.
+The Windows note below is kept because the code still builds by hand that way.
 They describe packaging, not a pipeline that runs.
 
 **The AppImage is packed twice.** `wails3 generate appimage` runs linuxdeploy with its GTK

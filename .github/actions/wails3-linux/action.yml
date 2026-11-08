@@ -1,0 +1,234 @@
+name: "Build the Linux app (Wails v3)"
+description: >-
+  Builds the application for Linux and packs it into an AppImage that carries the
+  bundled plugins. The macOS sibling is wails3-macos; this one differs only where
+  the platform does. Read the header comment for the two steps that are not obvious.
+
+# ---------------------------------------------------------------------------------------
+# Two things here have no counterpart in the macOS action, and neither is optional.
+#
+# The AppImage is packed twice. `wails3 generate appimage` runs linuxdeploy with its GTK
+# plugin, which is what makes the WebKit helper processes work inside an AppImage, and the
+# generator has no way to carry extra files. The plugin bundle is copied into the AppDir
+# afterwards at usr/lib/ofxhost and the AppImage is packed again with appimagetool. The host
+# looks for its own effects there, under a name no distribution owns.
+#
+# Every AppImage tool is run with APPIMAGE_EXTRACT_AND_RUN=1. linuxdeploy and appimagetool
+# ship as AppImages themselves and need FUSE to mount, which a GitHub runner does not have.
+# The variable makes them unpack to a temporary directory and run from there instead.
+#
+# The rest is the same shape as the macOS action: pinned Go and Node, the CMake archive
+# first, the bindings, the tests, a checksum and an artifact.
+# ---------------------------------------------------------------------------------------
+
+inputs:
+  build-name:
+    description: "Base name of the archive. Also what the binary is called."
+    required: false
+    default: ofxhost
+  build-platform:
+    description: "Target platform. linux/x86_64 or linux/amd64, nothing else for now."
+    required: false
+    default: linux/x86_64
+  go-version:
+    description: "Go version to install."
+    required: false
+    default: '1.26'
+  node-version:
+    description: "Node version to install."
+    required: false
+    default: '22'
+  wails-version:
+    description: "Wails v3 CLI version to install. Pinned, not latest."
+    required: false
+    default: v3.1.0
+  task-version:
+    description: "go-task version to install."
+    required: false
+    default: v3.54.0
+  package:
+    description: "Write the checksum and upload the AppImage as an artifact."
+    required: false
+    default: 'true'
+
+outputs:
+  arch:
+    description: "Architecture as the artifact names it: x86_64."
+    value: ${{ steps.target.outputs.arch }}
+  archive:
+    description: "Path to the AppImage, empty when package is false."
+    value: ${{ steps.checksum.outputs.path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve the target
+      id: target
+      shell: bash
+      env:
+        BUILD_PLATFORM: ${{ inputs.build-platform }}
+      run: |
+        case "$BUILD_PLATFORM" in
+          linux/x86_64|linux/amd64)
+            arch=x86_64
+            goarch=amd64
+            ;;
+          *)
+            echo "unsupported build-platform: $BUILD_PLATFORM" >&2
+            echo "this workflow builds linux/x86_64 only" >&2
+            exit 1
+            ;;
+        esac
+        echo "arch=$arch" >> "$GITHUB_OUTPUT"
+        echo "goarch=$goarch" >> "$GITHUB_OUTPUT"
+
+    - name: Set up Go
+      uses: actions/setup-go@v7.0.0
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: true
+
+    - name: Set up Node
+      uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+
+    # GTK4 and WebKitGTK 6.0, not GTK3: Wails v3 links those by default and needs the `gtk3`
+    # build tag to want the others, which would have to be passed to the CLI and to the
+    # application. The rest are the same libraries the macOS job installs from Homebrew.
+    - name: Install native dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential cmake ninja-build pkg-config file \
+          libgtk-4-dev libwebkitgtk-6.0-dev \
+          libraw-dev liblcms2-dev libexpat1-dev \
+          libpng-dev libtiff-dev libjpeg-dev libwebp-dev libjxl-dev \
+          libgl1-mesa-dev
+
+    - name: Install build tools
+      shell: bash
+      env:
+        WAILS_VERSION: ${{ inputs.wails-version }}
+        TASK_VERSION: ${{ inputs.task-version }}
+      run: |
+        go install "github.com/go-task/task/v3/cmd/task@${TASK_VERSION}"
+        go install "github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+    # cgo links build/ofxhost-native/lib/libofxhost.a, which CMake produces. The plugins are
+    # built by the same command, and OFX loads them from a bundle on disk, so the bundle has
+    # to exist before the AppImage is assembled around it.
+    - name: Build the native library and the bundled plugins
+      shell: bash
+      run: |
+        cmake -S internal/adapter/ofxhost/native \
+              -B build/ofxhost-native \
+              -DCMAKE_BUILD_TYPE=Release
+        cmake --build build/ofxhost-native -j "$(nproc)"
+
+    - name: Verify the native build produced what the link needs
+      shell: bash
+      run: |
+        test -f build/ofxhost-native/lib/libofxhost.a \
+          || { echo "libofxhost.a is missing; the CMake step did not run or failed"; exit 1; }
+        test -d build/ofxhost-native/bundled/OfxHost.ofx.bundle \
+          || { echo "the bundled plugins are missing; the app would ship with fewer effects"; exit 1; }
+        # The bundle's binary goes in Contents/<arch>/, and Linux reads Linux-x86-64. A
+        # bundle under Contents/MacOS is found by no host, and the failure is an empty picker.
+        test -f build/ofxhost-native/bundled/OfxHost.ofx.bundle/Contents/Linux-x86-64/OfxHost.ofx \
+          || { echo "the bundled plugins are not in Contents/Linux-x86-64"; exit 1; }
+
+    - name: Install frontend dependencies
+      shell: bash
+      working-directory: frontend
+      run: npm ci
+
+    - name: Generate the Wails bindings
+      shell: bash
+      run: wails3 generate bindings
+
+    - name: Test
+      shell: bash
+      run: |
+        go test ./...
+        go run ./tools/layerguard
+        cd frontend && npm test
+
+    # `task linux:create:appimage` builds the binary, generates the .desktop file and runs
+    # linuxdeploy with its GTK plugin. Its own AppImage is not the one that ships: the plugin
+    # bundle is added to the AppDir after it runs, and the AppDir is packed again below.
+    - name: Build and package the AppImage
+      shell: bash
+      env:
+        GOARCH: ${{ steps.target.outputs.goarch }}
+        APPIMAGE_EXTRACT_AND_RUN: '1'
+      run: task linux:create:appimage
+
+    - name: Add the plugins to the AppDir
+      id: appdir
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+      run: |
+        APPDIR="$(find build/linux/appimage/build -maxdepth 1 -name '*.AppDir' -print -quit)"
+        test -n "$APPDIR" || { echo "no AppDir under build/linux/appimage/build"; ls -la build/linux/appimage/build; exit 1; }
+        mkdir -p "$APPDIR/usr/lib/${APP_NAME}"
+        cp -R build/ofxhost-native/bundled/OfxHost.ofx.bundle "$APPDIR/usr/lib/${APP_NAME}/"
+        test -f "$APPDIR/usr/lib/${APP_NAME}/OfxHost.ofx.bundle/Contents/Linux-x86-64/OfxHost.ofx" \
+          || { echo "the plugin bundle did not survive the copy"; exit 1; }
+        echo "path=$APPDIR" >> "$GITHUB_OUTPUT"
+
+    # The generator already produced a working AppImage. It is packed again from the same
+    # AppDir only because the plugin bundle was added after it ran, and packing is the last
+    # step of an AppImage build.
+    - name: Pack the AppImage
+      id: checksum
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+        TARGET_ARCH: ${{ steps.target.outputs.arch }}
+        APPIMAGE_EXTRACT_AND_RUN: '1'
+      run: |
+        APPIMAGE="${APP_NAME}-linux-${TARGET_ARCH}.AppImage"
+        curl -fsSL -o /tmp/appimagetool \
+          "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${TARGET_ARCH}.AppImage"
+        chmod +x /tmp/appimagetool
+        ARCH="${TARGET_ARCH}" /tmp/appimagetool \
+          "${{ steps.appdir.outputs.path }}" \
+          "bin/${APPIMAGE}"
+        test -f "bin/${APPIMAGE}" || { echo "appimagetool produced no ${APPIMAGE}"; exit 1; }
+        ( cd bin && sha256sum "${APPIMAGE}" > "${APPIMAGE}.sha256" )
+        echo "path=bin/${APPIMAGE}" >> "$GITHUB_OUTPUT"
+
+    - name: Verify the AppImage carries its effects
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+        TARGET_ARCH: ${{ steps.target.outputs.arch }}
+        APPIMAGE_EXTRACT_AND_RUN: '1'
+      run: |
+        APPIMAGE="bin/${APP_NAME}-linux-${TARGET_ARCH}.AppImage"
+        test -f "$APPIMAGE" || { echo "no AppImage at $APPIMAGE"; ls -la bin; exit 1; }
+        test -x "$APPIMAGE" || chmod +x "$APPIMAGE"
+        # Extract rather than mount: a runner has no FUSE, and the contents are what is
+        # being checked.
+        rm -rf /tmp/appimage-check && mkdir -p /tmp/appimage-check
+        ( cd /tmp/appimage-check && "$OLDPWD/$APPIMAGE" --appimage-extract > /dev/null )
+        test -x "/tmp/appimage-check/squashfs-root/usr/bin/${APP_NAME}" \
+          || { echo "the AppImage has no executable"; exit 1; }
+        find "/tmp/appimage-check/squashfs-root/usr/lib/${APP_NAME}" -name '*.ofx.bundle' | grep -q . \
+          || { echo "the AppImage carries no plugins"; exit 1; }
+
+    - name: Upload the build
+      if: inputs.package == 'true'
+      uses: actions/upload-artifact@v7.0.2
+      with:
+        name: ${{ inputs.build-name }}-linux-${{ steps.target.outputs.arch }}
+        path: |
+          bin/${{ inputs.build-name }}-linux-${{ steps.target.outputs.arch }}.AppImage
+          bin/${{ inputs.build-name }}-linux-${{ steps.target.outputs.arch }}.AppImage.sha256
+        if-no-files-found: error

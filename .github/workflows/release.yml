@@ -1,17 +1,19 @@
 name: Release
 
-# Builds the macOS application for arm64 and for x86_64, and attaches both to a release.
+# Builds the application for macOS (both architectures) and for Linux, and attaches the
+# artefacts to a release.
 #
-# The work is in .github/actions/wails3-macos, one call per architecture. That action is the
-# Wails Build Action's shape - pinned Go and Node, a build, a signed .app, ditto, a checksum,
-# an artifact - with its two Wails v2 steps replaced by their v3 equivalents. The header of
-# that file records why the upstream action cannot build this project: it installs the v2 CLI
-# and calls `wails build --platform ... -o ...`, and the v3 CLI has neither flag.
+# The work is in .github/actions/wails3-macos and .github/actions/wails3-linux, one call per
+# runner. Those actions are the Wails Build Action's shape - pinned Go and Node, a build, a
+# signed .app or an AppImage, a checksum, an artifact - with its two Wails v2 steps replaced
+# by their v3 equivalents. The header of the macOS action records why the upstream action
+# cannot build this project: it installs the v2 CLI and calls `wails build --platform ...
+# -o ...`, and the v3 CLI has neither flag.
 #
-# Two jobs, not one universal build. Each architecture links its own Homebrew bottles, so
-# each needs a runner of its own architecture: macos-15 for arm64, macos-15-intel for x86_64.
-# A universal app assembled across two runners would need a lipo merge over every Mach-O file
-# in the bundle, which is more moving parts than a second job.
+# macOS is two jobs, not one universal build. Each architecture links its own Homebrew
+# bottles, so each needs a runner of its own architecture: macos-15 for arm64,
+# macos-15-intel for x86_64. A universal app assembled across two runners would need a lipo
+# merge over every Mach-O file in the bundle, which is more moving parts than a second job.
 
 on:
   push:
@@ -28,13 +30,22 @@ on:
         required: false
         type: boolean
         default: false
-  # A pull request that changes the pipeline itself, and nothing else. Two macOS builds take
-  # a while, so it is not something every pull request should pay for; a manual run with
-  # `publish` off does the same job with a button.
+      platforms:
+        description: 'Which platforms to build. A manual run can build one to test it.'
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - macos
+          - linux
+  # A pull request that changes the pipeline itself, and nothing else. Three builds take a
+  # while, so it is not something every pull request should pay for; a manual run does the
+  # same job with a button.
   pull_request:
     paths:
       - '.github/workflows/release.yml'
-      - '.github/actions/wails3-macos/**'
+      - '.github/actions/**'
 
 permissions:
   contents: write
@@ -51,6 +62,9 @@ env:
 jobs:
   macos:
     name: macOS (${{ matrix.arch }})
+    # A manual run names the platform it wants. A tag push and a pull request build all of
+    # them, because a release with one platform missing is not a release.
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'macos'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -88,10 +102,42 @@ jobs:
           wails-version: ${{ env.WAILS_VERSION }}
           task-version: ${{ env.TASK_VERSION }}
 
+  # One job. The AppImage is the only Linux artefact, and the runner is x86_64 to match it.
+  linux:
+    name: Linux (${{ matrix.arch }})
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'linux'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            goarch: amd64
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+
+      - name: Build, verify and package
+        uses: ./.github/actions/wails3-linux
+        with:
+          build-name: ${{ env.APP_NAME }}
+          build-platform: linux/${{ matrix.arch }}
+          go-version: ${{ env.GO_VERSION }}
+          node-version: ${{ env.NODE_VERSION }}
+          wails-version: ${{ env.WAILS_VERSION }}
+          task-version: ${{ env.TASK_VERSION }}
+
   release:
     name: Publish the release
-    needs: macos
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+    needs: [macos, linux]
+    # A release needs every platform, so a manual run that built one of them does not publish.
+    # Without the all-platforms test, this job would fail against the artifacts it did not build.
+    if: |
+      (startsWith(github.ref, 'refs/tags/v') || inputs.publish)
+      && (github.event_name != 'workflow_dispatch' || inputs.platforms == 'all')
     runs-on: ubuntu-latest
     steps:
       - name: Check out
@@ -117,6 +163,7 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.zip
+            dist/*.AppImage
             dist/*.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -37,9 +37,9 @@ Download the build for your system from [Releases](https://github.com/aaronmurni
 | --- | --- |
 | macOS, Apple Silicon | `ofxhost-macOS-arm64.zip` |
 | macOS, Intel | `ofxhost-macOS-x86_64.zip` |
+| Linux, x86_64 | `ofxhost-linux-x86_64.AppImage` |
 
-Only macOS is published. The program also builds on Linux and Windows; build it from source
-for those platforms.
+Windows is not published yet. The program builds there; build it from source.
 
 On macOS, unzip it and drag **OfxHost** onto **Applications**. The app is ad-hoc signed, so on
 first launch right-click it and choose **Open**, or clear the quarantine flag:
@@ -52,7 +52,15 @@ Each archive has a `.sha256` file beside it. Download both into one folder and c
 the archive:
 
 ```sh
-shasum -a 256 -c ofxhost-macOS-arm64.zip.sha256
+shasum -a 256 -c ofxhost-macOS-arm64.zip.sha256     # macOS
+sha256sum -c ofxhost-linux-x86_64.AppImage.sha256   # Linux
+```
+
+On Linux, make the AppImage executable and run it:
+
+```sh
+chmod +x ofxhost-linux-x86_64.AppImage
+./ofxhost-linux-x86_64.AppImage
 ```
 
 The host reads plugins from the same directory every other OpenFX host uses, so a
