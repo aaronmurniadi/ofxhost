@@ -300,6 +300,32 @@ or it is drawn and unclickable.
 Before blaming a plugin, check the host did not lie to it: wrong dimensions, a stale
 pointer, a missing action. Every crash so far was host-side.
 
+### A distribution's library is older than Homebrew's
+
+macOS builds against Homebrew, which tracks the newest release. Ubuntu 24.04 builds against
+0.21.2 of LibRaw and 0.7.0 of libjxl, and two things this code used were added later:
+
+- `LIBRAW_IMAGE_JPEGXL` exists from LibRaw 0.22. It is an enum constant, so a preprocessor
+  guard cannot see it; `LIBRAW_MINOR_VERSION` is what can be tested.
+- `JxlEncoderDistanceFromQuality` exists from libjxl 0.9. `jxl/version.h` carries
+  `JPEGXL_NUMERIC_VERSION` in every packaging that ships it, so probe the header with
+  `__has_include` before reading the macro.
+
+Both call sites keep the behaviour identical rather than degrading it: the JPEG XL preview
+branch is simply unreachable on an older LibRaw, and the distance formula is copied from
+libjxl so an export produces the same file whichever version compiled it.
+
+### `cc1obj` is an Objective-C file reaching a Linux build
+
+`gcc: fatal error: cannot execute 'cc1obj'` does not mean an Objective-C compiler is missing
+from the package list. It means cgo handed an Objective-C file to gcc, and cgo compiles every
+non-Go source in a package on every platform. `#ifdef __APPLE__` inside the file does not help:
+the file still has to be parsed.
+
+Name the file `*-_darwin.m` - the suffix is an implicit build constraint, and it works for
+non-Go files - and put the non-Apple stubs in a plain `.c` with `//go:build !darwin`. That is
+what `internal/adapter/gpu` does.
+
 ---
 
 ## 6. Testing

@@ -37,7 +37,36 @@
 #include <jxl/encode.h>
 #include <jxl/thread_parallel_runner.h>
 
+/* JxlEncoderDistanceFromQuality arrived in libjxl 0.9, and Ubuntu 24.04 ships 0.7. Every
+ * library that ships jxl/version.h defines JPEGXL_NUMERIC_VERSION in it, so the version is
+ * read from there. The header is probed first: a packaging that omits it leaves the macro
+ * undefined rather than failing the compile. */
+#if defined(__has_include)
+#if __has_include(<jxl/version.h>)
+#include <jxl/version.h>
+#endif
+#endif
+
 namespace {
+
+/* jxlDistanceFromQuality is the distance libjxl compresses to for a quality setting.
+ *
+ * The formula is libjxl's own, copied here rather than called, because the function that
+ * holds it is not in every version this builds against. It has to be the same formula: the
+ * number is what the file is judged by, and a locale's library must not change the output. */
+float jxlDistanceFromQuality(float quality) {
+#if defined(JPEGXL_NUMERIC_VERSION) && JPEGXL_NUMERIC_VERSION >= JPEGXL_COMPUTE_NUMERIC_VERSION(0, 9, 0)
+  return JxlEncoderDistanceFromQuality(quality);
+#else
+  if (quality >= 100.0f) {
+    return 0.0f;
+  }
+  if (quality >= 30.0f) {
+    return 0.1f + (100.0f - quality) * 0.09f;
+  }
+  return 53.0f / 3000.0f * quality * quality - 23.0f / 20.0f * quality + 25.0f;
+#endif
+}
 
 const char *const kNoPixels = "the frame has no pixels";
 const char *const kBadDepth = "the requested bit depth is not supported by this format";
@@ -441,7 +470,7 @@ bool writeJPEGXL(const char *path, const float *pixels, int width, int height, c
     }
     if (ok && !lossless) {
       ok = JxlEncoderSetFrameDistance(settings,
-                                      JxlEncoderDistanceFromQuality(static_cast<float>(quality))) == JXL_ENC_SUCCESS;
+                                      jxlDistanceFromQuality(static_cast<float>(quality))) == JXL_ENC_SUCCESS;
     }
     if (ok) {
       JxlPixelFormat format;

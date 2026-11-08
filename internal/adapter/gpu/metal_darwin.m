@@ -1,5 +1,13 @@
+//go:build darwin
+
 /*
  * The Metal device backend, in Objective-C.
+ *
+ * The `_darwin` suffix is what keeps this file out of a Linux or Windows build. cgo compiles
+ * every non-Go source in a package on every platform, and an Objective-C translation unit
+ * needs an Objective-C compiler even when every line of its body is guarded out: on a runner
+ * with only gcc the error is `cannot execute 'cc1obj'`, which names a missing backend rather
+ * than this file. The same symbols come from metal_stub.c on the other platforms.
  *
  * Objective-C rather than Objective-C++ on purpose: cgo recognises `.m` and compiles it, but
  * it does not recognise `.mm` at all, so an Objective-C++ file is silently left out of the
@@ -19,8 +27,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef __APPLE__
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -203,26 +209,3 @@ void *gpu_metal_command_queue(void) {
   pthread_mutex_unlock(&gMutex);
   return queue;
 }
-
-#else  /* not __APPLE__ */
-
-/* The same symbols with no device behind them, so the package compiles everywhere and the
- * host falls back to the CPU path on a platform this milestone does not cover. */
-
-int gpu_metal_available(void) { return 0; }
-
-void gpu_metal_device_name(char *buf, int bufLen) {
-  if (buf != NULL && bufLen > 0) {
-    buf[0] = '\0';
-  }
-}
-
-long long gpu_metal_alloc(long long bytes) { return -1; }
-int gpu_metal_free(long long handle) { return 0; }
-long long gpu_metal_bytes(long long handle) { return -1; }
-void *gpu_metal_pointer(long long handle) { return NULL; }
-int gpu_metal_write(long long handle, const void *src, long long bytes) { return -1; }
-int gpu_metal_read(long long handle, void *dst, long long bytes) { return -1; }
-void *gpu_metal_command_queue(void) { return NULL; }
-
-#endif  /* __APPLE__ */

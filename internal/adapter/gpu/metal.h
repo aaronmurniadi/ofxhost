@@ -5,9 +5,11 @@
  * Handles are opaque numbers: a Go caller passes one back and this file resolves it, which
  * makes a stale handle an error rather than a crash.
  *
- * The whole body is guarded by __APPLE__. cgo compiles every non-Go source in a package on
- * every platform, so without the guard a Linux build would fail on a header that only exists
- * on macOS. The other branch defines the same symbols and reports no device.
+ * The whole body is guarded by __APPLE__. The implementation is split by file name instead:
+ * metal_darwin.m holds the Metal code and is compiled on Apple platforms only, and
+ * metal_stub.c holds the same symbols in plain C for everywhere else. A single file cannot
+ * do it, because cgo hands every non-Go source to the platform's C compiler whatever the
+ * guards say, and gcc without its Objective-C backend cannot parse an Objective-C file at all.
  */
 #ifndef OFXHOST_GPU_METAL_H
 #define OFXHOST_GPU_METAL_H

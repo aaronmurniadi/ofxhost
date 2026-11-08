@@ -187,6 +187,25 @@ bool applySpace(libraw_data_t *lr, int space) {
   }
 }
 
+/* isJpegThumbnail answers whether a preview is a JPEG of some kind, and so can be handed on
+ * as-is instead of being re-encoded.
+ *
+ * JPEG XL previews are a LibRaw 0.22 addition. The enum constant is not a macro, so the
+ * version numbers are what the compiler can see: Homebrew's LibRaw is 0.22 and has the type,
+ * Ubuntu 24.04 ships 0.21.2 and does not. On the older library no file can produce the type,
+ * so the comparison is left out rather than the whole function. */
+bool isJpegThumbnail(const libraw_processed_image_t *thumb) {
+  if (thumb->type == LIBRAW_IMAGE_JPEG) {
+    return true;
+  }
+#if LIBRAW_MAJOR_VERSION > 0 || LIBRAW_MINOR_VERSION >= 22
+  if (thumb->type == LIBRAW_IMAGE_JPEGXL) {
+    return true;
+  }
+#endif
+  return false;
+}
+
 /* loadThumbnail copies the file's own preview, once.
  *
  * A file may carry several; the first public one is used, which is the camera's
@@ -241,7 +260,7 @@ void loadThumbnail(ofxr_image *img) {
   if (thumb == nullptr) {
     return;
   }
-  if (thumb->type == LIBRAW_IMAGE_JPEG || thumb->type == LIBRAW_IMAGE_JPEGXL) {
+  if (isJpegThumbnail(thumb)) {
     img->thumbnail.assign(thumb->data, thumb->data + thumb->data_size);
     img->thumb_ok = !img->thumbnail.empty();
   }

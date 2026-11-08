@@ -1415,6 +1415,14 @@ archive first, which no Wails project needs and this one cannot link without. Th
 also runs every AppImage tool with `APPIMAGE_EXTRACT_AND_RUN=1`: linuxdeploy and appimagetool
 ship as AppImages and need FUSE, which a GitHub runner does not have.
 
+**The first Linux build failed in three places, all of them real.** `go test` there compiles
+against Ubuntu's libraries, not Homebrew's, and it met two APIs that only exist in the newer
+ones: `LIBRAW_IMAGE_JPEGXL` (LibRaw 0.22) and `JxlEncoderDistanceFromQuality` (libjxl 0.9).
+Both call sites now guard on the version and keep the output identical. The third was
+`gcc: cannot execute 'cc1obj'`: cgo compiles every non-Go file in a package on every platform,
+so the Metal backend's Objective-C file reached a Linux compiler. It is now `metal_darwin.m`
+and the stubs are in `metal_stub.c`.
+
 The Windows note below is kept because the code still builds by hand that way.
 They describe packaging, not a pipeline that runs.
 
