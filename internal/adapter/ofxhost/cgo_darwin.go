@@ -6,8 +6,12 @@ package ofxhost
 // The OpenFX headers live in the submodule, and expat comes from the system SDK on
 // this platform. Both are spelled out rather than found through pkg-config, because
 // this package is built by cgo rather than by CMake.
+//
+// Expat is named after the archive: the host library is what calls into it, so the
+// archive has to be seen first. ld64 tolerates the other order and GNU ld does not,
+// and one link line is easier to keep honest than two.
 #cgo CPPFLAGS: -I${SRCDIR}/../../../third_party/openfx/include -I${SRCDIR}/../../../third_party/openfx/HostSupport/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../build/ofxhost-native/lib -lofxhost
+#cgo LDFLAGS: -L${SRCDIR}/../../../build/ofxhost-native/lib -lofxhost -lexpat
 //
 // The host library is built by CMake from native/CMakeLists.txt, because cgo cannot
 // compile translation units outside the package directory and HostSupport is a

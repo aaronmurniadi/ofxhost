@@ -300,6 +300,19 @@ or it is drawn and unclickable.
 Before blaming a plugin, check the host did not lie to it: wrong dimensions, a stale
 pointer, a missing action. Every crash so far was host-side.
 
+### GNU ld reads the link line left to right; ld64 does not
+
+`libofxhost.a` calls into expat, so `-lexpat` has to come after `-lofxhost`. Three of the
+cgo files carried `-lexpat` in the untagged `bridge.go` instead, which put it ahead of the
+archive. macOS linked it: ld64 rescans archives and does not care about the order. Ubuntu
+failed with `undefined reference to symbol 'XML_SetElementHandler'` and `DSO missing from
+command line`, because GNU ld with `--as-needed` drops a library it has already passed and
+no object had asked for yet.
+
+The flag now lives in `cgo_darwin.go`, `cgo_linux.go` and `cgo_windows.go`, after the
+archive, so the order is the same everywhere and the platform that tolerates the wrong
+order is not the one that proves it.
+
 ### A distribution's library is older than Homebrew's
 
 macOS builds against Homebrew, which tracks the newest release. Ubuntu 24.04 builds against

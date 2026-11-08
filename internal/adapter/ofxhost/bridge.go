@@ -19,7 +19,6 @@ package ofxhost
 
 /*
 #cgo CXXFLAGS: -std=c++17
-#cgo LDFLAGS: -lexpat
 
 #include <stdlib.h>
 #include "ofxhost.h"
