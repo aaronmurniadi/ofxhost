@@ -224,26 +224,53 @@ runs:
       shell: bash
       run: go run ./tools/layerguard
 
+    # The frontend is built here, in Git Bash, because that is where npm works: on Windows npm
+    # is a shell script beside node, and the MSYS2 shell that compiles the adapters is not the
+    # environment for it. `task` is the project's own path and carries the right flags for a
+    # production or development bundle.
+    - name: Build the frontend
+      shell: bash
+      run: task common:build:frontend
+
     # CGO_ENABLED=1 is not the Taskfile's default for Windows: its `build` task defaults it to
-    # 0 and would produce a stub without the RAW decoder or the OpenFX host. The production
-    # flags already carry `-H windowsgui`, which keeps the console window away.
+    # 0 and would produce a stub without the RAW decoder or the OpenFX host.
     #
-    # In MSYS2's shell for the same reason the CMake build is: cgo compiles the adapters with
-    # this compiler, and it needs the environment that compiler is built for.
+    # The compile runs in MSYS2's shell, because cgo calls mingw's gcc and that compiler needs
+    # the environment it was built for. Git Bash can see gcc but the C++ standard headers do
+    # not resolve there: `cstdlib:83 #include_next <stdlib.h>` reports the file missing.
+    #
+    # `go` is named explicitly. MSYS2's login shell keeps only the base Windows paths, so the
+    # runner's Go toolchain and GOPATH are not on its PATH, and `go: command not found` was
+    # the first thing this step did. Nothing else is needed inside: npm, wails3 and task stay
+    # in Git Bash, so this is a plain `go build` with the flags the Taskfile's windows build
+    # uses. They are copied rather than invoked because `task windows:build` would pull npm
+    # and wails3 into this shell.
     - name: Build the executable
       shell: bash
       env:
         MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         GOARCH: ${{ steps.target.outputs.goarch }}
+        APP_NAME: ${{ inputs.build-name }}
       run: |
-        cat > .ci-build.sh <<'SCRIPT'
+        # Paths converted here, where the Windows directories are on PATH, and pasted into the
+        # script that runs in the other shell.
+        GO_DIR="$(cygpath -u "$(dirname "$(command -v go)")")"
+        cat > .ci-build.sh <<SCRIPT
         set -euo pipefail
+        export PATH="${GO_DIR}:/mingw64/bin:/usr/bin:\$PATH"
+        export GOOS=windows
+        export GOARCH=${GOARCH}
+        export CGO_ENABLED=1
         go version
-        task windows:build CGO_ENABLED=1
+        gcc --version | head -1
+        mkdir -p bin
+        go build -tags production -trimpath -buildvcs=false \
+          -ldflags="-w -s -H windowsgui" \
+          -o "bin/${APP_NAME}.exe" ./cmd/ofxhost
         SCRIPT
         MSYS_BASH="$(cygpath -u "$MSYS2_LOCATION")/usr/bin/bash.exe"
-        MSYSTEM=MINGW64 MSYS2_PATH_TYPE=inherit \
-          "$MSYS_BASH" -lc "cd '$(pwd -W)' && bash .ci-build.sh"
+        test -x "$MSYS_BASH" || { echo "no MSYS2 bash at $MSYS_BASH"; exit 1; }
+        MSYSTEM=MINGW64 "$MSYS_BASH" -lc "cd '$(pwd -W)' && bash .ci-build.sh"
 
     - name: Verify the executable
       shell: bash
