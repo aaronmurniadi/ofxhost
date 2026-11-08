@@ -8,8 +8,6 @@ package ofxhost
 const (
 	// statusOK is kOfxStatOK: the action succeeded.
 	statusOK = 0
-	// statusFailed is kOfxStatFailed: the action ran and did not succeed.
-	statusFailed = 1
 	// statusReplyDefault is kOfxStatReplyDefault: the plugin declined the action,
 	// which the spec defines as "use the default behaviour".
 	statusReplyDefault = 14

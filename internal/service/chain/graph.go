@@ -277,6 +277,24 @@ func (g *Graph) ResetParam(index int, name string) error {
 // ResetParams restores every parameter of the node at index to its default and
 // records the new values in the model.
 func (g *Graph) ResetParams(index int) (int, error) {
+	return g.ResetParamsWithInputSpace(index, "")
+}
+
+// ResetParamsWithInputSpace resets every parameter and then re-applies the two things the
+// host initialises rather than the user: the plugin's own input colour space and its sensor
+// noise model.
+//
+// A reset returns every parameter to the value the vendor chose, and for a plugin that owns
+// an input colour space control that value is the vendor's preferred space - not the space
+// of the open image. Left alone, "Reset all" would take a Linear Rec.2020 image back to
+// ARRI LogC4, and every downstream value would be computed through the wrong transfer
+// function. The same is true of a denoiser's noise model, which would fall back to a generic
+// sensor.
+//
+// Both are the host's initialisation (D11), not a user value, so they are re-applied exactly
+// as they are when the node is added. A reset therefore returns the node to the state the
+// host creates, which is the only state the panel can honestly call "defaults".
+func (g *Graph) ResetParamsWithInputSpace(index int, space string) (int, error) {
 	g.mu.Lock()
 	node := g.chain.Node(index)
 	if node == nil {
@@ -284,6 +302,8 @@ func (g *Graph) ResetParams(index int) (int, error) {
 		return 0, fmt.Errorf("chain: node %d is out of range", index)
 	}
 	instance := g.instances[node.ID]
+	camera := g.camera
+	profiler := g.noise
 	g.mu.Unlock()
 	if instance == nil {
 		return 0, fmt.Errorf("chain: node %d has no instance", index)
@@ -293,6 +313,8 @@ func (g *Graph) ResetParams(index int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	initialiseInputSpace(instance, space)
+	seedNoise(instance, camera, profiler)
 	g.refreshParams(index, instance)
 	return changed, nil
 }

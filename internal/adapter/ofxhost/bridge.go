@@ -164,9 +164,7 @@ func (h *Host) Discover(extraDirs []string) error {
 	}
 
 	dirs := make([]string, 0, len(extraDirs)+len(PluginDirs())+4)
-	for _, dir := range envPluginDirs() {
-		dirs = append(dirs, dir)
-	}
+	dirs = append(dirs, envPluginDirs()...)
 	dirs = append(dirs, extraDirs...)
 	dirs = append(dirs, PluginDirs()...)
 
@@ -354,9 +352,14 @@ func loadParams(handle *C.ofxh_instance) []port.ParamInfo {
 
 		if kind.IsNumeric() && len(param.Defaults) > 0 {
 			values := make([]C.double, len(param.Defaults))
-			if C.ofxh_param_get_double(handle, cString(name), &values[0], C.int(len(values))) == statusOK {
-				// The first read is the current value, which for a fresh instance
-				// is the default the plugin declared.
+			// The declared default, not the current value.
+			//
+			// It used to read the current value, on the reasoning that a fresh instance starts
+			// at its defaults. That is not true: this list is rebuilt after every edit, so
+			// "default" meant "whatever the user just typed", and the noise seeding that
+			// compares a value against its default to decide whether the user touched it
+			// concluded every control was untouched.
+			if C.ofxh_param_default_double(handle, cString(name), &values[0], C.int(len(values))) == statusOK {
 				for j := range values {
 					param.Defaults[j] = float64(values[j])
 				}

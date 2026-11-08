@@ -1195,6 +1195,48 @@ int readNumeric(OFX::Host::Param::Instance *param, double *out, int capacity) {
   return kOfxStatErrValue;
 }
 
+/* defaultComponent reads one component of a parameter's declared default.
+ *
+ * kOfxParamPropDefault is a double array on the floating types and a single int on the
+ * integer, choice and boolean ones. Reading an int property as a double fails quietly: the
+ * host support answers zero instead of raising, so a boolean declared true "defaulted" to
+ * false and an integer with a default of 3 "defaulted" to 0. Every integer, choice and
+ * boolean parameter in the panel had the wrong default, its reset arrow wrote the wrong
+ * value, and a plugin whose preset is a choice was reset to preset zero rather than to the
+ * preset its author chose.
+ */
+double defaultComponent(OFX::Host::Param::Instance *param, int index) {
+  if (param == nullptr) {
+    return 0.0;
+  }
+  const auto &props = param->getProperties();
+  const std::string &type = param->getType();
+  try {
+    if (type == kOfxParamTypeInteger || type == kOfxParamTypeChoice || type == kOfxParamTypeBoolean) {
+      return static_cast<double>(props.getIntProperty(kOfxParamPropDefault, index));
+    }
+    return props.getDoubleProperty(kOfxParamPropDefault, index);
+  } catch (...) {
+    return 0.0;
+  }
+}
+
+/* defaultDimension reports how many components a default has. An int property has one. */
+int defaultDimension(OFX::Host::Param::Instance *param) {
+  if (param == nullptr) {
+    return 0;
+  }
+  const std::string &type = param->getType();
+  if (type == kOfxParamTypeInteger || type == kOfxParamTypeChoice || type == kOfxParamTypeBoolean) {
+    return 1;
+  }
+  try {
+    return param->getProperties().getDimension(kOfxParamPropDefault);
+  } catch (...) {
+    return 0;
+  }
+}
+
 /* writeNumeric is readNumeric's counterpart. Returns 0 or a negative status. */
 int writeNumeric(OFX::Host::Param::Instance *param, const double *in, int count) {
   if (param == nullptr || in == nullptr || count <= 0) {
@@ -1980,23 +2022,67 @@ extern "C" int ofxh_param_range(ofxh_instance *handle, const char *name, double 
   }
 }
 
+/* isChoiceParam reports whether a parameter drives others rather than being driven.
+ *
+ * The distinction decides the order the change notifications go out in. A choice is a
+ * driver: a preset, a film stock, a category. A double is almost always a value the plugin
+ * computed from a driver. Notifying the drivers last means the plugin's last word is the one
+ * that describes the state the user asked for.
+ */
+bool isChoiceParam(OFX::Host::Param::Instance *param) {
+  return param != nullptr && param->getType() == kOfxParamTypeChoice;
+}
+
+/* readString reads one string parameter, and reports whether it could. */
+bool readString(OFX::Host::Param::Instance *param, std::string &out) {
+  auto *textParam = dynamic_cast<OFX::Host::Param::StringInstance *>(param);
+  if (textParam == nullptr) {
+    return false;
+  }
+  std::string text;
+  if (textParam->get(kStillTime, text) != kOfxStatOK) {
+    return false;
+  }
+  out = text;
+  return true;
+}
+
 extern "C" int ofxh_instance_reset_params(ofxh_instance *handle) {
   if (handle == nullptr || handle->entry == nullptr) {
     return kOfxStatErrBadHandle;
   }
   try {
-    // A parameter's default lives on its descriptor, and the library has no
-    // "return to default" call on the instance, so each parameter is written back
-    // to the default its descriptor declares. A shape the host cannot write is
-    // skipped rather than counted.
+    // A parameter's default lives on its descriptor, and the library has no "return to
+    // default" call on the instance, so each parameter is written back to the default its
+    // descriptor declares. A shape the host cannot write is skipped rather than counted.
+    //
+    // Two things make the reset take effect rather than merely set numbers.
+    //
+    // A parameter already at its default is left alone. Writing it again would be work the
+    // plugin did not ask for, and - for a plugin that treats every write as a user edit -
+    // it would be an edit the user did not make.
+    //
+    // Each parameter that did change is reported through kOfxActionInstanceChanged once all
+    // the writes are done. Without that, a plugin that derives its state from a preset keeps
+    // the preset it had: the panel shows the defaults, and the picture is still the old
+    // stock, because nothing told the plugin to recompute. This is the same action the
+    // single-parameter write sends, and it is the reason notifyParamChanged exists.
     const auto &params = handle->entry->instance->getParamList();
-    int changed = 0;
+    std::vector<std::string> changed;
+    int count = 0;
     for (auto *param : params) {
       if (param == nullptr) {
         continue;
       }
       const auto &props = param->getProperties();
       const std::string &type = param->getType();
+
+      // A group, a page and a button hold no value, so there is no default to restore and
+      // nothing for the plugin to recompute. A push button in particular accepts a write on
+      // some plugins, which would have counted a press that never happened.
+      if (type == kOfxParamTypeGroup || type == kOfxParamTypePage || type == kOfxParamTypePushButton) {
+        continue;
+      }
 
       if (type == kOfxParamTypeString) {
         auto *textParam = dynamic_cast<OFX::Host::Param::StringInstance *>(param);
@@ -2009,8 +2095,13 @@ extern "C" int ofxh_instance_reset_params(ofxh_instance *handle) {
         } catch (...) {
           fallback.clear();
         }
+        std::string current;
+        if (!readString(param, current) || current == fallback) {
+          continue;
+        }
         if (textParam->set(fallback.c_str()) == kOfxStatOK) {
-          ++changed;
+          changed.push_back(param->getName());
+          ++count;
         }
         continue;
       }
@@ -2025,17 +2116,44 @@ extern "C" int ofxh_instance_reset_params(ofxh_instance *handle) {
         dimension = 2;
       }
       for (int i = 0; i < dimension; ++i) {
-        try {
-          defaults[i] = props.getDoubleProperty(kOfxParamPropDefault, i);
-        } catch (...) {
-          defaults[i] = 0.0;
+        defaults[i] = defaultComponent(param, i);
+      }
+
+      double current[4] = {0, 0, 0, 0};
+      if (readNumeric(param, current, dimension) == dimension) {
+        bool same = true;
+        for (int i = 0; i < dimension; ++i) {
+          if (current[i] != defaults[i]) {
+            same = false;
+            break;
+          }
+        }
+        if (same) {
+          continue;
         }
       }
+
       if (writeNumeric(param, defaults, dimension) == kOfxStatOK) {
-        ++changed;
+        changed.push_back(param->getName());
+        ++count;
       }
     }
-    return changed;
+
+    // Values first, drivers last: see isChoiceParam.
+    for (const auto &name : changed) {
+      OFX::Host::Param::Instance *param = handle->entry->instance->getParam(name);
+      if (!isChoiceParam(param)) {
+        notifyParamChanged(handle, name.c_str());
+      }
+    }
+    for (const auto &name : changed) {
+      OFX::Host::Param::Instance *param = handle->entry->instance->getParam(name);
+      if (isChoiceParam(param)) {
+        notifyParamChanged(handle, name.c_str());
+      }
+    }
+
+    return count;
   } catch (...) {
     return kOfxStatFailed;
   }
@@ -2059,13 +2177,12 @@ extern "C" int ofxh_param_default_double(ofxh_instance *handle, const char *name
     if (param == nullptr) {
       return kOfxStatErrBadIndex;
     }
-    const OFX::Host::Property::Set &props = param->getProperties();
-    const int dimension = props.getDimension(kOfxParamPropDefault);
+    const int dimension = defaultDimension(param);
     for (int i = 0; i < count; ++i) {
       // A parameter with fewer components than asked for repeats its last one, which is
       // what a one-component default means for a two-component parameter.
       const int index = i < dimension ? i : (dimension > 0 ? dimension - 1 : 0);
-      values[i] = dimension > 0 ? props.getDoubleProperty(kOfxParamPropDefault, index) : 0.0;
+      values[i] = dimension > 0 ? defaultComponent(param, index) : 0.0;
     }
     return kOfxStatOK;
   } catch (...) {

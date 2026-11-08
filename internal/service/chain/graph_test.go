@@ -18,8 +18,6 @@ type fakeHost struct {
 	closed    int
 	failAt    int // the plugin index whose Create fails
 	renderErr error
-	// transform is applied by every instance to the red channel.
-	transform func(float32) float32
 }
 
 func newFakeHost(labels ...string) *fakeHost {

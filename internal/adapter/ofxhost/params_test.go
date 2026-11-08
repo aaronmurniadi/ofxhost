@@ -171,6 +171,147 @@ func TestChangingOneParameterRepopulatesAnother(t *testing.T) {
 	}
 }
 
+// TestResetTellsThePluginWhatChanged is the regression test for "Reset all does nothing".
+//
+// A reset that only writes the default values leaves a plugin that derives its state from a
+// preset holding the preset it had: the panel shows the defaults and the picture is still the
+// old stock. spektrafilm does exactly that, and it is why the reset sends
+// kOfxActionInstanceChanged for every parameter it changed.
+//
+// The fixture makes it observable without a vendor: its category parameter rebuilds its
+// preset list, and it can only do that when it is told the category changed.
+func TestResetTellsThePluginWhatChanged(t *testing.T) {
+	host, index := fixtureHost(t)
+	instance, err := host.Create(index)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer func() { _ = instance.Close() }()
+
+	firstLabel := func(name string) string {
+		for _, p := range instance.Params() {
+			if p.Name == name {
+				if len(p.ChoiceLabels) == 0 {
+					t.Fatalf("%s has no options", name)
+				}
+				return p.ChoiceLabels[0]
+			}
+		}
+		t.Fatalf("no parameter %q", name)
+		return ""
+	}
+
+	// Move the category away from its default, which repopulates the preset list.
+	if setErr := instance.SetValues("category", port.ParamValue{Nums: []float64{1}}); setErr != nil {
+		t.Fatalf("set the category: %v", setErr)
+	}
+	if got := firstLabel("preset"); got != "Warm" {
+		t.Fatalf("the preset list starts on %q, want Warm", got)
+	}
+
+	changed, err := instance.ResetToDefaults()
+	if err != nil {
+		t.Fatalf("ResetToDefaults: %v", err)
+	}
+	if changed == 0 {
+		t.Fatal("the reset reported no change, but the category had moved")
+	}
+
+	// The category is back at 0 in the panel. The list underneath it is what says the
+	// plugin was told, because only the plugin can rebuild it.
+	if got := firstLabel("preset"); got != "Clean Slate" {
+		t.Fatalf("after the reset the preset list starts on %q, want Clean Slate: the plugin was not told the category changed", got)
+	}
+}
+
+// TestResetRestoresTheDeclaredDefaultOfEveryKind is the regression test for reading defaults
+// as doubles.
+//
+// kOfxParamPropDefault is an int property on an integer, a choice and a boolean. Reading it
+// with the double accessor answers zero instead of raising, so every one of those kinds had a
+// "default" of zero: the panel drew the wrong number, the per-row reset arrow wrote it, and a
+// plugin whose preset is a choice was reset to preset zero rather than to the preset its
+// author chose. This is the other half of why "Reset all" looked like it did nothing.
+func TestResetRestoresTheDeclaredDefaultOfEveryKind(t *testing.T) {
+	host, index := fixtureHost(t)
+	instance, err := host.Create(index)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer func() { _ = instance.Close() }()
+
+	defaultsOf := func(name string) []float64 {
+		for _, p := range instance.Params() {
+			if p.Name == name {
+				return p.Defaults
+			}
+		}
+		t.Fatalf("no parameter %q", name)
+		return nil
+	}
+
+	// The fixture declares count = 3 and toggle = true.
+	if got := defaultsOf("count"); len(got) == 0 || got[0] != 3 {
+		t.Fatalf("count reports the default %v, want 3", got)
+	}
+	if got := defaultsOf("toggle"); len(got) == 0 || got[0] != 1 {
+		t.Fatalf("toggle reports the default %v, want 1", got)
+	}
+
+	if setErr := instance.SetValues("count", port.ParamValue{Nums: []float64{42}}); setErr != nil {
+		t.Fatalf("set the count: %v", setErr)
+	}
+	if setErr := instance.SetValues("toggle", port.ParamValue{Nums: []float64{0}}); setErr != nil {
+		t.Fatalf("set the toggle: %v", setErr)
+	}
+
+	if _, err := instance.ResetToDefaults(); err != nil {
+		t.Fatalf("ResetToDefaults: %v", err)
+	}
+
+	after, err := instance.Values("count")
+	if err != nil {
+		t.Fatalf("Values: %v", err)
+	}
+	if after.Nums[0] != 3 {
+		t.Fatalf("count reset to %v, want 3", after.Nums[0])
+	}
+	toggled, err := instance.Values("toggle")
+	if err != nil {
+		t.Fatalf("Values: %v", err)
+	}
+	if toggled.Nums[0] != 1 {
+		t.Fatalf("toggle reset to %v, want 1", toggled.Nums[0])
+	}
+}
+
+// TestResetIsIdempotent protects the skip.
+//
+// Writing a value the plugin already holds is not a change, and reporting it as one would
+// make every reset look like it edited hundreds of parameters. The property is stated as a
+// second reset rather than as a first one on a fresh instance: the host support initialises
+// an integer parameter's value to zero rather than to its declared default, so the first
+// reset of one genuinely does change something.
+func TestResetIsIdempotent(t *testing.T) {
+	host, index := fixtureHost(t)
+	instance, err := host.Create(index)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer func() { _ = instance.Close() }()
+
+	if _, err := instance.ResetToDefaults(); err != nil {
+		t.Fatalf("the first ResetToDefaults: %v", err)
+	}
+	changed, err := instance.ResetToDefaults()
+	if err != nil {
+		t.Fatalf("the second ResetToDefaults: %v", err)
+	}
+	if changed != 0 {
+		t.Fatalf("a second reset reported %d changed parameters, want 0", changed)
+	}
+}
+
 // TestEveryHostSpaceHasAPluginOption protects the mapping the chain relies on.
 //
 // The host cannot negotiate a colour space: the vendored HostSupport predates OFX 1.5

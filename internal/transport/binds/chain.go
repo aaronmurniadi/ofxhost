@@ -296,11 +296,19 @@ func (c *Chain) ResetParam(nodeIndex int, name string) string {
 }
 
 // ResetParams restores every parameter of a node to its default.
+//
+// The node's input colour space and its noise model are then re-applied, because those two
+// are the host's initialisation and not the vendor's default: a reset that left them at the
+// vendor's value would describe an image the user does not have open.
 func (c *Chain) ResetParams(index int) (int, string) {
 	if c.graph == nil {
 		return 0, "no plugin host is available"
 	}
-	changed, err := c.graph.ResetParams(index)
+	space := ""
+	if c.inputSpace != nil {
+		space = c.inputSpace()
+	}
+	changed, err := c.graph.ResetParamsWithInputSpace(index, space)
 	if err != nil {
 		return 0, err.Error()
 	}
