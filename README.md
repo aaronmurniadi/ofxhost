@@ -1,4 +1,13 @@
+<p align="center">
+  <img src="build/appicon.png" width="320" alt="OfxHost logo">
+</p>
+
 # OfxHost
+
+[![Latest release](https://img.shields.io/github/v/release/aaronmurniadi/ofxhost)](https://github.com/aaronmurniadi/ofxhost/releases/latest)
+[![Discord](https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/B69ZgZRzk)
+
+<a href="https://www.buymeacoffee.com/aaronmurniadi"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=aaronmurniadi&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy me a coffee"></a>
 
 An OpenFX host for still images. Open a RAW file in the colour space you want to
 work in, build a chain of OFX plugins, and export in a wide-gamut colour space.
