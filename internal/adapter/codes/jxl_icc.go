@@ -2,8 +2,26 @@ package codes
 
 /*
 #include <jxl/decode.h>
+#include <jxl/version.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+// libjxl 0.10 removed the explicit colour-profile argument from these two calls: the decoder
+// already knows the profile of the image it is decoding. Distros this project builds on differ
+// here - Ubuntu 24.04 ships 0.7, Homebrew 0.12 - so both forms are compiled in, chosen by the
+// version header rather than by a build tag the packager would have to remember.
+#if defined(JPEGXL_MAJOR_VERSION) && (JPEGXL_MAJOR_VERSION > 0 || (JPEGXL_MAJOR_VERSION == 0 && JPEGXL_MINOR_VERSION >= 10))
+#define OFXHOST_JXL_PROFILE_TAKES_NO_ARGUMENT 1
+#endif
+
+#ifdef OFXHOST_JXL_PROFILE_TAKES_NO_ARGUMENT
+#define OFXHOST_JXL_PROFILE_SIZE(dec, target, size) JxlDecoderGetICCProfileSize(dec, target, size)
+#define OFXHOST_JXL_PROFILE_COPY(dec, target, dst, size) JxlDecoderGetColorAsICCProfile(dec, target, dst, size)
+#else
+// Before 0.10 the profile being asked about is passed in, and NULL means the one on the image.
+#define OFXHOST_JXL_PROFILE_SIZE(dec, target, size) JxlDecoderGetICCProfileSize(dec, NULL, target, size)
+#define OFXHOST_JXL_PROFILE_COPY(dec, target, dst, size) JxlDecoderGetColorAsICCProfile(dec, NULL, target, dst, size)
+#endif
 
 // read_jxl_icc reads the colour profile a JPEG XL file carries.
 //
@@ -46,11 +64,11 @@ static long read_jxl_icc(const char *path, unsigned char *dst, size_t cap) {
     switch (st) {
       case JXL_DEC_COLOR_ENCODING: {
         size_t need = 0;
-        if (JxlDecoderGetICCProfileSize(dec, JXL_COLOR_PROFILE_TARGET_DATA, &need) == JXL_DEC_SUCCESS && need > 0) {
+        if (OFXHOST_JXL_PROFILE_SIZE(dec, JXL_COLOR_PROFILE_TARGET_DATA, &need) == JXL_DEC_SUCCESS && need > 0) {
           if (dst == NULL) {
             profileLen = (long)need;
           } else if (need <= cap &&
-                     JxlDecoderGetColorAsICCProfile(dec, JXL_COLOR_PROFILE_TARGET_DATA, dst, need) ==
+                     OFXHOST_JXL_PROFILE_COPY(dec, JXL_COLOR_PROFILE_TARGET_DATA, dst, need) ==
                          JXL_DEC_SUCCESS) {
             profileLen = (long)need;
           }

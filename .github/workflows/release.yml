@@ -440,20 +440,34 @@ jobs:
           test -f build/ofxhost-native/bundled/OfxHost.ofx.bundle/Contents/Win64/OfxHost.ofx \
             || { echo "the bundled plugins are not in Contents/Win64"; exit 1; }
 
+      # npm is a shell script in Git Bash and a .cmd everywhere else. MSYS2's bash runs
+      # neither, so the frontend steps take Git Bash and only the cgo build stays in MSYS2,
+      # where gcc is on PATH.
       - name: Install frontend dependencies
+        shell: bash
         run: cd frontend && npm ci
 
       - name: Generate the Wails bindings
+        shell: bash
         run: wails3 generate bindings
+
+      - name: Build the frontend
+        shell: bash
+        run: cd frontend && npm run build
 
       - name: Build
         run: |
           # -H windowsgui keeps the console window away. The production tag turns off the
-          # inspector, which is what Debug reads.
-          cd frontend && npm run build && cd ..
+          # inspector, which is what Debug reads. gcc and CXX are mingw's, which is the only
+          # toolchain cgo can drive on Windows.
           go build -tags production -trimpath \
             -ldflags="-s -w -H windowsgui" \
             -o "bin/${APP_NAME}.exe" ./cmd/ofxhost
+
+      # No `go test ./...` here. The adapter tests load the fixture plugin through the
+      # OpenFX host, which is compiled but not yet proven on this platform, and a red Windows
+      # job would hide the build failure it exists to report. The recorded reason is in
+      # PLAN.md; the tests run on macOS and Linux.
 
       - name: Assemble the zip
         run: |
