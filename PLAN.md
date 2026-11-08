@@ -1385,7 +1385,7 @@ macOS app for both architectures and one AppImage for Linux:
 |---|---|
 | `ofxhost-macOS-arm64.zip` | `macos-15`, `task darwin:package ARCH=arm64` |
 | `ofxhost-macOS-x86_64.zip` | `macos-15-intel`, `task darwin:package ARCH=amd64` |
-| `ofxhost-linux-x86_64.AppImage` | `ubuntu-24.04`, `task linux:create:appimage`, then packed again |
+| `ofxhost-linux-x86_64.tar.gz` | `ubuntu-24.04`, `task linux:build`, then the binary and its bundle are tarred |
 
 A manual run takes a `platforms` input, so one platform can be tested without paying for the
 others. A release still needs all of them: the publish job refuses a run that built one.
@@ -1411,9 +1411,7 @@ checksum, an artifact. Its build step cannot be used here, and neither can its v
   the same `wails build --platform`. Its README lists a `wails3` stack as "coming soon".
 
 The local actions therefore replace the two v2 steps and keep the rest. Both build the CMake
-archive first, which no Wails project needs and this one cannot link without. The Linux action
-also runs every AppImage tool with `APPIMAGE_EXTRACT_AND_RUN=1`: linuxdeploy and appimagetool
-ship as AppImages and need FUSE, which a GitHub runner does not have.
+archive first, which no Wails project needs and this one cannot link without.
 
 **The first Linux build failed in three places, all of them real.** `go test` there compiles
 against Ubuntu's libraries, not Homebrew's, and it met two APIs that only exist in the newer
@@ -1426,14 +1424,27 @@ and the stubs are in `metal_stub.c`.
 The Windows note below is kept because the code still builds by hand that way.
 They describe packaging, not a pipeline that runs.
 
-**The AppImage is packed twice.** `wails3 generate appimage` runs linuxdeploy with its GTK
-plugin, which is what makes the WebKit helper processes work inside an AppImage, and it has no
-way to carry extra files. The plugin bundle is copied into the AppDir afterwards, at
-`usr/lib/ofxhost`, and the AppImage is packed again with `appimagetool`. The host looks for its
-effects there — a distribution owns `usr/lib`, so the bundle sits under a name no other package
-uses rather than loose among the libraries. The same steps by hand then extract the finished
-AppImage and check both the executable and the bundle are inside it, because a release that
-opens with an empty effect picker is the failure this exists to prevent.
+**Linux ships a tarball, not an AppImage.** An AppImage was built, and it needed two downloads
+at run time that this repository does not control: `wails3 generate appimage` fetches
+linuxdeploy from GitHub's release downloads, and both attempts returned `504 Gateway Timeout`.
+The same file came back from the API endpoint three times out of three, so the web download
+path was what was broken, not the runner. Placing linuxdeploy in the generator's build
+directory worked around it, and the AppImage still needed a second packing pass with
+`appimagetool` to carry the plugin bundle at `usr/lib/ofxhost`.
+
+The tarball removes all of it: no linuxdeploy, no appimagetool, no FUSE, no extra network. The
+layout is the one `BundledPluginDirs` already searches on every platform — the executable with
+`Resources/` beside it — so no code changed to support it:
+
+```
+ofxhost-linux-x86_64/
+  ofxhost
+  Resources/OfxHost.ofx.bundle/Contents/Linux-x86-64/OfxHost.ofx
+```
+
+The binary is linked against the runner's GTK4 and WebKitGTK 6.0, so the CI job checks `ldd`
+for unresolved libraries: a binary that starts for the person who built it and fails for
+nobody else is the failure that check exists to prevent.
 
 **Windows needs mingw.** cgo cannot drive MSVC, so the toolchain is MSYS2's mingw-w64: gcc, the
 OpenFX host archive from CMake with Ninja, and import libraries for libraw, lcms2, expat and the

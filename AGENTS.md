@@ -382,8 +382,10 @@ matter when changing adapter code:
   `MacOS`, `Win64`, `Linux-x86-64`, `Linux-arm-64`. OFX discovery reads only that one.
 - **Where the host looks for its own bundle** is `BundledPluginDirs` in
   `internal/adapter/ofxhost/bundled.go`: `Contents/Resources` inside a macOS app, `Resources`
-  beside a Windows executable, `usr/lib/ofxhost` inside an AppImage. A new packaging layout
-  needs a line there, and `bundled_test.go` is where that line is proved.
+  beside the executable on Linux and Windows, `usr/lib/ofxhost` inside an AppDir. A new
+  packaging layout needs a line there, and `bundled_test.go` is where that line is proved.
+  The Linux release is a tarball laid out as `ofxhost` plus `Resources/`, which is the second
+  of those; there is no AppImage in CI.
 
 ### The fixture plugin
 

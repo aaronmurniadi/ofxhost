@@ -1,21 +1,32 @@
 name: "Build the Linux app (Wails v3)"
 description: >-
-  Builds the application for Linux and packs it into an AppImage that carries the
-  bundled plugins. The macOS sibling is wails3-macos; this one differs only where
-  the platform does. Read the header comment for the two steps that are not obvious.
+  Builds the application for Linux and packs the binary with its plugin bundle into
+  a tarball. The macOS sibling is wails3-macos; this one differs only where the
+  platform does. Read the header comment for why there is no AppImage.
 
 # ---------------------------------------------------------------------------------------
-# Two things here have no counterpart in the macOS action, and neither is optional.
+# A tarball, not an AppImage.
 #
-# The AppImage is packed twice. `wails3 generate appimage` runs linuxdeploy with its GTK
-# plugin, which is what makes the WebKit helper processes work inside an AppImage, and the
-# generator has no way to carry extra files. The plugin bundle is copied into the AppDir
-# afterwards at usr/lib/ofxhost and the AppImage is packed again with appimagetool. The host
-# looks for its own effects there, under a name no distribution owns.
+# An AppImage was built here first. `wails3 generate appimage` fetches linuxdeploy from
+# GitHub's release downloads at run time, and that URL answered `504 Gateway Timeout` on
+# every attempt, for the continuous tag and for a pinned one: the generator cannot be pointed
+# at a mirror and has no working switch to skip the fetch. The download path was the problem,
+# not the runner, and turning a release into a race against a third party's CDN for a tool
+# nobody here controls is not worth the artefact.
 #
-# Every AppImage tool is run with APPIMAGE_EXTRACT_AND_RUN=1. linuxdeploy and appimagetool
-# ship as AppImages themselves and need FUSE to mount, which a GitHub runner does not have.
-# The variable makes them unpack to a temporary directory and run from there instead.
+# A tarball needs no FUSE, no linuxdeploy, no appimagetool and no network beyond the module
+# downloads every job already makes. It also removes the second packing pass the AppImage
+# needed to carry the plugin bundle at usr/lib/ofxhost.
+#
+# The layout is the one internal/adapter/ofxhost/bundled.go already searches on every
+# platform: the executable with a Resources directory beside it:
+#
+#   ofxhost-linux-x86_64/
+#     ofxhost
+#     Resources/OfxHost.ofx.bundle/Contents/Linux-x86-64/OfxHost.ofx
+#
+# Ctrl-C or a double-click in a file manager runs the binary directly; nothing needs to be
+# installed or mounted.
 #
 # The rest is the same shape as the macOS action: pinned Go and Node, the CMake archive
 # first, the bindings, the tests, a checksum and an artifact.
@@ -47,7 +58,7 @@ inputs:
     required: false
     default: v3.54.0
   package:
-    description: "Write the checksum and upload the AppImage as an artifact."
+    description: "Write the checksum and upload the tarball as an artifact."
     required: false
     default: 'true'
 
@@ -56,8 +67,8 @@ outputs:
     description: "Architecture as the artifact names it: x86_64."
     value: ${{ steps.target.outputs.arch }}
   archive:
-    description: "Path to the AppImage, empty when package is false."
-    value: ${{ steps.checksum.outputs.path }}
+    description: "Path to the tarball, empty when package is false."
+    value: ${{ steps.package.outputs.path }}
 
 runs:
   using: "composite"
@@ -121,7 +132,7 @@ runs:
 
     # cgo links build/ofxhost-native/lib/libofxhost.a, which CMake produces. The plugins are
     # built by the same command, and OFX loads them from a bundle on disk, so the bundle has
-    # to exist before the AppImage is assembled around it.
+    # to exist before the tarball is assembled around it.
     - name: Build the native library and the bundled plugins
       shell: bash
       run: |
@@ -158,133 +169,70 @@ runs:
         go run ./tools/layerguard
         cd frontend && npm test
 
-    # `task linux:create:appimage` builds the binary, generates the .desktop file and runs
-    # linuxdeploy with its GTK plugin. Its own AppImage is not the one that ships: the plugin
-    # bundle is added to the AppDir after it runs, and the AppDir is packed again below.
-    #
-    # linuxdeploy is fetched here, not by the generator. The generator downloads it into its
-    # build directory and skips the download when the file is already there.
-    #
-    # The fetch goes through the GitHub API, not the browser download URL. That URL returned
-    # `504 Gateway Timeout` on every attempt here, for the `continuous` tag and for a pinned
-    # one alike, while the API asset endpoint served the same file: the web download path and
-    # the API path are not the same service. `gh release download` uses the API, needs a token
-    # on a runner, and retries here are ours.
-    - name: Fetch linuxdeploy
-      shell: bash
-      env:
-        TARGET_ARCH: ${{ steps.target.outputs.arch }}
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        # The generator's build directory, from the Taskfile's -builddir argument.
-        TOOLS_DIR=build/linux/appimage/build
-        LINUXDEPLOY="${TOOLS_DIR}/linuxdeploy-${TARGET_ARCH}.AppImage"
-        mkdir -p "$TOOLS_DIR"
-        if [ -f "$LINUXDEPLOY" ]; then
-          echo "linuxdeploy is already at $LINUXDEPLOY"
-          exit 0
-        fi
-        for attempt in 1 2 3; do
-          if gh release download continuous \
-               --repo linuxdeploy/linuxdeploy \
-               --pattern "linuxdeploy-${TARGET_ARCH}.AppImage" \
-               --output "$LINUXDEPLOY" \
-               --clobber; then
-            break
-          fi
-          echo "linuxdeploy download attempt ${attempt} failed" >&2
-          rm -f "$LINUXDEPLOY"
-          if [ "$attempt" = 3 ]; then
-            exit 1
-          fi
-          sleep 10
-        done
-        # A saved error page would pass the next existence check and fail later with a message
-        # about sudo or a missing ELF header. Check what arrived.
-        file "$LINUXDEPLOY" | grep -q 'ELF' \
-          || { echo "linuxdeploy is not an ELF binary:"; file "$LINUXDEPLOY"; rm -f "$LINUXDEPLOY"; exit 1; }
-        chmod +x "$LINUXDEPLOY"
-
-    - name: Build and package the AppImage
+    # `task linux:build` builds the frontend, the bindings, the version assets and the binary
+    # into bin/, which is the same path a local build uses.
+    - name: Build the binary
       shell: bash
       env:
         GOARCH: ${{ steps.target.outputs.goarch }}
-        APPIMAGE_EXTRACT_AND_RUN: '1'
-      run: task linux:create:appimage
+      run: task linux:build
 
-    - name: Add the plugins to the AppDir
-      id: appdir
+    - name: Verify the binary
       shell: bash
       env:
         APP_NAME: ${{ inputs.build-name }}
       run: |
-        APPDIR="$(find build/linux/appimage/build -maxdepth 1 -name '*.AppDir' -print -quit)"
-        test -n "$APPDIR" || { echo "no AppDir under build/linux/appimage/build"; ls -la build/linux/appimage/build; exit 1; }
-        mkdir -p "$APPDIR/usr/lib/${APP_NAME}"
-        cp -R build/ofxhost-native/bundled/OfxHost.ofx.bundle "$APPDIR/usr/lib/${APP_NAME}/"
-        test -f "$APPDIR/usr/lib/${APP_NAME}/OfxHost.ofx.bundle/Contents/Linux-x86-64/OfxHost.ofx" \
-          || { echo "the plugin bundle did not survive the copy"; exit 1; }
-        echo "path=$APPDIR" >> "$GITHUB_OUTPUT"
+        BIN="bin/${APP_NAME}"
+        test -x "$BIN" || { echo "no binary at $BIN"; ls -la bin; exit 1; }
+        file "$BIN" | grep -q 'ELF 64-bit' \
+          || { echo "$BIN is not an ELF64 executable"; file "$BIN"; exit 1; }
+        # A binary whose libraries are not on the runner would start for the person who built
+        # it and fail for nobody else. Every dependency must resolve here.
+        if ldd "$BIN" | grep -q 'not found'; then
+          echo "the binary has unresolved libraries:" >&2
+          ldd "$BIN" | grep 'not found' >&2
+          exit 1
+        fi
 
-    # The generator already produced a working AppImage. It is packed again from the same
-    # AppDir only because the plugin bundle was added after it ran, and packing is the last
-    # step of an AppImage build.
-    - name: Pack the AppImage
-      id: checksum
-      shell: bash
-      env:
-        APP_NAME: ${{ inputs.build-name }}
-        TARGET_ARCH: ${{ steps.target.outputs.arch }}
-        GH_TOKEN: ${{ github.token }}
-        APPIMAGE_EXTRACT_AND_RUN: '1'
-      run: |
-        APPIMAGE="${APP_NAME}-linux-${TARGET_ARCH}.AppImage"
-        # Downloaded the same way as linuxdeploy, and for the same reason: the browser download
-        # URL is not the API path, and the browser one returned 504 here.
-        rm -f /tmp/appimagetool
-        for attempt in 1 2 3; do
-          if gh release download continuous \
-               --repo AppImage/appimagetool \
-               --pattern "appimagetool-${TARGET_ARCH}.AppImage" \
-               --output /tmp/appimagetool \
-               --clobber; then
-            break
-          fi
-          echo "appimagetool download attempt ${attempt} failed" >&2
-          rm -f /tmp/appimagetool
-          if [ "$attempt" = 3 ]; then
-            exit 1
-          fi
-          sleep 10
-        done
-        file /tmp/appimagetool | grep -q 'ELF' \
-          || { echo "appimagetool is not an ELF binary:"; file /tmp/appimagetool; exit 1; }
-        chmod +x /tmp/appimagetool
-        ARCH="${TARGET_ARCH}" /tmp/appimagetool \
-          "${{ steps.appdir.outputs.path }}" \
-          "bin/${APPIMAGE}"
-        test -f "bin/${APPIMAGE}" || { echo "appimagetool produced no ${APPIMAGE}"; exit 1; }
-        ( cd bin && sha256sum "${APPIMAGE}" > "${APPIMAGE}.sha256" )
-        echo "path=bin/${APPIMAGE}" >> "$GITHUB_OUTPUT"
-
-    - name: Verify the AppImage carries its effects
+    # The staging directory keeps the archive's paths relative, so untarring it makes one
+    # folder rather than four files in whatever directory the user is standing in.
+    - name: Package
+      id: package
+      if: inputs.package == 'true'
       shell: bash
       env:
         APP_NAME: ${{ inputs.build-name }}
         TARGET_ARCH: ${{ steps.target.outputs.arch }}
-        APPIMAGE_EXTRACT_AND_RUN: '1'
       run: |
-        APPIMAGE="bin/${APP_NAME}-linux-${TARGET_ARCH}.AppImage"
-        test -f "$APPIMAGE" || { echo "no AppImage at $APPIMAGE"; ls -la bin; exit 1; }
-        test -x "$APPIMAGE" || chmod +x "$APPIMAGE"
-        # Extract rather than mount: a runner has no FUSE, and the contents are what is
-        # being checked.
-        rm -rf /tmp/appimage-check && mkdir -p /tmp/appimage-check
-        ( cd /tmp/appimage-check && "$OLDPWD/$APPIMAGE" --appimage-extract > /dev/null )
-        test -x "/tmp/appimage-check/squashfs-root/usr/bin/${APP_NAME}" \
-          || { echo "the AppImage has no executable"; exit 1; }
-        find "/tmp/appimage-check/squashfs-root/usr/lib/${APP_NAME}" -name '*.ofx.bundle' | grep -q . \
-          || { echo "the AppImage carries no plugins"; exit 1; }
+        PKG="${APP_NAME}-linux-${TARGET_ARCH}"
+        STAGE="build/linux/package/${PKG}"
+        rm -rf "build/linux/package"
+        mkdir -p "${STAGE}/Resources"
+        cp "bin/${APP_NAME}" "${STAGE}/"
+        cp -R build/ofxhost-native/bundled/OfxHost.ofx.bundle "${STAGE}/Resources/"
+        tar -czf "bin/${PKG}.tar.gz" -C build/linux/package "${PKG}"
+        # Written from inside the directory so the file names only the archive. A checksum
+        # that records "bin/..." cannot be checked by anyone who downloaded the two files
+        # into one folder, which is the only thing a checksum is for.
+        ( cd bin && sha256sum "${PKG}.tar.gz" > "${PKG}.tar.gz.sha256" )
+        echo "path=bin/${PKG}.tar.gz" >> "$GITHUB_OUTPUT"
+
+    - name: Verify the tarball carries the binary and its effects
+      if: inputs.package == 'true'
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+        TARGET_ARCH: ${{ steps.target.outputs.arch }}
+      run: |
+        PKG="${APP_NAME}-linux-${TARGET_ARCH}"
+        ARCHIVE="bin/${PKG}.tar.gz"
+        test -f "$ARCHIVE" || { echo "no archive at $ARCHIVE"; ls -la bin; exit 1; }
+        rm -rf /tmp/package-check && mkdir -p /tmp/package-check
+        tar -xzf "$ARCHIVE" -C /tmp/package-check
+        test -x "/tmp/package-check/${PKG}/${APP_NAME}" \
+          || { echo "the archive has no executable"; find /tmp/package-check -maxdepth 3; exit 1; }
+        find "/tmp/package-check/${PKG}/Resources" -name '*.ofx.bundle' | grep -q . \
+          || { echo "the archive carries no plugins"; find /tmp/package-check -maxdepth 4; exit 1; }
 
     - name: Upload the build
       if: inputs.package == 'true'
@@ -292,6 +240,6 @@ runs:
       with:
         name: ${{ inputs.build-name }}-linux-${{ steps.target.outputs.arch }}
         path: |
-          bin/${{ inputs.build-name }}-linux-${{ steps.target.outputs.arch }}.AppImage
-          bin/${{ inputs.build-name }}-linux-${{ steps.target.outputs.arch }}.AppImage.sha256
+          bin/${{ inputs.build-name }}-linux-${{ steps.target.outputs.arch }}.tar.gz
+          bin/${{ inputs.build-name }}-linux-${{ steps.target.outputs.arch }}.tar.gz.sha256
         if-no-files-found: error
