@@ -109,9 +109,15 @@ if(EXISTS "${OFX_SUPPORT_LIB}/ofxsImageEffect.cpp")
   # path. It is Objective-C for that reason: reading through an id<MTLBuffer> needs the
   # language, and the alternative is a fixture that cannot exercise the code it is there to
   # test. Apple only; elsewhere the file compiles its CPU branch.
+  #
+  # The .mm suffix is not enough off Apple: CMake reads it as Objective-C++ everywhere, and
+  # MinGW has no such front end, so the compiler fails with "cannot execute 'cc1objplus'"
+  # before it reads a line of the branch that is not there. The language is stated instead.
   if(APPLE)
     enable_language(OBJCXX)
     set_source_files_properties(../testdata/fixture/plugin.mm PROPERTIES LANGUAGE OBJCXX)
+  else()
+    set_source_files_properties(../testdata/fixture/plugin.mm PROPERTIES LANGUAGE CXX)
   endif()
   add_library(ofxhost_fixture MODULE
     ../testdata/fixture/plugin.mm

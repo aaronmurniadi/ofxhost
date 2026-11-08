@@ -119,10 +119,15 @@ jobs:
 
       - name: Install native dependencies (x86_64)
         run: |
+          # A clone into /usr/local, not the installer: the installer refuses a machine that
+          # already has Homebrew, and on Apple Silicon it already does. This is Homebrew's own
+          # documented way to run a second prefix, and under Rosetta it fetches x86_64 bottles.
           if [ ! -x /usr/local/bin/brew ]; then
-            sudo mkdir -p /usr/local/bin
-            curl -fsSL https://github.com/Homebrew/brew/tarball/master \
-              | sudo tar xz --strip 1 -C /usr/local
+            sudo mkdir -p /usr/local
+            sudo chown -R "$(whoami)" /usr/local
+            git clone --depth=1 https://github.com/Homebrew/brew /usr/local/Homebrew
+            mkdir -p /usr/local/bin
+            ln -sf /usr/local/Homebrew/bin/brew /usr/local/bin/brew
           fi
           arch -x86_64 /usr/local/bin/brew install \
             libraw lcms2 libpng libtiff jpeg-turbo webp jpeg-xl expat
@@ -264,14 +269,15 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      # gtk3 and webkit2gtk-4.1 are the window; the rest are the same libraries the macOS job
-      # installs from Homebrew.
+      # GTK4 and WebKitGTK 6.0, not GTK3: Wails v3 links those by default and needs the `gtk3`
+      # build tag to want the others, which would have to be passed to the CLI as well as to
+      # the application. The rest are the same libraries the macOS job installs from Homebrew.
       - name: Install native dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build pkg-config \
-            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libgtk-4-dev libwebkitgtk-6.0-dev \
             libraw-dev liblcms2-dev libexpat1-dev \
             libpng-dev libtiff-dev libjpeg-dev libwebp-dev libjxl-dev \
             libgl1-mesa-dev
