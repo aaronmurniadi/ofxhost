@@ -306,38 +306,93 @@ runs:
         SIZE="$(stat -c%s "$BIN")"
         test "$SIZE" -gt 1000000 || { echo "$BIN is only $SIZE bytes; the link did not finish"; exit 1; }
 
-    # The link is static, and this is what proves it. Windows reports the first DLL it cannot
-    # find, which is how "libexpat-1.dll could not be found" reached a release: the zip ships
-    # the executable and Resources/, and the executable had been linked against mingw import
-    # libraries. Every library a mingw static link could reintroduce is named lib*, and no
-    # Windows system DLL is, so one prefix test covers the whole class.
+    # The link is static, with one exception, and this step is what keeps the exception from
+    # becoming a second release that does not start.
     #
-    # Both binaries are checked. The plugin is loaded at runtime by LoadLibrary, so a missing
-    # DLL there fails later and more confusingly than it does for the executable.
-    - name: Check both binaries import no DLL of their own
+    # Windows reports the first DLL it cannot find, which is how "libexpat-1.dll could not be
+    # found" reached a release: the zip shipped the executable and Resources/, and the
+    # executable had been linked against mingw import libraries. So the rule now is not "no
+    # DLLs" but "no DLL that is not in the zip". libjxl in MSYS2 was compiled against a shared
+    # highway, so libhwy is dynamic and the rest is not; whatever the link leaves dynamic
+    # travels with the build, and its own dependencies travel too.
+    #
+    # The closure is computed rather than listed. A hard-coded list is a list that goes stale
+    # the first time a package changes, and the failure would be a missing DLL again.
+    - name: Collect the libraries the binaries still import
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+        MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+      run: |
+        set -euo pipefail
+        MINGW="$(cygpath -u "$MSYS2_LOCATION")/mingw64/bin"
+        PLUGIN="build/ofxhost-native/bundled/OfxHost.ofx.bundle/Contents/Win64/OfxHost.ofx"
+        WORK="$(mktemp -d)"
+        : > "$WORK/needed"
+
+        # Only mingw's own libraries can be missing. A Windows system DLL lives in System32
+        # and is on the loader's search path by definition.
+        for BINARY in "bin/${APP_NAME}.exe" "$PLUGIN"; do
+          objdump -p "$BINARY" | awk '/DLL Name:/{print $3}' | grep -i '^lib' >> "$WORK/needed" || true
+        done
+
+        # A shipped DLL has its own imports, and a copy has the same problem one level down.
+        # One round reads a snapshot and writes the accumulated set, so the file is never read
+        # while it is appended to. The loop stops when a round adds nothing.
+        while : ; do
+          sort -u "$WORK/needed" -o "$WORK/needed"
+          cp "$WORK/needed" "$WORK/round"
+          while read -r DLL; do
+            [ -n "$DLL" ] || continue
+            test -f "$MINGW/$DLL" || { echo "$DLL is imported and is not in $MINGW"; exit 1; }
+            cp -f "$MINGW/$DLL" bin/
+            objdump -p "$MINGW/$DLL" | awk '/DLL Name:/{print $3}' | grep -i '^lib' >> "$WORK/needed" || true
+          done < "$WORK/round"
+          sort -u "$WORK/needed" -o "$WORK/needed"
+          cmp -s "$WORK/needed" "$WORK/round" && break
+        done
+
+        if [ ! -s "$WORK/needed" ]; then
+          echo "both binaries are fully static: nothing is shipped beside them"
+          exit 0
+        fi
+        echo "shipped beside the executable:"
+        cat "$WORK/needed"
+
+    # What the executable and the plugin import must be exactly what the zip carries. This is
+    # the assertion the first attempt lacked, and it is stated as a comparison so it keeps
+    # working whether the link leaves nothing dynamic or one library.
+    - name: Check every library the binaries import is shipped
       shell: bash
       env:
         APP_NAME: ${{ inputs.build-name }}
       run: |
+        set -euo pipefail
         PLUGIN="build/ofxhost-native/bundled/OfxHost.ofx.bundle/Contents/Win64/OfxHost.ofx"
         FAILED=0
         for BINARY in "bin/${APP_NAME}.exe" "$PLUGIN"; do
-          test -f "$BINARY" || { echo "no binary at $BINARY"; exit 1; }
           echo "== imports of $BINARY"
-          # mingw's objdump is first on PATH: the native build put mingw64/bin there.
           IMPORTS="$(objdump -p "$BINARY" | awk '/DLL Name:/{print $3}')"
           echo "$IMPORTS" | sed '/^$/d' | sort
-          BUNDLED="$(echo "$IMPORTS" | grep -i '^lib' || true)"
-          if [ -n "$BUNDLED" ]; then
-            echo "$BINARY imports libraries it would have to ship with it:"
-            echo "$BUNDLED"
-            echo "The link fell back to an import library. Check that -static is present in"
-            echo "internal/adapter/ofxhost/cgo_windows.go and that the MSYS2 package carries a"
-            echo ".a for each name in its group."
-            FAILED=1
-          fi
+          while read -r DLL; do
+            [ -n "$DLL" ] || continue
+            case "$DLL" in
+              lib*|Lib*) ;;
+              *) continue ;;
+            esac
+            if [ ! -f "bin/$DLL" ]; then
+              echo "$BINARY imports $DLL, which the zip does not carry"
+              FAILED=1
+            fi
+          done <<< "$IMPORTS"
         done
-        exit $FAILED
+        if [ "$FAILED" -ne 0 ]; then
+          echo "A DLL the build needs is missing from the package. The collect step copies the"
+          echo "closure from MSYS2's mingw64/bin; a name it cannot find means the library was"
+          echo "dropped from the install list, or the link found it somewhere else."
+          exit 1
+        fi
+        echo "every library the binaries import is in the package"
 
     - name: Package
       id: package
@@ -354,7 +409,12 @@ runs:
         if (-not (Test-Path "bin\Resources\OfxHost.ofx.bundle\Contents\Win64\OfxHost.ofx")) {
           throw "the plugin bundle did not survive the copy"
         }
-        Compress-Archive -Path "bin\$env:APP_NAME.exe", "bin\Resources" -DestinationPath "bin\$pkg.zip" -Force
+        # The DLLs the link left dynamic, if any. -Path with a wildcard that matches nothing
+        # makes Compress-Archive fail, so the list is built first.
+        $items = @("bin\$env:APP_NAME.exe", "bin\Resources")
+        $dlls = Get-ChildItem -Path "bin" -Filter "*.dll" -File -ErrorAction SilentlyContinue
+        if ($dlls) { $items += $dlls.FullName }
+        Compress-Archive -Path $items -DestinationPath "bin\$pkg.zip" -Force
         $hash = (Get-FileHash -Path "bin\$pkg.zip" -Algorithm SHA256).Hash.ToLower()
         # The sha256sum format, so the file checks with the same command as every other
         # artefact: hash, two spaces, file name.
@@ -377,6 +437,11 @@ runs:
         $names | Write-Output
         if (-not ($names -match "^$env:APP_NAME\.exe$")) { throw "the archive has no $env:APP_NAME.exe at the top" }
         if (-not ($names -match '^Resources[\\/].*OfxHost\.ofx$')) { throw "the archive carries no plugin binary" }
+        # Every DLL the step above copied must have travelled with the archive.
+        $dlls = Get-ChildItem -Path "bin" -Filter "*.dll" -File -ErrorAction SilentlyContinue
+        foreach ($dll in $dlls) {
+          if (-not ($names -contains $dll.Name)) { throw "the archive is missing $($dll.Name)" }
+        }
 
     - name: Upload the build
       if: inputs.package == 'true'

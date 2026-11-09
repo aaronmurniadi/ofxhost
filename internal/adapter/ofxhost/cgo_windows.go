@@ -35,19 +35,35 @@ package ofxhost
 // packages carry their own copies of the two defines, because a preprocessor flag is
 // per-package and those packages are what includes those headers.
 //
+// ws2_32 is there because LibRaw calls htons, ntohs and ntohl, which live in Winsock. Go
+// only adds it when the program itself imports net, and this one does not.
+//
+// highway is the one library that stays dynamic, and the reason is in the MSYS2 package
+// rather than here: libjxl there was compiled against a shared highway, so its objects
+// reference `__imp_` thunks that libhwy.a does not define. Linking highway statically is not
+// possible without rebuilding libjxl. It is named after the group, where `-Bdynamic` can
+// apply to that one name, and the packaging step copies it and its own dependencies beside
+// the executable. If a future package makes highway static, remove the two -B flags and the
+// copied library stops being needed.
+//
+// The first attempt at this link proved both points: it failed on __imp_ntohs from LibRaw
+// and on __imp__ZN3hwy15GetChosenTargetEv from libjxl_cms, which is why the CI job builds
+// this platform before a tag is cut.
+//
 // Expat and the archive are named first for readability; the group makes the position
 // irrelevant.
 #cgo CPPFLAGS: -I${SRCDIR}/../../../third_party/openfx/include -I${SRCDIR}/../../../third_party/openfx/HostSupport/include
 #cgo CPPFLAGS: -DXML_STATIC
 #cgo LDFLAGS: -L${SRCDIR}/../../../build/ofxhost-native/lib -static
 #cgo LDFLAGS: -Wl,--start-group
-#cgo LDFLAGS: -lofxhost -lexpat -lstdc++ -lwinpthread
+#cgo LDFLAGS: -lofxhost -lexpat -lstdc++ -lwinpthread -lws2_32
 #cgo LDFLAGS: -lraw -llcms2 -ljpeg -lgomp
 #cgo LDFLAGS: -lpng -ltiff -lz -ldeflate -llzma -lzstd
 #cgo LDFLAGS: -lLerc -ljbig
-#cgo LDFLAGS: -ljxl -ljxl_cms -ljxl_threads -lhwy -lbrotlienc -lbrotlidec -lbrotlicommon
+#cgo LDFLAGS: -ljxl -ljxl_cms -ljxl_threads -lbrotlienc -lbrotlidec -lbrotlicommon
 #cgo LDFLAGS: -lwebp -lwebpmux -lsharpyuv
 #cgo LDFLAGS: -Wl,--end-group
+#cgo LDFLAGS: -Wl,-Bdynamic -lhwy -Wl,-Bstatic
 //
 // The host library is built by CMake from native/CMakeLists.txt, because cgo cannot compile
 // translation units outside the package directory and HostSupport is a separate C++ library.
