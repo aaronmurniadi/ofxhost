@@ -58,8 +58,20 @@ type ChainRunner interface {
 type State struct {
 	// Path is the file that is open, empty when nothing is.
 	Path string
-	// Full is the decoded frame at full resolution.
-	Full image.Raster
+	// Frame is the decoded frame, which may be smaller than the file.
+	//
+	// The develop is done at the size the window can show, because a 16 MP RAW
+	// costs 1.8 s at full size and 0.09 s at half, and a preview is never larger
+	// than the panel. ProjectW and ProjectH carry the size the file really is, so
+	// nothing downstream has to guess it from this raster.
+	Frame image.Raster
+	// ProjectW and ProjectH are the file's own dimensions.
+	//
+	// They are the size the chain is told about, so a plugin that sizes a kernel or
+	// a noise model in project pixels stays correct when Frame is scaled. They are
+	// zero when nothing is open.
+	ProjectW int
+	ProjectH int
 	// Camera is the capture metadata, for the noise model.
 	Camera port.CameraInfo
 	// FileSpace is the space the file declared.
@@ -84,6 +96,12 @@ type OpenRequest struct {
 	// declares no space of its own and two users can reasonably want two different
 	// answers from the same file.
 	Space image.ColorSpace
+	// MaxEdge is the largest frame the caller can display, so the develop is done at
+	// that size. Zero asks for the full develop, which is what an export needs.
+	//
+	// The chain still runs on as many pixels as it needs, and Render re-develops at
+	// full size when a caller asks for more than was developed.
+	MaxEdge int
 }
 
 // OpenResult reports what happened.
@@ -216,7 +234,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 	s.status.Report("Opening " + filepath.Base(req.Path) + " in " + space.String() + "...")
 
 	s.wg.Add(1)
-	go s.decode(ctx, generation, req.Path, space)
+	go s.decode(ctx, generation, req.Path, space, req.MaxEdge)
 
 	return OpenResult{}, nil
 }
@@ -240,11 +258,11 @@ func (s *Service) Pump() bool {
 }
 
 // decode runs on its own goroutine.
-func (s *Service) decode(ctx context.Context, generation uint64, path string, space image.ColorSpace) {
+func (s *Service) decode(ctx context.Context, generation uint64, path string, space image.ColorSpace,
+	maxEdge int) {
 	defer s.wg.Done()
 
-	decoded, err := s.decoder.Decode(path, space)
-
+	decoded, err := s.develop(path, space, maxEdge)
 	// A newer request has started, so this work is already stale. Dropping it is
 	// what keeps a slow file from replacing a fast one that followed it.
 	if s.generation.Load() != generation {
@@ -255,6 +273,28 @@ func (s *Service) decode(ctx context.Context, generation uint64, path string, sp
 	case s.result <- Outcome{generation: generation, Path: path, decoded: decoded, Err: err, ctx: ctx}:
 	case <-ctx.Done():
 	}
+}
+
+// develop decodes one file at no more than maxEdge, using the cheap display path when
+// the decoder offers one.
+//
+// A decoder that cannot scale implements only port.ImageDecoder. It then develops the
+// whole file, which is correct and only slower, so the fallback needs no special case
+// anywhere else.
+func (s *Service) develop(path string, space image.ColorSpace, maxEdge int) (port.Decoded, error) {
+	if scaled, ok := s.decoder.(port.DisplayDecoder); ok {
+		return scaled.DecodeForDisplay(path, space, maxEdge)
+	}
+	return s.decoder.Decode(path, space)
+}
+
+// projectSize reports the file's own dimensions, falling back to the frame when the
+// decoder did not scale anything.
+func projectSize(decoded port.Decoded) (int, int) {
+	if decoded.ProjectW > 0 && decoded.ProjectH > 0 {
+		return decoded.ProjectW, decoded.ProjectH
+	}
+	return decoded.Image.W, decoded.Image.H
 }
 
 // apply publishes a finished decode.
@@ -273,7 +313,8 @@ func (s *Service) apply(outcome Outcome) {
 
 	s.mu.Lock()
 	s.state.Path = outcome.Path
-	s.state.Full = outcome.decoded.Image
+	s.state.Frame = outcome.decoded.Image
+	s.state.ProjectW, s.state.ProjectH = projectSize(outcome.decoded)
 	s.state.Camera = outcome.decoded.Camera
 	s.state.FileSpace = outcome.decoded.FileSpace
 	s.state.Thumbnail = outcome.decoded.Thumbnail
@@ -333,22 +374,32 @@ func (s *Service) Render(generation uint64) (image.Raster, error) {
 // than what the sensor recorded. A 25 MP file at 1080p is a tenth of the pixels, and
 // a plugin that convolves a kernel gets about ten times faster.
 //
-// maxEdge of zero or less renders at full resolution, which is what export does.
+// maxEdge of zero or less renders at full resolution, which is what export does. The
+// frame is re-developed first when it was opened smaller than this asks for; see
+// ensureDeveloped.
 //
 // The project long edge is passed on separately: several plugins size a kernel, a
 // blur radius or a noise model in project pixels, and a chain that only saw the
-// shrunken frame would compute them wrong by the scale factor.
+// shrunken frame would compute them wrong by the scale factor. It comes from
+// ProjectW/ProjectH and never from the frame, because the frame may be scaled.
 func (s *Service) RenderAt(generation uint64, maxEdge int) (image.Raster, error) {
+	if err := s.ensureDeveloped(maxEdge); err != nil {
+		return image.Raster{}, err
+	}
+
 	s.mu.RLock()
-	frame := s.state.Full
+	frame := s.state.Frame
 	runner := s.chain
+	projectEdge := s.state.ProjectW
+	if s.state.ProjectH > projectEdge {
+		projectEdge = s.state.ProjectH
+	}
 	s.mu.RUnlock()
 
 	if frame.Empty() {
 		return image.Raster{}, errors.New("document: no image is open")
 	}
 
-	projectEdge := frame.LongEdge()
 	if maxEdge > 0 {
 		// Scaled before the first plugin, not after the last. Scaling afterwards
 		// would leave every pass running on the full frame and save only the encode.
@@ -364,6 +415,59 @@ func (s *Service) RenderAt(generation uint64, maxEdge int) (image.Raster, error)
 		return out, nil
 	}
 	return runner.ApplyProjected(frame, projectEdge, generation)
+}
+
+// ensureDeveloped re-develops at full size when the caller asks for more pixels than
+// the open frame holds.
+//
+// The document is developed at the size the window can show, which is what makes
+// opening a 16 MP RAW take about 0.1 s instead of 1.8 s. Two callers can still want
+// more: an export, which writes the whole file, and a preview set to a resolution
+// larger than the one that was developed. Doing the re-develop here, on the caller's
+// goroutine, keeps the rule in one place instead of teaching every caller about it.
+func (s *Service) ensureDeveloped(maxEdge int) error {
+	s.mu.RLock()
+	path := s.state.Path
+	space := s.state.WorkingSpace
+	edge := s.state.Frame.LongEdge()
+	projectEdge := s.state.ProjectW
+	if s.state.ProjectH > projectEdge {
+		projectEdge = s.state.ProjectH
+	}
+	generation := s.generation.Load()
+	s.mu.RUnlock()
+
+	if path == "" || s.decoder == nil {
+		return nil
+	}
+
+	// A cap above the file's own size is the same request as the whole file, and a
+	// cap of zero is an export.
+	wanted := maxEdge
+	if wanted <= 0 || wanted > projectEdge {
+		wanted = projectEdge
+	}
+	if edge >= wanted {
+		return nil
+	}
+
+	s.status.Report(fmt.Sprintf("Developing %s at %d pixels...", filepath.Base(path), wanted))
+	decoded, err := s.develop(path, space, wanted)
+	if err != nil {
+		return err
+	}
+
+	// A newer Open started while this ran, so the frame belongs to a document that is
+	// already gone. Dropping it is the same rule a stale decode follows.
+	if s.generation.Load() != generation {
+		return nil
+	}
+
+	s.mu.Lock()
+	s.state.Frame = decoded.Image
+	s.state.ProjectW, s.state.ProjectH = projectSize(decoded)
+	s.mu.Unlock()
+	return nil
 }
 
 // Chain returns the open document's chain.

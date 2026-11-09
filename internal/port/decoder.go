@@ -13,7 +13,19 @@ import (
 // Decoded is one image ready for the chain.
 type Decoded struct {
 	// Image is the developed frame in the layout the pipeline uses.
+	//
+	// It is the whole file unless the caller asked for a display-sized develop, in
+	// which case it is smaller and ProjectW/ProjectH say how large the file is.
 	Image image.Raster
+	// ProjectW and ProjectH are the file's own dimensions, whatever size the frame
+	// was developed at.
+	//
+	// They are needed because several plugins size a kernel, a blur radius or a
+	// noise model in project pixels: a chain handed only the shrunken frame would
+	// compute them wrong by the scale factor. Zero means the frame is the project,
+	// which is what every decoder that never scales reports.
+	ProjectW int
+	ProjectH int
 	// FileSpace is the space the pixels are in, which is the space the caller
 	// asked for.
 	//
@@ -37,6 +49,21 @@ type CameraInfo struct {
 	ISO      int
 	Aperture float64
 	Shutter  float64
+}
+
+// DisplayDecoder develops a file at the size the window can show.
+//
+// It is separate from ImageDecoder for the same reason Thumbnailer is: a develop is
+// allowed to take a cheaper path when its result is only going to be looked at, and
+// the caller decides when that is. A decoder that cannot scale implements only
+// ImageDecoder; the caller then gets a full develop.
+type DisplayDecoder interface {
+	// DecodeForDisplay develops path into `want` with its long edge at most maxEdge.
+	//
+	// An implementation may return a larger frame when the format offers no cheap
+	// scaling, and it reports the file's own dimensions in ProjectW and ProjectH
+	// either way. maxEdge of zero or less means the full develop.
+	DecodeForDisplay(path string, want image.ColorSpace, maxEdge int) (Decoded, error)
 }
 
 // ImageDecoder turns a file on disk into pixels.

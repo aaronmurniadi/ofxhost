@@ -191,8 +191,8 @@ func TestOpenDecodesAndPublishes(t *testing.T) {
 	if state.Path != "/tmp/a.cr3" {
 		t.Fatalf("Path = %q", state.Path)
 	}
-	if state.Full.W != 20 || state.Full.H != 10 {
-		t.Fatalf("frame = %dx%d", state.Full.W, state.Full.H)
+	if state.Frame.W != 20 || state.Frame.H != 10 {
+		t.Fatalf("frame = %dx%d", state.Frame.W, state.Frame.H)
 	}
 	if state.Camera.ISO != 400 {
 		t.Fatalf("ISO = %d", state.Camera.ISO)
@@ -257,7 +257,7 @@ func TestAFailedDecodeKeepsThePreviousFrame(t *testing.T) {
 	if state.Path != "/tmp/good.cr3" {
 		t.Fatalf("a failed open replaced the document with %q", state.Path)
 	}
-	if state.Full.W != 20 {
+	if state.Frame.W != 20 {
 		t.Fatal("a failed open dropped the previous frame")
 	}
 	if got := sink.Text(); !strings.Contains(got, "Could not open bad.cr3") {
@@ -294,8 +294,8 @@ func TestANewerRequestSupersedesAnOlderOne(t *testing.T) {
 	if state.Path != "/tmp/fast.cr3" {
 		t.Fatalf("the document is %q, want the newer fast.cr3", state.Path)
 	}
-	if state.Full.W != 10 {
-		t.Fatalf("the frame is %dx%d, want the 10x10 one", state.Full.W, state.Full.H)
+	if state.Frame.W != 10 {
+		t.Fatalf("the frame is %dx%d, want the 10x10 one", state.Frame.W, state.Frame.H)
 	}
 }
 
@@ -671,5 +671,164 @@ func TestRestoreSkipsADeletedFile(t *testing.T) {
 	}
 	if ok || got != path[:0] {
 		t.Fatalf("Restore = %q ok=%v, want nothing", got, ok)
+	}
+}
+
+// scaledFakeDecoder is a decoder that also implements port.DisplayDecoder, so a test
+// can see the size the document asked to develop at.
+type scaledFakeDecoder struct {
+	*fakeDecoder
+	mu    sync.Mutex
+	edges []int
+}
+
+// DecodeForDisplay records the cap and returns a frame shrunk to it, the way a real
+// decoder does, while reporting the file's own size.
+func (f *scaledFakeDecoder) DecodeForDisplay(path string, want image.ColorSpace, maxEdge int) (port.Decoded, error) {
+	f.mu.Lock()
+	f.edges = append(f.edges, maxEdge)
+	f.mu.Unlock()
+
+	decoded, err := f.fakeDecoder.Decode(path, want)
+	if err != nil {
+		return port.Decoded{}, err
+	}
+	decoded.ProjectW, decoded.ProjectH = decoded.Image.W, decoded.Image.H
+	if maxEdge > 0 && decoded.Image.LongEdge() > maxEdge {
+		scale := float64(maxEdge) / float64(decoded.Image.LongEdge())
+		decoded.Image = image.New(int(float64(decoded.Image.W)*scale), int(float64(decoded.Image.H)*scale))
+	}
+	return decoded, nil
+}
+
+// edgesSeen returns the caps the document has asked for, in order.
+func (f *scaledFakeDecoder) edgesSeen() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int(nil), f.edges...)
+}
+
+// newScaledDecoder returns a display-capable fake holding one 4000x2000 frame.
+func newScaledDecoder() *scaledFakeDecoder {
+	decoder := &scaledFakeDecoder{fakeDecoder: newFakeDecoder()}
+	decoder.frames["/tmp/big.cr3"] = image.New(4000, 2000)
+	return decoder
+}
+
+// TestOpenDevelopsAtTheDisplaySize is the whole point of the display path: a RAW file
+// that only has to fill a 1000-pixel panel is developed small, and the file's own size
+// still travels so the chain can size its kernels.
+func TestOpenDevelopsAtTheDisplaySize(t *testing.T) {
+	decoder := newScaledDecoder()
+	s := newService(t, decoder)
+
+	request := OpenRequest{Path: "/tmp/big.cr3", Space: image.SRGB, MaxEdge: 1000}
+	if _, err := s.Open(context.Background(), request); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, s)
+
+	if got := decoder.edgesSeen(); len(got) != 1 || got[0] != 1000 {
+		t.Fatalf("the develop was asked for %v, want [1000]", got)
+	}
+	state := s.State()
+	if state.Frame.LongEdge() != 1000 {
+		t.Fatalf("the frame is %dx%d, want a 1000-pixel long edge", state.Frame.W, state.Frame.H)
+	}
+	if state.ProjectW != 4000 || state.ProjectH != 2000 {
+		t.Fatalf("project = %dx%d, want 4000x2000", state.ProjectW, state.ProjectH)
+	}
+
+	// The chain must still be told the project size, not the size of the frame it is
+	// handed: a plugin that sizes a kernel in project pixels would be wrong otherwise.
+	runner := &recordingRunner{}
+	s.SetChain(runner)
+	if _, err := s.RenderAt(1, 500); err != nil {
+		t.Fatalf("RenderAt: %v", err)
+	}
+	if runner.gotProject != 4000 {
+		t.Fatalf("projectEdge = %d, want 4000", runner.gotProject)
+	}
+}
+
+// TestRenderReDevelopsTheFullFrame keeps export honest. The document was opened small,
+// and writing the file needs every pixel, so the export asks again and gets it.
+func TestRenderReDevelopsTheFullFrame(t *testing.T) {
+	decoder := newScaledDecoder()
+	s := newService(t, decoder)
+	runner := &recordingRunner{}
+	s.SetChain(runner)
+
+	request := OpenRequest{Path: "/tmp/big.cr3", Space: image.SRGB, MaxEdge: 1000}
+	if _, err := s.Open(context.Background(), request); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, s)
+
+	out, err := s.Render(2)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if out.W != 4000 || out.H != 2000 {
+		t.Fatalf("the export frame is %dx%d, want the full 4000x2000", out.W, out.H)
+	}
+	if runner.gotW != 4000 || runner.gotH != 2000 {
+		t.Fatalf("the chain ran on %dx%d, want 4000x2000", runner.gotW, runner.gotH)
+	}
+	if got := decoder.edgesSeen(); len(got) != 2 || got[1] != 4000 {
+		t.Fatalf("the develops were asked for %v, want [1000 4000]", got)
+	}
+
+	// A second export must not develop again: the frame is already the whole file.
+	if _, err := s.Render(3); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if got := decoder.edgesSeen(); len(got) != 2 {
+		t.Fatalf("a second export developed again: %v", got)
+	}
+}
+
+// TestPreviewAboveTheDevelopedSizeReDevelops covers the other caller that can ask for
+// more pixels: a preview resolution larger than what was developed.
+func TestPreviewAboveTheDevelopedSizeReDevelops(t *testing.T) {
+	decoder := newScaledDecoder()
+	s := newService(t, decoder)
+
+	request := OpenRequest{Path: "/tmp/big.cr3", Space: image.SRGB, MaxEdge: 1000}
+	if _, err := s.Open(context.Background(), request); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, s)
+
+	if _, err := s.RenderAt(4, 2000); err != nil {
+		t.Fatalf("RenderAt: %v", err)
+	}
+	if got := decoder.edgesSeen(); len(got) != 2 || got[1] != 2000 {
+		t.Fatalf("the develops were asked for %v, want [1000 2000]", got)
+	}
+	if s.State().Frame.LongEdge() != 2000 {
+		t.Fatalf("the frame is %dx%d, want a 2000-pixel long edge",
+			s.State().Frame.W, s.State().Frame.H)
+	}
+}
+
+// TestOpenWithoutADisplayDecoderStillWorks is the fallback: a decoder that cannot
+// scale implements only ImageDecoder, and the document must still open and report the
+// file's size.
+func TestOpenWithoutADisplayDecoderStillWorks(t *testing.T) {
+	decoder := newFakeDecoder()
+	decoder.frames["/tmp/big.cr3"] = image.New(4000, 2000)
+	s := newService(t, decoder)
+
+	request := OpenRequest{Path: "/tmp/big.cr3", Space: image.SRGB, MaxEdge: 1000}
+	if _, err := s.Open(context.Background(), request); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, s)
+
+	state := s.State()
+	if state.Frame.W != 4000 || state.ProjectW != 4000 {
+		t.Fatalf("frame %dx%d, project %dx%d, want both 4000x2000",
+			state.Frame.W, state.Frame.H, state.ProjectW, state.ProjectH)
 	}
 }

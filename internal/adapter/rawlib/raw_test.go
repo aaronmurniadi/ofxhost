@@ -310,3 +310,62 @@ func mathAbs(v float64) float64 {
 	}
 	return v
 }
+
+// TestDecodeForDisplayReportsTheProjectSize is the point of the display develop: the
+// frame comes back smaller than the file, and the file's own size still travels so a
+// plugin that sizes a kernel in project pixels stays correct.
+func TestDecodeForDisplayReportsTheProjectSize(t *testing.T) {
+	paths := samplePaths(t)
+	path := paths[0]
+
+	full, err := New().Decode(path, image.LinearRec2020)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+
+	small, err := New().DecodeForDisplay(path, image.LinearRec2020, 512)
+	if err != nil {
+		t.Fatalf("DecodeForDisplay: %v", err)
+	}
+
+	if small.Image.Empty() {
+		t.Fatal("the display develop produced no pixels")
+	}
+	if small.Image.LongEdge() > 512 {
+		t.Fatalf("the display frame is %dx%d, larger than the 512 asked for",
+			small.Image.W, small.Image.H)
+	}
+	if small.ProjectW != full.Image.W || small.ProjectH != full.Image.H {
+		t.Fatalf("project = %dx%d, want the file's own %dx%d",
+			small.ProjectW, small.ProjectH, full.Image.W, full.Image.H)
+	}
+	// The full develop reports the project as the frame it produced, so a caller that
+	// never scales does not have to special-case the field.
+	if full.ProjectW != full.Image.W || full.ProjectH != full.Image.H {
+		t.Fatalf("full project = %dx%d, want the frame's own %dx%d",
+			full.ProjectW, full.ProjectH, full.Image.W, full.Image.H)
+	}
+	if small.FileSpace != image.LinearRec2020 {
+		t.Fatalf("FileSpace = %v", small.FileSpace)
+	}
+}
+
+// TestDecodeForDisplayAboveTheFileSizeDoesNotEnlarge keeps the cap a ceiling: a
+// request larger than the file develops it whole and leaves it alone.
+func TestDecodeForDisplayAboveTheFileSizeDoesNotEnlarge(t *testing.T) {
+	paths := samplePaths(t)
+	path := paths[0]
+
+	full, err := New().Decode(path, image.SRGB)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	big, err := New().DecodeForDisplay(path, image.SRGB, full.Image.LongEdge()*4)
+	if err != nil {
+		t.Fatalf("DecodeForDisplay: %v", err)
+	}
+	if big.Image.W != full.Image.W || big.Image.H != full.Image.H {
+		t.Fatalf("the frame is %dx%d, want the untouched %dx%d",
+			big.Image.W, big.Image.H, full.Image.W, full.Image.H)
+	}
+}

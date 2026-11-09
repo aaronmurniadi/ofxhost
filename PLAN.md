@@ -36,6 +36,7 @@ These are settled. Do not reopen them without a written reason in this file.
 | D10 | **UI state is persisted; a chain is persisted too, under the image's path** (amended, see §5 item 5) | A user who spent time on a chain expects it back when the same image opens. The record goes in the state directory, never beside the photograph, so no file appears where the user did not ask for one. Restoring matches by plugin identifier, because the plugin list changes between launches |
 | D11 | **A plugin's own input colour space parameter is initialised from the document, once, at add time** | The OFX route is blocked by a support library that predates OFX 1.5 colour. These plugins carry a parameter for exactly that reason, and leaving a Rec.2020 image to be processed as ARRI LogC4 is a wrong render, not a missing nicety. Adding it once initialises the control instead of overriding the user, and **Reset all** applies it again, because a reset would otherwise put the vendor's space back |
 | D12 | **The window has no top bar. Its actions live in the Plugins panel, and the look follows the previous host's Dear ImGui theme** | The previous host puts Open, Export, the colour space controls, the preview resolution and the status line at the top of the Plugins panel, and keeps the whole window for panels. The same order here removes a line of chrome above the panels and leaves one place where the actions are. The styling follows the Dear ImGui theme the previous host shipped, so the two programs look like the same tool: square corners, one-pixel borders, tight rows, and a dense type scale |
+| D13 | **A RAW file is developed at the size the window can show, not at the size of the file.** Export develops it again, whole | Opening a 16 MP X-Trans file costs 1.8 s at full size and 0.13 s at display size, because LibRaw's demosaic is the whole cost and a quarter of the pixels is a quarter of that work. The document keeps the file's own dimensions beside the frame so a plugin that sizes a kernel in project pixels stays correct, and `Render` re-develops at full size when a caller asks for more pixels than the frame holds. Measured and argued in §7.6 |
 
 D7 has one exception worth naming: the **on-disk formats** (`docs/workspace-format.md`
 in the old repo) are a reasonable starting shape for the sidecar JSON. Read them as
@@ -900,6 +901,81 @@ So the acceptance test is a pixel comparison, not the presence of a property: re
 same frame through `spektrafilm` twice, declaring `Lin Rec.2020` and then `sRGB`, and
 compare the output. **If the pixels do not move, revert the change rather than keep a
 property nothing reads.**
+
+### 7.6 Opening a RAW file: where the 1.8 s went
+
+Decision D13. Every number here is measured on the committed 4952×3288 Fujifilm X-M1
+sample, on this machine, with `LibRaw 0.22` from Homebrew.
+
+#### The stages
+
+| Stage | Time |
+|---|---|
+| `libraw_open_file` | 1 ms |
+| `libraw_unpack` | 56 ms |
+| `libraw_dcraw_process` (X-Trans Markesteijn, 3 passes) | **1 591 ms** |
+| `libraw_dcraw_make_mem_image` | 31 ms |
+| expand RGB16 to RGBA16 | 21 ms |
+
+The demosaic is the file. LibRaw already threads it: with `OMP_NUM_THREADS=1` the same
+stage takes 7 533 ms, so there is no parallelism left to win.
+
+Two cheaper develops exist and both were measured:
+
+| Develop | `dcraw_process` | Whole decode |
+|---|---|---|
+| full | 1 591 ms | 1 739 ms |
+| `half_size = 1` | 21 ms | 91 ms |
+| `user_qual = 0` (bilinear) | 168 ms | 286 ms |
+
+`half_size` is not a downscale of the full develop: LibRaw bins the sensor 2×2 and
+demosaics a frame a quarter of the area. For a preview capped at 1920 pixels from a
+4952-pixel file, the half develop is 2476 pixels wide, so the frame the window sees is
+the same size either way.
+
+#### What was built
+
+- `port.DisplayDecoder.DecodeForDisplay(path, want, maxEdge)` is a second interface, in
+the shape of `port.Thumbnailer`: a develop that is only going to be looked at may take
+a cheaper path. A decoder that cannot scale implements only `ImageDecoder`, and the
+document develops whole.
+- `port.Decoded` gained `ProjectW` and `ProjectH`. A shrunken frame no longer reveals
+the file's size, and the chain is told the project long edge so a plugin that sizes a
+kernel, a blur radius or a noise model in project pixels stays correct.
+- `document.State.Frame` may be smaller than the project; `ProjectW`/`ProjectH` are
+what the status line reports. `RenderAt` re-develops at full size first when the caller
+asks for more pixels than the frame holds, which is what an export and a preview set to
+"Full resolution" both do. The rule lives in one method, `ensureDeveloped`, so no caller
+has to know about it.
+
+Result: the open lands in **132 ms** instead of 1.86 s. An export pays the full develop
+again (1.8 s) on a path that already took seconds.
+
+#### The colour conversion, and a trap in lcms2
+
+With the preview in Linear Rec.2020 the publish went from 239 ms to 591 ms. The 350 ms
+was lcms2 converting the 1920×1274 preview to sRGB, and it is not the flag that is
+wrong: a real frame converts at 7.3 Mpx/s in float RGBA, in 16-bit RGBA, with
+`COPY_ALPHA`, without it, with `NOCACHE`, with either of the precalculations, and with
+`NOOPTIMIZE`. What decides the cost is the **input** space:
+
+| Conversion | float | 16-bit |
+|---|---|---|
+| Linear Rec.2020 → sRGB | 338 ms | 336 ms |
+| sRGB → Linear Rec.2020 | 279 ms | 53 ms |
+| Display P3 → sRGB | 327 ms | 51 ms |
+| Linear Rec.2020 → Linear Rec.709 | 285 ms | 264 ms |
+
+lcms2's fast path does not apply when the input profile's curve is linear. The shim now
+transforms at 16 bits, which is a 6.4× win for any conversion whose input is encoded and
+neutral for the two linear spaces. It is not a cure for a linear working space: that
+would mean applying the transfer function outside lcms2, and a device link is not a
+substitute — measured against the direct transform on a saturated gradient, a link is
+7× faster and wrong by up to 8.6 % of full scale.
+
+A first, uniform-colour measurement of this appeared to show 26×. It was measuring
+lcms2's transform cache: the same input tuple hashed to the same result. Real pixels do
+not.
 
 ---
 

@@ -191,10 +191,26 @@ func (d *Document) Open(req OpenRequest) OpenResult {
 	if _, err := d.docs.Open(d.ctx, document.OpenRequest{
 		Path:  req.Path,
 		Space: image.ColorSpace(req.Space),
+		// The develop is done at the size the window can show, which is the largest
+		// frame the preview will ever ask for. A preview set to "Full resolution"
+		// reports no cap, and the whole file is developed.
+		MaxEdge: d.previewEdge(),
 	}); err != nil {
 		return OpenResult{Error: err.Error()}
 	}
 	return OpenResult{Started: true}
+}
+
+// previewEdge is the long edge the preview is capped to right now.
+//
+// Zero means no cap: the preview renderer reports zero both when the user picked
+// "Full resolution" and when it has no renderer at all, and both cases want the
+// whole file.
+func (d *Document) previewEdge() int {
+	if d.preview == nil {
+		return 0
+	}
+	return d.preview.MaxEdge()
 }
 
 // pump applies any decode that has finished.
@@ -230,8 +246,10 @@ func (d *Document) Current() DocumentDTO {
 	out := DocumentDTO{
 		Open:         state.Path != "",
 		Path:         state.Path,
-		Width:        state.Full.W,
-		Height:       state.Full.H,
+		// Width and Height are the file's own dimensions, not the size the frame was
+		// developed at: the status line reports what the photograph is.
+		Width:        state.ProjectW,
+		Height:       state.ProjectH,
 		FileSpace:    state.FileSpace.String(),
 		WorkingSpace: state.WorkingSpace.String(),
 		InputSpace:   state.InputSpace.String(),
@@ -272,7 +290,7 @@ type PreviewURLResponse struct {
 func (d *Document) PublishPreview() PreviewURLResponse {
 	d.pump()
 	state := d.docs.State()
-	if state.Path == "" || state.Full.Empty() {
+	if state.Path == "" || state.Frame.Empty() {
 		return PreviewURLResponse{Error: "no image is open"}
 	}
 	if d.preview == nil {

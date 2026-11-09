@@ -19,9 +19,11 @@
 
 #include <lcms2.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <vector>
 
 namespace {
 
@@ -235,12 +237,51 @@ extern "C" int ofxl_convert(float *src, float *dst, size_t count, int from_space
     return 1;
   }
 
-  /* TYPE_RGBA_FLT is four float32 channels, which is the pipeline's layout.
+  /* The transform runs at 16 bits per channel rather than in float, and that is the
+   * whole cost of this function.
+   *
+   * Measured on a real 1920x1274 preview frame, which is the size a window asks for:
+   * a conversion whose INPUT space is encoded (sRGB or Display P3) drops from 327 ms
+   * in float to 50 ms at 16 bits, 6.4x. A conversion whose input space is linear
+   * costs 335 ms either way, because lcms2's fast path does not apply to a linear
+   * input curve. Nothing else moves it: COPY_ALPHA, NOCACHE, RGB in place of RGBA,
+   * LOWRESPRECALC, HIGHRESPRECALC and NOOPTIMIZE all land within 2% of each other.
+   *
+   * So this is a win for Display P3 as a working space and neutral for the two linear
+   * spaces. It is not a cure for a linear working space; that would need the transfer
+   * function applied outside lcms2.
+   *
+   * 16 bits loses nothing that matters here. The pipeline's samples start as 16-bit
+   * integers from the decoder, so a 16-bit transform is exactly the source precision,
+   * and every destination is 8 or 16 bits per channel. The two float passes below
+   * cost about 20 ms together, well under what the transform saves on an encoded
+   * input. The alternative, keeping the data in 16 bits end to end, is a change to
+   * the pipeline and not to this file. */
+  const size_t samples = count * 4;
+
+  /* Reused between calls: a new allocation for every preview would be a page-fault
+   * storm for no reason. The mutex is held, so one buffer pair is enough. */
+  static std::vector<unsigned short> input16;
+  static std::vector<unsigned short> output16;
+  input16.resize(samples);
+  output16.resize(samples);
+
+  for (size_t i = 0; i < samples; ++i) {
+    float v = src[i];
+    if (v < 0.0f) {
+      v = 0.0f;
+    } else if (v > 1.0f) {
+      v = 1.0f;
+    }
+    input16[i] = static_cast<unsigned short>(v * 65535.0f + 0.5f);
+  }
+
+  /* TYPE_RGBA_16 is four 16-bit channels, which is the pipeline's layout.
    * cmsFLAGS_COPY_ALPHA matters: without it lcms2 leaves the fourth channel
    * alone on some paths and zeroes it on others, and a preview with a lost alpha
    * channel is a visible bug. */
   cmsHTRANSFORM transform =
-      cmsCreateTransform(from, TYPE_RGBA_FLT, to, TYPE_RGBA_FLT, intentFor(intent), cmsFLAGS_COPY_ALPHA);
+      cmsCreateTransform(from, TYPE_RGBA_16, to, TYPE_RGBA_16, intentFor(intent), cmsFLAGS_COPY_ALPHA);
   if (transform == nullptr) {
     if (err != nullptr) {
       *err = kTransformFailed;
@@ -248,8 +289,13 @@ extern "C" int ofxl_convert(float *src, float *dst, size_t count, int from_space
     return 1;
   }
 
-  cmsDoTransform(transform, src, dst, static_cast<cmsUInt32Number>(count));
+  cmsDoTransform(transform, input16.data(), output16.data(), static_cast<cmsUInt32Number>(count));
   cmsDeleteTransform(transform);
+
+  const float scale = 1.0f / 65535.0f;
+  for (size_t i = 0; i < samples; ++i) {
+    dst[i] = static_cast<float>(output16[i]) * scale;
+  }
   return 0;
 }
 

@@ -2,7 +2,7 @@
 
 Guidance for anyone — human or agent — changing this repository.
 
-Read `PLAN.md` first. It holds the decisions (D1–D10), the milestone order, and the
+Read `PLAN.md` first. It holds the decisions (D1–D13), the milestone order, and the
 reasoning behind the architecture. This file holds what the plan does not: how to work
 in the tree without breaking it.
 
@@ -274,6 +274,24 @@ Scaling the encoded PNG made the preview smaller and no faster. The cap belongs 
 chain input, and the *project* long edge must travel with it: plugins size kernels and
 noise models in project pixels, so a chain that only sees the shrunken frame computes
 them wrong by the scale factor.
+
+The same rule now governs the develop (D13, PLAN §7.6). A RAW opens at the size the
+window can show, which is `half_size` for a 16 MP file, so `document.State.Frame` is
+smaller than the photograph and `ProjectW`/`ProjectH` carry the real dimensions. Never
+take the project size from the frame. `Render` re-develops at full size before an export
+or a preview set to a larger resolution; that decision lives in `ensureDeveloped`.
+
+### The demosaic is the whole cost of opening a RAW, and lcms2 is slow on a linear input
+
+Both measured on the committed sample, both surprising until they were timed. PLAN §7.6
+holds the tables; the short version:
+
+- `libraw_dcraw_process` is 1 591 ms of a 1 739 ms full develop. `half_size` makes it 21 ms.
+  Before blaming the host for a slow open, time the develop, not the code around it.
+- lcms2 converts a real frame at 7.3 Mpx/s when the **input** profile has a linear curve,
+  whatever format or flag is used, and at 49 Mpx/s at 16 bits when the input is encoded.
+  A conversion benchmarked on a uniform colour measures the transform cache, not the
+  transform: it read 26× where the honest number was 1.0×.
 
 ### `defaultSize` is read only at mount
 
