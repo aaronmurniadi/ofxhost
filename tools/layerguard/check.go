@@ -151,11 +151,11 @@ func checkImport(file string, line int, importPath string) (Violation, bool) {
 	}
 	rest := strings.TrimPrefix(importPath, ModulePath+"/")
 
-	fromLayer, _, ok := splitLayerPath(file)
+	fromLayer, ok := splitLayerPath(file)
 	if !ok {
 		return Violation{}, false
 	}
-	toLayer, _, ok := splitLayerPath(rest)
+	toLayer, ok := splitLayerPath(rest)
 	if !ok {
 		// A package outside internal/ (cmd, tools, cgo) is not part of the graph.
 		return Violation{}, false
@@ -178,16 +178,16 @@ func checkImport(file string, line int, importPath string) (Violation, bool) {
 	return Violation{}, false
 }
 
-// splitLayerPath returns the first path element and the remainder.
-func splitLayerPath(path string) (layer, rest string, ok bool) {
+// splitLayerPath returns the first path element under internal/.
+func splitLayerPath(path string) (layer string, ok bool) {
 	trimmed := strings.TrimPrefix(path, "internal/")
 	if trimmed == path {
-		return "", "", false
+		return "", false
 	}
 	if i := strings.Index(trimmed, "/"); i >= 0 {
-		return trimmed[:i], trimmed[i+1:], true
+		return trimmed[:i], true
 	}
-	return trimmed, "", true
+	return trimmed, true
 }
 
 // isWails reports whether an import path belongs to the Wails framework.

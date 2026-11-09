@@ -54,13 +54,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "plugins":
 		return runPlugins(args[1:], stdout, stderr)
 	case "version":
-		fmt.Fprintf(stdout, "ofxhost %s\nlibraw %s\nlcms2 %s\n", Version, rawlib.Version(), lcms.Version())
+		_, _ = fmt.Fprintf(stdout, "ofxhost %s\nlibraw %s\nlcms2 %s\n", Version, rawlib.Version(), lcms.Version())
 		return ExitOK
 	case "help", "-h", "--help":
-		fmt.Fprint(stdout, Usage)
+		_, _ = fmt.Fprint(stdout, Usage)
 		return ExitOK
 	}
-	fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], Usage)
+	_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], Usage)
 	return ExitUsage
 }
 
@@ -86,17 +86,17 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		return ExitUsage
 	}
 	if flags.NArg() == 0 {
-		fmt.Fprintf(stderr, "render: no input file\n")
+		_, _ = fmt.Fprintf(stderr, "render: no input file\n")
 		return ExitUsage
 	}
 	if *output == "" {
-		fmt.Fprintf(stderr, "render: -out is required\n")
+		_, _ = fmt.Fprintf(stderr, "render: -out is required\n")
 		return ExitUsage
 	}
 
 	workingSpace, ok := spaceByName(*space)
 	if !ok {
-		fmt.Fprintf(stderr, "render: unknown colour space %q\n", *space)
+		_, _ = fmt.Fprintf(stderr, "render: unknown colour space %q\n", *space)
 		return ExitUsage
 	}
 
@@ -106,10 +106,10 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 	decoder := rawlib.New()
 	decoded, err := decoder.Decode(input, workingSpace)
 	if err != nil {
-		fmt.Fprintf(stderr, "render: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "render: %v\n", err)
 		return ExitFailed
 	}
-	fmt.Fprintf(stdout, "decoded %s: %dx%d, %s, ISO %d %s %s\n",
+	_, _ = fmt.Fprintf(stdout, "decoded %s: %dx%d, %s, ISO %d %s %s\n",
 		input, decoded.Image.W, decoded.Image.H, decoded.FileSpace,
 		decoded.Camera.ISO, decoded.Camera.Make, decoded.Camera.Model)
 
@@ -121,7 +121,7 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		converter := lcms.New()
 		converted, convertErr := converter.Convert(frame, frameSpace, image.SRGB, image.Perceptual)
 		if convertErr != nil {
-			fmt.Fprintf(stderr, "render: %v\n", convertErr)
+			_, _ = fmt.Fprintf(stderr, "render: %v\n", convertErr)
 			return ExitFailed
 		}
 		frame = converted
@@ -131,11 +131,11 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if err := writePNG(*output, frame); err != nil {
-		fmt.Fprintf(stderr, "render: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "render: %v\n", err)
 		return ExitFailed
 	}
 
-	fmt.Fprintf(stdout, "wrote %s: %dx%d in %s\n", *output, frame.W, frame.H, time.Since(started).Round(time.Millisecond))
+	_, _ = fmt.Fprintf(stdout, "wrote %s: %dx%d in %s\n", *output, frame.W, frame.H, time.Since(started).Round(time.Millisecond))
 	return ExitOK
 }
 

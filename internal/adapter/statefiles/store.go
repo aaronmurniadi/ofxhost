@@ -56,31 +56,19 @@ func NewIn(dir string) *Store {
 	if err != nil {
 		abs = dir
 	}
-	state := func(p string) (string, error) { return paths.Under(filepath.Join(abs, "state"), p), nil }
+	state := func(p string) string { return paths.Under(filepath.Join(abs, "state"), p) }
 	return &Store{
 		settingsPath: func() (string, error) {
 			return filepath.Join(abs, "config", "settings.json"), nil
 		},
 		sidecarPath: func(imagePath string) (string, error) {
-			name, err := state(imagePath)
-			if err != nil {
-				return "", err
-			}
-			return name + ".json", nil
+			return state(imagePath) + ".json", nil
 		},
 		exportSidecarPath: func(exportPath string) (string, error) {
-			name, err := state(exportPath)
-			if err != nil {
-				return "", err
-			}
-			return name + ".export.json", nil
+			return state(exportPath) + ".export.json", nil
 		},
 		directoryEntryPath: func(dirPath string) (string, error) {
-			name, err := state(dirPath)
-			if err != nil {
-				return "", err
-			}
-			return filepath.Join(name, "_directory.json"), nil
+			return filepath.Join(state(dirPath), "_directory.json"), nil
 		},
 		sessionPath: func() (string, error) {
 			return filepath.Join(abs, "state", "_session.json"), nil

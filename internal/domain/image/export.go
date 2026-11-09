@@ -17,13 +17,13 @@ const (
 const ExportFormatCount = 5
 
 type formatInfo struct {
-	name       string
-	extension  string
-	bitDepths  []int
-	quality    bool // writes with a lossy quality setting
-	lossless   bool // offers a lossless switch
-	icc        bool // can carry an ICC profile
-	alpha      bool // can carry an alpha channel
+	name      string
+	extension string
+	bitDepths []int
+	quality   bool // writes with a lossy quality setting
+	lossless  bool // offers a lossless switch
+	icc       bool // can carry an ICC profile
+	alpha     bool // can carry an alpha channel
 }
 
 // Ordered by the ExportFormat values above.

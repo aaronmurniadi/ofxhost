@@ -17,26 +17,26 @@ func runPlugins(args []string, stdout, stderr io.Writer) int {
 
 	host, err := ofxhost.New(ofxhost.Options{})
 	if err != nil {
-		fmt.Fprintf(stderr, "plugins: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "plugins: %v\n", err)
 		return ExitFailed
 	}
 	defer func() { _ = host.Close() }()
 
 	if err := host.Discover(nil); err != nil {
-		fmt.Fprintf(stderr, "plugins: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "plugins: %v\n", err)
 		return ExitFailed
 	}
 
 	plugins := host.Plugins()
-	fmt.Fprintf(stdout, "OpenFX %s\n", ofxhost.Version)
-	fmt.Fprintf(stdout, "searching: %v\n", ofxhost.PluginDirs())
-	fmt.Fprintf(stdout, "%d plugins\n", len(plugins))
+	_, _ = fmt.Fprintf(stdout, "OpenFX %s\n", ofxhost.Version)
+	_, _ = fmt.Fprintf(stdout, "searching: %v\n", ofxhost.PluginDirs())
+	_, _ = fmt.Fprintf(stdout, "%d plugins\n", len(plugins))
 	for _, plugin := range plugins {
 		author := plugin.Author
 		if author == "" {
 			author = "-"
 		}
-		fmt.Fprintf(stdout, "  %-28s %-40s %s\n", plugin.Label, plugin.Identifier, author)
+		_, _ = fmt.Fprintf(stdout, "  %-28s %-40s %s\n", plugin.Label, plugin.Identifier, author)
 	}
 	return ExitOK
 }
