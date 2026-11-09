@@ -7,9 +7,10 @@ name: CI
 # frontend type check were only as reliable as the person who remembered them. A rule that
 # a machine does not check is a rule that will be broken.
 #
-# The frontend job runs `wails3 generate bindings` before it type-checks. That is not
-# optional: frontend/bindings is gitignored, the Wails vite plugin resolves it while
-# vite.config.ts is being loaded, and without it vitest fails before the first test.
+# The frontend job needs no Go toolchain and no GTK: vite.config.ts drops the Wails vite
+# plugin in test mode, so a unit test reads no generated binding. Installing the Wails CLI
+# there was tried and reverted - the CLI links GTK, so the job failed on -lglib-2.0 before it
+# ran anything.
 #
 # The release workflow builds all three platforms. This one proves the code, and it proves
 # it on the two platforms where the C++ and the cgo tagging actually differ. Windows is left
@@ -34,10 +35,10 @@ permissions:
 env:
   GO_VERSION: '1.26'
   NODE_VERSION: '22'
-  GOLANGCI_VERSION: v2.5.0
-  # Pinned to the version release.yml builds with, so a binding generated here is the same
-  # binding a release ships.
-  WAILS_VERSION: v3.1.0
+  # Newer than the linter's own Go requirement: v2.5.0 was built with Go 1.25 and refuses a
+  # module that targets 1.26.0 ("the Go language version used to build golangci-lint is lower
+  # than the targeted Go version"). Bump this when go.mod moves.
+  GOLANGCI_VERSION: v2.15.0
 
 jobs:
   go:
@@ -149,11 +150,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      # The submodule is here for the bindings generator, not for a build: it reads the Go
-      # packages, and the adapter packages name headers from third_party/openfx.
+      # No submodule: this job compiles nothing and generates nothing.
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       - uses: actions/setup-node@v5
         with:
@@ -161,23 +159,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
       - run: npm ci
-
-      # vite.config.ts loads the Wails vite plugin, and that plugin resolves the generated
-      # event bindings as soon as the config is read. frontend/bindings is gitignored, so on
-      # a clean checkout vitest died before it ran a test: "Event bindings module not found".
-      # Generating them is also what makes the type check see the real service types.
-      - name: Install the Wails CLI
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
-
-      - name: Generate the Wails bindings
-        working-directory: .
-        run: wails3 generate bindings
 
       # TypeScript first: a type error is a compile failure, and the unit tests cannot see
       # one that the compiler would have caught in a second.

@@ -30,17 +30,26 @@ something to embed before the first npm run build in frontend/.
 }
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   server: {
     host: "127.0.0.1",
     port: Number(process.env.WAILS_VITE_PORT) || 9245,
     strictPort: true,
   },
-  plugins: [react(), wails("./bindings"), embedPlaceholder()],
+  plugins: [
+    react(),
+    // The Wails plugin resolves frontend/bindings while the config is read, and that
+    // directory is gitignored because `wails3 generate bindings` produces it. In test mode
+    // the plugin is not loaded: no test imports a generated binding, and requiring one
+    // meant a clean checkout failed before the first test with "Event bindings module not
+    // found". Loading it for dev and build keeps the typed events where they are used.
+    ...(mode === "test" ? [] : [wails("./bindings")]),
+    embedPlaceholder(),
+  ],
   test: {
     // The theme test reads app.css as text to prove every theme the settings panel offers
     // has a block in it. Vitest stubs CSS by default, which would make that test compare an
     // empty string against the list and pass for the wrong reason.
     css: true,
   },
-});
+}));
