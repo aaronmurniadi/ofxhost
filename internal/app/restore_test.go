@@ -57,6 +57,7 @@ func newSession(t *testing.T, host *ofxhost.Host, store *statefiles.Store) *sess
 	doc.SetCameraSink(graph)
 	doc.SetImageSink(graph)
 	doc.SetChainStore(store)
+	docs.SetOutcomeSink(doc.OnDecode)
 
 	return &session{
 		host:  host,

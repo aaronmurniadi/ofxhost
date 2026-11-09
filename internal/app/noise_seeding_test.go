@@ -69,6 +69,9 @@ func TestTheDenoiserIsSeededFromTheOpenCamera(t *testing.T) {
 	doc := binds.NewDocument(ctx, docs, renderer, graph, host, nil, nil)
 	chain := binds.NewChain(graph, host, func() bool { return true }, func() string { return "Rec.709" })
 	doc.SetCameraSink(graph)
+	// The composition root wires this, so the test does too: a finished decode is now
+	// announced by the service rather than drained by the caller.
+	docs.SetOutcomeSink(doc.OnDecode)
 
 	if result := doc.Open(binds.OpenRequest{Path: path, Space: int(domainimage.SRGB)}); result.Error != "" {
 		t.Fatalf("Open: %s", result.Error)

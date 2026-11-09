@@ -142,7 +142,7 @@ func (c *Chain) Current() ChainDTO {
 	if c.graph == nil {
 		return ChainDTO{Selected: -1, Message: "no plugin host is available"}
 	}
-	model := c.graph.Chain()
+	model := c.graph.Snapshot()
 
 	out := ChainDTO{Nodes: make([]NodeDTO, 0, model.Len()), Selected: model.Selected, Available: true}
 	for i := range model.Nodes {

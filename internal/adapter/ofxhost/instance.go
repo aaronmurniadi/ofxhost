@@ -35,8 +35,9 @@ type Instance struct {
 	params []port.ParamInfo
 	closed bool
 
-	// id is the identity the rest of the program sees. It is minted here so a
-	// native handle never leaves this package.
+	// id is the identity the rest of the program sees. It is minted at creation, the
+	// same way the C side mints its handle, so a native pointer never leaves this
+	// package and the identity is stable from the first read.
 	id int64
 	// generation counts renders, so a newer one can abort an older one.
 	generation atomic.Uint64
@@ -56,13 +57,17 @@ type Instance struct {
 // nextInstanceID mints the ids.
 var nextInstanceID atomic.Int64
 
+// newInstanceID returns the identity the rest of the program sees.
+//
+// The value is minted when the instance is created, never lazily. A lazy mint reads
+// and writes the field with no lock, and two goroutines that both found a zero would
+// mint two ids for one instance: the caller that read first keeps the stale one, and
+// the chain that keys its instances by this number pairs the wrong native handle with
+// a node.
+func newInstanceID() int64 { return nextInstanceID.Add(1) }
+
 // ID implements port.Instance.
-func (i *Instance) ID() int64 {
-	if i.id == 0 {
-		i.id = nextInstanceID.Add(1)
-	}
-	return i.id
-}
+func (i *Instance) ID() int64 { return i.id }
 
 // Label returns the plugin's display name.
 func (i *Instance) Label() string { return i.info.Label }
@@ -89,6 +94,11 @@ func (i *Instance) refreshParams() {
 // because a panel reads it every time it is drawn and rebuilding the strings per frame
 // would cost more than the draw.
 func (i *Instance) Params() []port.ParamInfo {
+	// The lock is not optional: refreshParams replaces the slice after every write, and
+	// the panel reads this metadata on a different goroutine from the one that writes a
+	// value. Without it the copy races the replacement and reads a half-built slice.
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	out := make([]port.ParamInfo, len(i.params))
 	copy(out, i.params)
 	return out
@@ -370,8 +380,9 @@ func (i *Instance) Render(req port.RenderRequest) (image.Raster, port.RenderStat
 
 // Cancel marks every render older than generation as stale.
 //
-// It does not take the instance lock: the whole point is to reach a render that is
-// already holding it.
+// It takes the lock only long enough to read the handle and the closed flag: the
+// cancel itself must reach a render that is already holding the lock, or it would
+// block until the pass it is trying to stop had finished.
 func (i *Instance) Cancel(generation uint64) {
 	i.mu.Lock()
 	handle := i.handle

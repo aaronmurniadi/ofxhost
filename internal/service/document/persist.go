@@ -118,6 +118,9 @@ func (s *Service) Restore(store Store) (path string, ok bool, err error) {
 		candidate = filepath.Join(dir, candidate)
 	}
 	if _, statErr := os.Stat(candidate); statErr != nil {
+		// The file was open when the program last quit and is gone now. That is not a
+		// failure to report: the caller starts empty, which is the first-run case.
+		//nolint:nilerr // the missing file is the answer, not an error to pass on.
 		return "", false, nil
 	}
 	return candidate, true, nil

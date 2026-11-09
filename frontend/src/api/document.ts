@@ -52,6 +52,18 @@ export interface PreviewURLResponse {
   error: string;
 }
 
+/**
+ * DocumentEvent announces a finished decode.
+ *
+ * It carries no pixels: a preview is fetched from the frame server. `path` names the file
+ * the decode read, which is not always the file that is open, because a failed decode
+ * leaves the previous document in place.
+ */
+export interface DocumentEvent {
+  path: string;
+  error: string;
+}
+
 /** call invokes one binding method, throwing on a transport failure. */
 async function call<T>(method: string, ...args: unknown[]): Promise<T> {
   return (await Call.ByName(`${SERVICE}.${STRUCT}.${method}`, ...args)) as T;

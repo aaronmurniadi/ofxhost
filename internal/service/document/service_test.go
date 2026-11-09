@@ -3,7 +3,6 @@ package document
 import (
 	"context"
 	"errors"
-	"github.com/aaronmurniadi/ofxhost/internal/domain/project"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/aaronmurniadi/ofxhost/internal/domain/project"
 
 	"github.com/aaronmurniadi/ofxhost/internal/domain/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/domain/image"
@@ -26,6 +27,11 @@ type fakeDecoder struct {
 	errs    map[string]error
 	delay   time.Duration
 	rawExts []string
+
+	// active and peak measure how many decodes run at once, which is what the
+	// develop lock is supposed to keep at one.
+	active int
+	peak   int
 }
 
 func newFakeDecoder() *fakeDecoder {
@@ -42,7 +48,17 @@ func (f *fakeDecoder) Decode(path string, want image.ColorSpace) (port.Decoded, 
 	frame := f.frames[path]
 	err := f.errs[path]
 	delay := f.delay
+	f.active++
+	if f.active > f.peak {
+		f.peak = f.active
+	}
 	f.mu.Unlock()
+
+	defer func() {
+		f.mu.Lock()
+		f.active--
+		f.mu.Unlock()
+	}()
 
 	if delay > 0 {
 		time.Sleep(delay)
@@ -79,6 +95,13 @@ func (f *fakeDecoder) callCount() int {
 	return len(f.calls)
 }
 
+// peakConcurrency reports the most decodes that ever ran at once.
+func (f *fakeDecoder) peakConcurrency() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.peak
+}
+
 // fakeColor is a converter that copies, so a test does not need lcms2.
 type fakeColor struct{}
 
@@ -92,29 +115,87 @@ func (fakeColor) Profile(space image.ColorSpace) ([]byte, error) {
 	return []byte("not a real profile"), nil
 }
 
+// recorder collects the decode announcements of one service.
+//
+// A test waits for the announcement rather than polling for it, which is what the
+// service now expects: a decode says when it is done, and nothing has to drain it.
+type recorder struct {
+	mu       sync.Mutex
+	outcomes []Outcome
+	consumed int
+}
+
+func (r *recorder) add(outcome Outcome) {
+	r.mu.Lock()
+	r.outcomes = append(r.outcomes, outcome)
+	r.mu.Unlock()
+}
+
+// next returns the first unread announcement, or false when there is none.
+func (r *recorder) next() (Outcome, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.outcomes) <= r.consumed {
+		return Outcome{}, false
+	}
+	outcome := r.outcomes[r.consumed]
+	r.consumed++
+	return outcome, true
+}
+
+// recorders maps a service to the recorder newService installed on it.
+var recorders sync.Map // *Service -> *recorder
+
 // newService returns a service and closes it at the end of the test.
 func newService(t *testing.T, decoder port.ImageDecoder) *Service {
+	t.Helper()
+	s, _ := newServiceWithStatus(t, decoder)
+	return s
+}
+
+// newServiceWithStatus returns a service and the status sink it reports to.
+func newServiceWithStatus(t *testing.T, decoder port.ImageDecoder) (*Service, *status.Sink) {
 	t.Helper()
 	if decoder == nil {
 		decoder = newFakeDecoder()
 	}
 	sink := &status.Sink{}
 	s := New(decoder, fakeColor{}, sink, nil)
-	t.Cleanup(s.Close)
-	return s
+	rec := &recorder{}
+	s.SetOutcomeSink(rec.add)
+	recorders.Store(s, rec)
+	t.Cleanup(func() {
+		s.Close()
+		recorders.Delete(s)
+	})
+	return s, sink
 }
 
-// waitFor pumps until the decode is applied or the deadline passes.
+// waitFor waits for the next decode announcement, which the service makes only after
+// the outcome is applied.
 func waitFor(t *testing.T, s *Service) {
 	t.Helper()
+	if _, ok := waitForOutcome(t, s); !ok {
+		t.Fatal("the decode never landed")
+	}
+}
+
+// waitForOutcome waits for the next decode announcement and returns it.
+func waitForOutcome(t *testing.T, s *Service) (Outcome, bool) {
+	t.Helper()
+	value, ok := recorders.Load(s)
+	if !ok {
+		t.Fatal("the service was not made by newService, so it has no recorder")
+	}
+	rec := value.(*recorder)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if s.Pump() {
-			return
+		if outcome, ready := rec.next(); ready {
+			return outcome, true
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("the decode never landed")
+	return Outcome{}, false
 }
 
 func TestOpenRequiresAPath(t *testing.T) {
@@ -208,11 +289,9 @@ func TestOpenDecodesAndPublishes(t *testing.T) {
 }
 
 func TestOpenReportsThroughTheStatusLine(t *testing.T) {
-	sink := &status.Sink{}
 	decoder := newFakeDecoder()
 	decoder.frames["/tmp/a.cr3"] = image.New(20, 10)
-	s := New(decoder, fakeColor{}, sink, nil)
-	t.Cleanup(s.Close)
+	s, sink := newServiceWithStatus(t, decoder)
 
 	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3", Space: image.SRGB}); err != nil {
 		t.Fatalf("Open: %v", err)
@@ -221,13 +300,7 @@ func TestOpenReportsThroughTheStatusLine(t *testing.T) {
 		t.Fatalf("the first message is %q", got)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if s.Pump() {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitFor(t, s)
 	if got := sink.Text(); !strings.Contains(got, "Opened a.cr3") {
 		t.Fatalf("the final message is %q", got)
 	}
@@ -241,7 +314,13 @@ func TestAFailedDecodeKeepsThePreviousFrame(t *testing.T) {
 	decoder.errs["/tmp/bad.cr3"] = errors.New("the sensor data is corrupt")
 	sink := &status.Sink{}
 	s := New(decoder, fakeColor{}, sink, nil)
-	t.Cleanup(s.Close)
+	rec := &recorder{}
+	s.SetOutcomeSink(rec.add)
+	recorders.Store(s, rec)
+	t.Cleanup(func() {
+		s.Close()
+		recorders.Delete(s)
+	})
 
 	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/good.cr3", Space: image.SRGB}); err != nil {
 		t.Fatalf("Open good: %v", err)
@@ -286,7 +365,6 @@ func TestANewerRequestSupersedesAnOlderOne(t *testing.T) {
 		if s.State().Path == "/tmp/fast.cr3" {
 			break
 		}
-		s.Pump()
 		time.Sleep(time.Millisecond)
 	}
 
@@ -299,10 +377,23 @@ func TestANewerRequestSupersedesAnOlderOne(t *testing.T) {
 	}
 }
 
-func TestPumpReturnsFalseWithNothingPending(t *testing.T) {
+func TestNoOutcomeIsAnnouncedWithoutAnOpen(t *testing.T) {
+	// The sink is a callback now, so the old "Pump with nothing pending" case is
+	// "nothing opens, nothing is announced". A spurious announcement would make the
+	// window reload a document that has not changed.
 	s := newService(t, nil)
-	if s.Pump() {
-		t.Fatal("Pump applied something with nothing pending")
+	time.Sleep(20 * time.Millisecond)
+
+	value, ok := recorders.Load(s)
+	if !ok {
+		t.Fatal("the recorder is missing")
+	}
+	rec := value.(*recorder)
+	rec.mu.Lock()
+	count := len(rec.outcomes)
+	rec.mu.Unlock()
+	if count != 0 {
+		t.Fatalf("%d outcomes were announced with nothing open", count)
 	}
 }
 
@@ -328,7 +419,7 @@ func TestStateIsNotRacedByTheDecodeGoroutine(t *testing.T) {
 		if _, err := s.Open(context.Background(), OpenRequest{Path: path, Space: image.SRGB}); err != nil {
 			t.Fatalf("Open: %v", err)
 		}
-		s.Pump()
+		waitFor(t, s)
 	}
 	<-done
 	if readCount.Load() == 0 {
@@ -361,6 +452,90 @@ func TestCloseWaitsForARunningDecode(t *testing.T) {
 	// The decode ran to completion even though the service closed mid-flight.
 	if decoder.callCount() != 1 {
 		t.Fatalf("the decoder ran %d times", decoder.callCount())
+	}
+}
+
+func TestCloseCannotRaceAPendingOpen(t *testing.T) {
+	// The closed check and the wait-group add are one step. Without that, Close could set
+	// closed, call wg.Wait, and return in the gap before the Add, and the decode would
+	// then write into a service the caller believed was gone. Under the race detector
+	// this loop is what makes the gap visible.
+	for i := 0; i < 50; i++ {
+		s := New(newFakeDecoder(), fakeColor{}, nil, nil)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = s.Open(context.Background(), OpenRequest{Path: "/tmp/a.cr3", Space: image.SRGB})
+		}()
+		go func() {
+			defer wg.Done()
+			s.Close()
+		}()
+		wg.Wait()
+	}
+}
+
+func TestAFailedDecodeIsAnnounced(t *testing.T) {
+	// A failure is announced like a success, because the window has to clear its
+	// in-flight mark. A failed decode leaves the previous document in place, so the
+	// announcement and the state disagree on purpose.
+	decoder := newFakeDecoder()
+	decoder.frames["/tmp/good.cr3"] = image.New(20, 10)
+	decoder.errs["/tmp/bad.cr3"] = errors.New("the sensor data is corrupt")
+	s := newService(t, decoder)
+
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/good.cr3", Space: image.SRGB}); err != nil {
+		t.Fatalf("Open good: %v", err)
+	}
+	waitFor(t, s)
+
+	if _, err := s.Open(context.Background(), OpenRequest{Path: "/tmp/bad.cr3", Space: image.SRGB}); err != nil {
+		t.Fatalf("Open bad: %v", err)
+	}
+	outcome, ok := waitForOutcome(t, s)
+	if !ok {
+		t.Fatal("the failure was never announced")
+	}
+	if outcome.Err == nil {
+		t.Fatal("the announcement carries no error")
+	}
+	if outcome.Path != "/tmp/bad.cr3" {
+		t.Fatalf("the announcement names %q", outcome.Path)
+	}
+	if s.State().Path != "/tmp/good.cr3" {
+		t.Fatalf("the failure replaced the document with %q", s.State().Path)
+	}
+}
+
+func TestDevelopsDoNotOverlap(t *testing.T) {
+	// Two develops at once is two full-resolution buffers in memory at the same time,
+	// which is the cost the develop lock exists to prevent. Ask for the full file from
+	// two goroutines and check the decoder never saw both.
+	decoder := newFakeDecoder()
+	decoder.frames["/tmp/a.cr3"] = image.New(4000, 3000)
+	decoder.delay = 20 * time.Millisecond
+	s := newService(t, decoder)
+
+	// Open small, so both renders below have to develop the file again.
+	if _, err := s.Open(context.Background(), OpenRequest{
+		Path: "/tmp/a.cr3", Space: image.SRGB, MaxEdge: 500}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	waitFor(t, s)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = s.RenderAt(0, 0)
+		}()
+	}
+	wg.Wait()
+
+	if peak := decoder.peakConcurrency(); peak > 1 {
+		t.Fatalf("%d decodes ran at once, want at most 1", peak)
 	}
 }
 
@@ -406,17 +581,7 @@ func TestOpenUsesTheRealFilesystemNotADirectory(t *testing.T) {
 type recordingRunner struct {
 	gotW, gotH   int
 	gotProject   int
-	applyCalls   int
 	projectCalls int
-}
-
-func (r *recordingRunner) Apply(in image.Raster) (image.Raster, error) {
-	return in, nil
-}
-
-func (r *recordingRunner) ApplyWithGeneration(in image.Raster, _ uint64) (image.Raster, error) {
-	r.applyCalls++
-	return in, nil
 }
 
 func (r *recordingRunner) ApplyProjected(in image.Raster, projectEdge int, _ uint64) (image.Raster, error) {
@@ -689,7 +854,7 @@ func (f *scaledFakeDecoder) DecodeForDisplay(path string, want image.ColorSpace,
 	f.edges = append(f.edges, maxEdge)
 	f.mu.Unlock()
 
-	decoded, err := f.fakeDecoder.Decode(path, want)
+	decoded, err := f.Decode(path, want)
 	if err != nil {
 		return port.Decoded{}, err
 	}

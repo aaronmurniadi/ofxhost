@@ -136,7 +136,7 @@ func TestResetRestoresTheInputSpace(t *testing.T) {
 		t.Fatalf("after the reset the space is %g, want option 2 (Linear Rec.2020)", got)
 	}
 	// And the model must agree, or the next saved chain would record the vendor's space.
-	recorded := graph.Chain().Node(position).Params["inputColorSpace"].Nums
+	recorded := graph.Snapshot().Node(position).Params["inputColorSpace"].Nums
 	if len(recorded) == 0 || recorded[0] != 2 {
 		t.Fatalf("the model holds %v, want option 2", recorded)
 	}

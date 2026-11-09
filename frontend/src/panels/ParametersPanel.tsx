@@ -85,12 +85,10 @@ export default function ParametersPanel({ selected, onChange, documentPath }: Pr
   };
 
   const resetAll = async () => {
-    const [count, message] = await chainApi.resetParams(selected);
+    const [, message] = await chainApi.resetParams(selected);
+    // The count is not shown: the panel redraws from the plugin after this, so the
+    // number of changed parameters is already visible as the values themselves.
     setError(message);
-    if (message === "") {
-      setError("");
-    }
-    void count;
     await reload();
     onChange();
   };

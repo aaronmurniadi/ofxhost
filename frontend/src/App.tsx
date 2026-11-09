@@ -16,7 +16,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, chainApi, type ChainDTO, type DocumentDTO } from "./api/document";
+import { Events } from "@wailsio/runtime";
+import { api, chainApi, type ChainDTO, type DocumentDTO, type DocumentEvent } from "./api/document";
 import { createDebounced, type Debounced } from "./api/debounce";
 import { DEFAULT_PANELS, sessionApi, type PanelsDTO } from "./api/session";
 import Workspace from "./layout/Workspace";
@@ -67,16 +68,16 @@ const DEFAULT_SPACE_NAME = "Linear Rec.2020";
  */
 const SPACE_STORAGE_KEY = "ofxhost.workingSpace.v1";
 
-/** How often the shell asks whether a decode has landed. */
-const POLL_INTERVAL_MS = 120;
+/** How long the shell waits for the decode to announce itself. */
+const OPEN_TIMEOUT_MS = 120_000;
 
 /**
- * How many polls before the shell gives up.
+ * The event the Go side raises when a decode finishes.
  *
- * A 25 MP RAW takes a couple of seconds to develop, so the cap is generous: it is
- * there so a real failure ends with a message rather than an endless "Opening…".
+ * It is the same string as binds.EventDocument. The event replaced the poll: the service
+ * applies a decode whether or not the window is asking, and announces it once.
  */
-const MAX_POLLS = 600;
+const EVENT_DOCUMENT = "ofxhost:document";
 
 /**
  * Opening is a decode in flight.
@@ -247,12 +248,12 @@ export default function App() {
     chainApi.current().then(setChain).catch(() => setChain(null));
   }, []);
 
-  // Poll while a decode is in flight.
+  // Wait for the decode the Go side announced.
   //
-  // The Go side decodes on its own goroutine, so the window never blocks on a RAW
-  // file; the decode becomes visible through Current() once it lands. A repeating
-  // timer is what waits for that, and the attempt cap is what keeps a genuine
-  // failure from looking like an endless wait.
+  // The service decodes on its own goroutine and announces the result once, so the shell
+  // subscribes and does nothing else. Before this it asked every 120 ms whether the file
+  // had opened, which made the window responsible for work that was already finished: a
+  // decode that landed while nobody polled stayed invisible.
   //
   // The wait is for the requested space, not only for "a document is open". A new Open
   // leaves the previous document in place until its own decode lands, so a space chosen
@@ -262,7 +263,6 @@ export default function App() {
       return;
     }
 
-    let attempts = 0;
     let cancelled = false;
 
     const landed = (current: DocumentDTO): boolean => {
@@ -277,24 +277,15 @@ export default function App() {
       return current.workingSpace === opening.spaceName;
     };
 
-    const tick = async () => {
-      if (cancelled) {
-        return;
-      }
-      attempts += 1;
-
+    // finish reads the document and its preview once, and commits them.
+    const finish = async () => {
       const current = await api.current();
       if (cancelled) {
         return;
       }
-
+      // Another decode has already replaced this one. Its own event finishes the wait,
+      // so this one says nothing rather than showing the wrong file.
       if (!landed(current)) {
-        if (attempts >= MAX_POLLS) {
-          setMessage("The image did not open. See the log for the reason.");
-          setOpening(null);
-          return;
-        }
-        window.setTimeout(tick, POLL_INTERVAL_MS);
         return;
       }
 
@@ -318,9 +309,39 @@ export default function App() {
       reloadChain();
     };
 
-    window.setTimeout(tick, POLL_INTERVAL_MS);
+    const unsubscribe = Events.On(EVENT_DOCUMENT, (event) => {
+      const data = event.data as DocumentEvent | null;
+      if (data === null || data === undefined) {
+        return;
+      }
+      // A failure names the file it tried. A failure for an older file is not this
+      // wait's business: a newer Open has already taken over.
+      if (data.error !== "") {
+        if (data.path !== opening.path) {
+          return;
+        }
+        setMessage(data.error);
+        setOpening(null);
+        return;
+      }
+      void finish();
+    });
+
+    // The event may have been raised just before this effect subscribed, so read once
+    // now. A decode that has not landed yet leaves this call with nothing to show, and
+    // the event finishes the wait when it arrives.
+    void finish();
+
+    // A decode that never reports ends in a message rather than an endless spinner.
+    const deadline = window.setTimeout(() => {
+      setMessage("The image did not open. See the log for the reason.");
+      setOpening(null);
+    }, OPEN_TIMEOUT_MS);
+
     return () => {
       cancelled = true;
+      unsubscribe();
+      window.clearTimeout(deadline);
     };
   }, [opening, reloadChain]);
 

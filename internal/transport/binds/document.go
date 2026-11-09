@@ -47,6 +47,8 @@ type Document struct {
 	// store reads the state directory for LastSession, so the frontend can reopen the
 	// image that was open before. It is nil when persistence is not configured.
 	store document.Store
+	// emitter raises the event that tells the window a decode landed.
+	emitter Emitter
 
 	// ctx is the application lifetime, set by the composition root before the
 	// frontend can call anything.
@@ -213,39 +215,71 @@ func (d *Document) previewEdge() int {
 	return d.preview.MaxEdge()
 }
 
-// pump applies any decode that has finished.
+// EventDocument is the name the window listens for. A finished decode raises it once,
+// which is what replaced the frontend's poll.
+const EventDocument = "ofxhost:document"
+
+// Emitter publishes an event to the window.
 //
-// The document service decodes on its own goroutine and hands the result to a
-// channel, so that a slow file does not block the caller that opened it. Somebody
-// has to drain that channel, and in a window there is no frame loop to do it: the
-// frontend polls, and every poll drains first. Without this the decode completes and
-// is never published, which reads as "stuck on Opening" with no error anywhere.
-func (d *Document) pump() {
-	if d.docs == nil {
-		return
+// It is an interface here for the same reason Picker is: this package must be testable
+// without a running application. The window supplies the implementation.
+type Emitter interface {
+	Emit(name string, data ...any)
+}
+
+// DocumentEvent announces a finished decode to the window.
+//
+// It carries no frame. A preview is fetched over the frame server, so the event only
+// says which file the result belongs to and whether it failed. A failure names the
+// file that was attempted, which is not always the file that is open: a failed decode
+// leaves the previous document in place.
+type DocumentEvent struct {
+	// Path is the file the decode read.
+	Path string `json:"path"`
+	// Error is empty on success.
+	Error string `json:"error"`
+}
+
+// OnDecode is the outcome sink of the document service.
+//
+// It runs on the decode goroutine, so it publishes the image and the capture metadata
+// and raises an event, and does no rendering: the window answers the event with one
+// call to PublishPreview. Rendering here would block the decode goroutine on a plugin
+// pass that the next edit may already have superseded.
+func (d *Document) OnDecode(outcome document.Outcome) {
+	// The image is published before the capture metadata: the chain is swapped to the
+	// record of the image that just opened, and only then is the sensor it was shot on
+	// reported. The other order seeds the previous image's chain, and the record it
+	// writes then belongs to the wrong file.
+	d.publishImage()
+	d.publishCamera()
+
+	event := DocumentEvent{Path: outcome.Path}
+	if outcome.Err != nil {
+		event.Error = outcome.Err.Error()
 	}
-	// A bounded loop, not "for": a decode that finished and a second that finished
-	// while this ran are both applied, but a storm of them cannot hold this call.
-	for i := 0; i < 8; i++ {
-		if !d.docs.Pump() {
-			return
-		}
+
+	d.mu.Lock()
+	emitter := d.emitter
+	d.mu.Unlock()
+	if emitter != nil {
+		emitter.Emit(EventDocument, event)
 	}
+}
+
+// SetEmitter gives the binding somewhere to announce a finished decode.
+func (d *Document) SetEmitter(emitter Emitter) {
+	d.mu.Lock()
+	d.emitter = emitter
+	d.mu.Unlock()
 }
 
 // Current returns the open document.
 func (d *Document) Current() DocumentDTO {
-	d.pump()
-	// The image is published before the capture metadata: the chain is swapped to the record of
-	// the image that just opened, and only then is the sensor it was shot on reported. The other
-	// order seeds the previous image's chain, and the record it writes then belongs to the wrong
-	// file.
-	d.publishImage()
-	d.publishCamera()
 	state := d.docs.State()
 	out := DocumentDTO{
-		Open:         state.Path != "",
-		Path:         state.Path,
+		Open: state.Path != "",
+		Path: state.Path,
 		// Width and Height are the file's own dimensions, not the size the frame was
 		// developed at: the status line reports what the photograph is.
 		Width:        state.ProjectW,
@@ -288,7 +322,6 @@ type PreviewURLResponse struct {
 // parameter edit. It does the colour conversion and the scaling in one place, so
 // the frontend never sees a pixel.
 func (d *Document) PublishPreview() PreviewURLResponse {
-	d.pump()
 	state := d.docs.State()
 	if state.Path == "" || state.Frame.Empty() {
 		return PreviewURLResponse{Error: "no image is open"}
@@ -433,52 +466,78 @@ func (d *Document) LastSession() LastSessionDTO {
 
 // SetCameraSink gives the binding somewhere to report the capture metadata.
 func (d *Document) SetCameraSink(sink CameraSink) {
+	d.mu.Lock()
 	d.camera = sink
+	d.mu.Unlock()
 }
 
 // publishCamera hands the current capture to the sink, once per image.
 //
-// It runs from Current because that is where the decode's result becomes visible: the
-// service decodes on its own goroutine and publishes on a poll, so there is no other
-// moment at which the camera is known. The last value is remembered so a poll that happens
-// every few frames does not re-seed a chain that has not changed.
+// It runs from OnDecode, on the decode goroutine, while another goroutine may be reading
+// the document. The decision to publish is therefore taken under the mutex and the sink
+// is called outside it, so a sink that takes its own lock cannot close a cycle.
 func (d *Document) publishCamera() {
-	if d.camera == nil {
+	d.mu.Lock()
+	sink := d.camera
+	d.mu.Unlock()
+	if sink == nil {
 		return
 	}
 	state := d.docs.State()
+
+	d.mu.Lock()
 	if state.Path == d.lastCameraPath && d.lastCameraPath != "" {
+		d.mu.Unlock()
 		return
 	}
 	d.lastCameraPath = state.Path
 	d.lastCamera = state.Camera
-	d.camera.SetCamera(state.Camera)
+	d.mu.Unlock()
+
+	sink.SetCamera(state.Camera)
 }
 
 // SetImageSink gives the binding somewhere to report each opened path.
 func (d *Document) SetImageSink(sink ImageSink) {
+	d.mu.Lock()
 	d.images = sink
-	if d.chainStore != nil {
-		sink.SetStore(d.chainStore, "")
+	store := d.chainStore
+	d.mu.Unlock()
+	if store != nil {
+		sink.SetStore(store, "")
 	}
 }
 
 // SetChainStore gives the binding the store a chain is recorded in.
 func (d *Document) SetChainStore(store ChainStore) {
+	d.mu.Lock()
 	d.chainStore = store
+	d.mu.Unlock()
 }
 
 // publishImage hands the opened path to the sink, once per image.
+//
+// It runs from OnDecode, so the same rule as publishCamera applies: decide under the
+// mutex, call the sink outside it.
 func (d *Document) publishImage() {
-	if d.images == nil || d.chainStore == nil {
+	d.mu.Lock()
+	sink := d.images
+	store := d.chainStore
+	d.mu.Unlock()
+	if sink == nil || store == nil {
 		return
 	}
 	state := d.docs.State()
+
+	d.mu.Lock()
 	if state.Path == d.lastImagePath {
+		d.mu.Unlock()
 		return
 	}
 	d.lastImagePath = state.Path
+	d.mu.Unlock()
+
 	// A closed document clears the recording, so a chain edited with nothing open is not
 	// filed against the image that was open before.
-	d.images.SetStore(d.chainStore, state.Path)
+	sink.SetStore(store, state.Path)
 }

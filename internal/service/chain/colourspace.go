@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/aaronmurniadi/ofxhost/internal/port"
@@ -34,9 +35,9 @@ var inputColourSpaceParams = []string{
 // The match is on the option's label, because that is all a choice parameter exposes and
 // the labels are the same names this host uses. A plugin whose labels differ simply keeps
 // its default, which is what happened before this existed.
-func initialiseInputSpace(instance port.Instance, space string) {
+func initialiseInputSpace(instance port.Instance, space string) error {
 	if instance == nil || space == "" {
-		return
+		return nil
 	}
 
 	params := instance.Params()
@@ -49,11 +50,16 @@ func initialiseInputSpace(instance port.Instance, space string) {
 				if !strings.EqualFold(label, space) {
 					continue
 				}
-				// A failure leaves the default in place, which is the old behaviour and
-				// not worth failing the add for.
-				_ = instance.SetValues(param.Name, port.ParamValue{Nums: []float64{float64(index)}})
-				return
+				// A failure leaves the vendor's default in place, which is a wrong
+				// render and not a missing nicety. It is reported rather than
+				// swallowed: the panel shows the message, and the value is visibly
+				// not the one the image needs (D11).
+				if err := instance.SetValues(param.Name, port.ParamValue{Nums: []float64{float64(index)}}); err != nil {
+					return fmt.Errorf("chain: set the input colour space to %s: %w", space, err)
+				}
+				return nil
 			}
 		}
 	}
+	return nil
 }

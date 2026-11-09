@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/wailsapp/wails/v3/pkg/application"
+
 	"github.com/aaronmurniadi/ofxhost/frontend"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/codes"
 	"github.com/aaronmurniadi/ofxhost/internal/adapter/decoders"
@@ -36,7 +38,6 @@ import (
 	"github.com/aaronmurniadi/ofxhost/internal/transport/binds"
 	"github.com/aaronmurniadi/ofxhost/internal/transport/desktop"
 	"github.com/aaronmurniadi/ofxhost/internal/transport/frames"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // Options configures the application.
@@ -200,6 +201,11 @@ func New(opts Options) (*App, error) {
 		documentBinding.SetImageSink(graph)
 		documentBinding.SetChainStore(docStore)
 	}
+	// A finished decode raises an event instead of waiting to be polled. The decode
+	// goroutine announces it, so the result reaches the window even when the user is not
+	// touching the program.
+	documentBinding.SetEmitter(window)
+	docs.SetOutcomeSink(documentBinding.OnDecode)
 	window.Application().RegisterService(
 		application.NewService(documentBinding))
 	window.Application().RegisterService(application.NewService(binds.NewChain(graph, pluginHost,

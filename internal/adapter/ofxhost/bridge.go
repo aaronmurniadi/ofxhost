@@ -243,6 +243,7 @@ func (h *Host) Create(index int) (port.Instance, error) {
 			h.plugins[index].Label, h.lastError(handle))
 	}
 	return &Instance{
+		id:     newInstanceID(),
 		handle: cHandle,
 		host:   h,
 		info:   h.plugins[index],

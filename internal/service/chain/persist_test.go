@@ -105,10 +105,10 @@ func TestRestoreRebuildsTheChain(t *testing.T) {
 	restored, _ := newTestGraph(t)
 	restored.SetStore(store, "/photos/sample.RAF")
 
-	if got := len(restored.Chain().Nodes); got != 1 {
+	if got := len(restored.Snapshot().Nodes); got != 1 {
 		t.Fatalf("restored %d nodes, want 1", got)
 	}
-	if got := restored.Chain().Nodes[0].Identifier; got != plugin {
+	if got := restored.Snapshot().Nodes[0].Identifier; got != plugin {
 		t.Fatalf("restored %q, want %q", got, plugin)
 	}
 }
@@ -124,7 +124,7 @@ func TestAnUninstalledPluginIsSkipped(t *testing.T) {
 	}
 
 	graph.SetStore(store, "/photos/sample.RAF")
-	if got := len(graph.Chain().Nodes); got != 0 {
+	if got := len(graph.Snapshot().Nodes); got != 0 {
 		t.Fatalf("restored %d nodes from a plugin that is not installed", got)
 	}
 }
@@ -166,13 +166,13 @@ func TestRestoringReplacesTheChain(t *testing.T) {
 	if _, err := graph.Add(0); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if got := len(graph.Chain().Nodes); got != 1 {
+	if got := len(graph.Snapshot().Nodes); got != 1 {
 		t.Fatalf("the first image holds %d nodes, want 1", got)
 	}
 
 	// The second image has one saved node of its own, so the chain must hold exactly one.
 	graph.SetStore(store, "/photos/second.RAF")
-	if got := len(graph.Chain().Nodes); got != 1 {
+	if got := len(graph.Snapshot().Nodes); got != 1 {
 		t.Fatalf("the second image holds %d nodes, want 1", got)
 	}
 }
@@ -189,7 +189,7 @@ func TestAnImageWithNoRecordStartsEmpty(t *testing.T) {
 	}
 
 	graph.SetStore(store, "/photos/untouched.RAF")
-	if got := len(graph.Chain().Nodes); got != 0 {
+	if got := len(graph.Snapshot().Nodes); got != 0 {
 		t.Fatalf("a file with no record holds %d nodes, want 0", got)
 	}
 }

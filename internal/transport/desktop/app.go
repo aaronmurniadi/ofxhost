@@ -143,6 +143,15 @@ func New(opts Options) *App {
 // services before Run.
 func (a *App) Application() *application.App { return a.app }
 
+// Emit raises an event to the window.
+//
+// It is the Emitter the document binding talks to, so that package does not import
+// Wails. Wails' own emit is safe to call from any goroutine, which is what lets the
+// decode goroutine announce a finished file directly.
+func (a *App) Emit(name string, data ...any) {
+	a.app.Event.Emit(name, data...)
+}
+
 // Run starts the message loop and blocks until the last window closes.
 func (a *App) Run() error {
 	a.logger.Info("window starting")

@@ -36,16 +36,19 @@ import (
 // ChainRunner is the live plugin chain a document renders through.
 //
 // It is an interface rather than the concrete graph so this package does not import
-// the chain service: a document needs to run passes, not to edit nodes.
+// the chain service: a document needs to run passes, not to edit nodes. One method is
+// the whole contract, because every caller eventually needs the project size and the
+// generation, and the two convenience forms that used to sit beside it only guessed at
+// the first of those.
 type ChainRunner interface {
-	// Apply runs the enabled nodes over a frame.
-	Apply(in image.Raster) (image.Raster, error)
-	// ApplyWithGeneration runs the chain with a render generation, so a superseded
-	// pass stops.
-	ApplyWithGeneration(in image.Raster, generation uint64) (image.Raster, error)
-	// ApplyProjected runs the chain on a frame that may be smaller than the
-	// project, and passes the project long edge so a plugin that sizes a kernel or
-	// a noise model in project pixels stays honest at preview resolution.
+	// ApplyProjected runs the chain on a frame that may be smaller than the project.
+	//
+	// projectEdge is the long edge the chain has at full resolution, so a plugin that
+	// sizes a kernel or a noise model in project pixels stays honest at preview
+	// resolution. A caller that has the full frame passes in.LongEdge(). Zero takes the
+	// edge from the frame, which is right only when no scaling happened.
+	//
+	// generation lets a newer pass stop an older one. Zero mints a fresh value.
 	ApplyProjected(in image.Raster, projectEdge int, generation uint64) (image.Raster, error)
 	// Close frees the instances.
 	Close()
@@ -135,6 +138,16 @@ type Service struct {
 
 	mu    sync.RWMutex
 	state State
+	// devMu serialises every develop, so two callers cannot be inside the decoder at
+	// once.
+	//
+	// Two develops in flight means two full-resolution buffers alive together: a 25 MP
+	// frame is hundreds of megabytes, and a preview that re-develops while an export
+	// does the same doubles that bill for no gain. It also leaves one writer to Frame at
+	// a time, which is why the state write below needs no second guard.
+	//
+	// Order is devMu then mu, everywhere.
+	devMu sync.Mutex
 	// lastDirectory is the folder of the open document, recorded so a relaunch can
 	// find the directory entry that names the image. It is empty until a document
 	// has been persisted, so Restore falls back to the session record on disk.
@@ -144,29 +157,43 @@ type Service struct {
 	// started can tell it is stale and discard its work.
 	generation atomic.Uint64
 
-	// result carries the outcome of a decode back to whoever is waiting.
-	result chan Outcome
-
+	// lifeMu guards closed and the wait-group add as one step, and it guards sink.
+	//
+	// The two belong in the same lock because a check of closed followed by a wg.Add is
+	// not atomic: Close can set closed, call wg.Wait, and return in the gap between
+	// them, and the decode that then starts runs inside a service the caller believes
+	// is gone.
+	lifeMu sync.Mutex
+	// closed stops a new request after Close.
+	closed bool
 	// wg tracks the decode goroutine so Close can wait for it.
 	wg sync.WaitGroup
-	// closed stops a new request after Close.
-	closed atomic.Bool
+	// sink receives each applied outcome, so the window learns about a decode without
+	// polling for it. It is called on the decode goroutine.
+	sink OutcomeSink
 }
+
+// OutcomeSink receives each finished decode, after its result has been applied to the
+// state.
+//
+// It runs on the decode goroutine, so a caller that touches a window must hand the work
+// to the window's own thread. A nil sink is legal: the decode is still applied and the
+// status line still reports it.
+type OutcomeSink func(Outcome)
 
 // Outcome is one finished decode.
 //
-// It is exported so the transport layer can pump the channel without this package
-// having to keep a callback: the caller decides when to apply a decode, which is
-// what keeps a decode from landing in the middle of a frame.
+// The frame itself is not carried: it is already in State by the time a sink sees this,
+// and passing a second reference would be a second answer to what is open.
 type Outcome struct {
 	// Path is the file the decode read.
 	Path string
-	// Err is the failure, or nil.
+	// Err is the failure, or nil. A failed decode leaves the previous document in
+	// place, so Path may name a file that is not the open one.
 	Err error
 
 	generation uint64
 	decoded    port.Decoded
-	ctx        context.Context
 }
 
 // New returns a document service.
@@ -185,7 +212,6 @@ func New(decoder port.ImageDecoder, color port.ColorConverter, sink *status.Sink
 			FileSpace:    image.SRGB,
 			Chain:        chain.New(),
 		},
-		result: make(chan Outcome, 4),
 	}
 }
 
@@ -206,14 +232,12 @@ func (s *Service) State() State {
 // through the Pump the caller runs. A newer Open replaces a pending one, which is
 // what dropping a second file onto the window does.
 func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error) {
-	if s.closed.Load() {
-		return OpenResult{}, errors.New("document: the service is closed")
-	}
-	if req.Path == "" {
-		return OpenResult{}, errors.New("document: no path given")
-	}
 	if s.decoder == nil {
 		return OpenResult{}, errors.New("document: no decoder is configured")
+	}
+
+	if req.Path == "" {
+		return OpenResult{}, errors.New("document: no path given")
 	}
 
 	ext := lowerExtension(req.Path)
@@ -230,31 +254,32 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 		return OpenResult{}, fmt.Errorf("document: %d is not a colour space", int(space))
 	}
 
+	// The closed check and the wait-group add are one step. See lifeMu.
+	s.lifeMu.Lock()
+	if s.closed {
+		s.lifeMu.Unlock()
+		return OpenResult{}, errors.New("document: the service is closed")
+	}
+	s.wg.Add(1)
+	s.lifeMu.Unlock()
+
 	generation := s.generation.Add(1)
 	s.status.Report("Opening " + filepath.Base(req.Path) + " in " + space.String() + "...")
 
-	s.wg.Add(1)
 	go s.decode(ctx, generation, req.Path, space, req.MaxEdge)
 
 	return OpenResult{}, nil
 }
 
-// Results returns the channel of finished decodes.
-func (s *Service) Results() <-chan Outcome { return s.result }
-
-// Pump applies the outcome of a finished decode. It is safe to call from any
-// goroutine and returns true when it applied one.
+// SetOutcomeSink gives the service somewhere to announce a finished decode.
 //
-// It exists so the transport layer can pump once per frame, mirroring the way the
-// previous host applied a decode between frames instead of blocking on it.
-func (s *Service) Pump() bool {
-	select {
-	case outcome := <-s.result:
-		s.apply(outcome)
-		return true
-	default:
-		return false
-	}
+// It is a callback rather than a channel this package owns, because a channel made the
+// caller responsible for draining it: a decode that finished and was never applied read
+// as "stuck on Opening", and the window had to poll to prevent it.
+func (s *Service) SetOutcomeSink(sink OutcomeSink) {
+	s.lifeMu.Lock()
+	s.sink = sink
+	s.lifeMu.Unlock()
 }
 
 // decode runs on its own goroutine.
@@ -262,16 +287,32 @@ func (s *Service) decode(ctx context.Context, generation uint64, path string, sp
 	maxEdge int) {
 	defer s.wg.Done()
 
+	// One develop at a time, and one writer to Frame. See devMu.
+	s.devMu.Lock()
+	defer s.devMu.Unlock()
+
 	decoded, err := s.develop(path, space, maxEdge)
 	// A newer request has started, so this work is already stale. Dropping it is
 	// what keeps a slow file from replacing a fast one that followed it.
 	if s.generation.Load() != generation {
 		return
 	}
+	// The application is shutting down, so the frame would be published into a window
+	// that is already gone.
+	if ctx.Err() != nil {
+		return
+	}
 
-	select {
-	case s.result <- Outcome{generation: generation, Path: path, decoded: decoded, Err: err, ctx: ctx}:
-	case <-ctx.Done():
+	outcome := Outcome{generation: generation, Path: path, decoded: decoded, Err: err}
+	if !s.apply(outcome) {
+		return
+	}
+
+	s.lifeMu.Lock()
+	sink := s.sink
+	s.lifeMu.Unlock()
+	if sink != nil {
+		sink(outcome)
 	}
 }
 
@@ -297,10 +338,13 @@ func projectSize(decoded port.Decoded) (int, int) {
 	return decoded.Image.W, decoded.Image.H
 }
 
-// apply publishes a finished decode.
-func (s *Service) apply(outcome Outcome) {
+// apply publishes a finished decode and reports whether it handled it.
+//
+// A stale outcome is dropped without a word: a newer request owns the state, and
+// announcing this one would tell the window about a file it is not looking at.
+func (s *Service) apply(outcome Outcome) bool {
 	if outcome.generation != s.generation.Load() {
-		return
+		return false
 	}
 
 	if outcome.Err != nil {
@@ -308,7 +352,8 @@ func (s *Service) apply(outcome Outcome) {
 		if s.logger != nil {
 			s.logger.Error("open failed", "path", outcome.Path, "err", outcome.Err)
 		}
-		return
+		// Handled, and reported: the caller still has to clear its in-flight mark.
+		return true
 	}
 
 	s.mu.Lock()
@@ -340,6 +385,7 @@ func (s *Service) apply(outcome Outcome) {
 
 	s.status.Report(fmt.Sprintf("Opened %s (%dx%d, %s)", filepath.Base(outcome.Path),
 		outcome.decoded.Image.W, outcome.decoded.Image.H, outcome.decoded.FileSpace))
+	return true
 }
 
 // The input space is not settable, and that is deliberate.
@@ -426,6 +472,11 @@ func (s *Service) RenderAt(generation uint64, maxEdge int) (image.Raster, error)
 // larger than the one that was developed. Doing the re-develop here, on the caller's
 // goroutine, keeps the rule in one place instead of teaching every caller about it.
 func (s *Service) ensureDeveloped(maxEdge int) error {
+	// The whole develop is serialised, not just the publish: two decoders running at once
+	// is the memory cost this lock exists to prevent. See devMu.
+	s.devMu.Lock()
+	defer s.devMu.Unlock()
+
 	s.mu.RLock()
 	path := s.state.Path
 	space := s.state.WorkingSpace
@@ -470,10 +521,11 @@ func (s *Service) ensureDeveloped(maxEdge int) error {
 	return nil
 }
 
-// Chain returns the open document's chain.
+// Chain returns a copy of the open document's chain.
 //
-// The chain is a pointer because the panels edit it in place; the document owns it
-// and replaces it only when a new file opens.
+// It is a copy, not the live model: the panels read it while an edit writes it, and a
+// shared pointer would let a reader walk a node list that is being changed. A caller
+// that wants to edit goes through Graph, which serialises the write.
 func (s *Service) Chain() *chain.Chain {
 	s.mu.RLock()
 	runner := s.chain
@@ -481,16 +533,19 @@ func (s *Service) Chain() *chain.Chain {
 	s.mu.RUnlock()
 
 	// The runner owns the live chain once it is installed; the copy in State is only
-	// what the document starts with. Returning the runner's chain keeps one truth,
-	// which matters as soon as either side can be restored.
+	// what the document starts with. Asking the runner keeps one truth, which matters as
+	// soon as either side can be restored.
 	if runner != nil {
-		if holder, ok := runner.(interface{ Chain() *chain.Chain }); ok {
-			if live := holder.Chain(); live != nil {
+		if holder, ok := runner.(interface{ Snapshot() *chain.Chain }); ok {
+			if live := holder.Snapshot(); live != nil {
 				return live
 			}
 		}
 	}
-	return own
+	if own == nil {
+		return chain.New()
+	}
+	return own.Clone()
 }
 
 // Close stops the decode goroutine and waits for it.
@@ -498,11 +553,17 @@ func (s *Service) Chain() *chain.Chain {
 // A decode already running is allowed to finish, so nothing is left writing into a
 // buffer the caller no longer owns.
 func (s *Service) Close() {
-	if s.closed.Swap(true) {
+	s.lifeMu.Lock()
+	if s.closed {
+		s.lifeMu.Unlock()
 		return
 	}
+	s.closed = true
+	s.lifeMu.Unlock()
+
+	// No channel to close: a decode announces itself through the sink, and the sink may
+	// be nil. Waiting is the whole of shutdown.
 	s.wg.Wait()
-	close(s.result)
 }
 
 // lowerExtension returns the lowercase extension with a leading dot.

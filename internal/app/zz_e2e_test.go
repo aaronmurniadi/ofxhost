@@ -58,6 +58,7 @@ func TestZZSeedingEndToEnd(t *testing.T) {
 	doc := binds.NewDocument(ctx, docs, renderer, graph, host, nil, nil)
 	chain := binds.NewChain(graph, host, func() bool { return true }, func() string { return "Rec.709" })
 	doc.SetCameraSink(graph)
+	docs.SetOutcomeSink(doc.OnDecode)
 
 	if res := doc.Open(binds.OpenRequest{Path: path, Space: int(domainimage.SRGB)}); res.Error != "" {
 		t.Fatalf("Open: %s", res.Error)

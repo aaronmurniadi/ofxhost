@@ -1,6 +1,9 @@
 package chain
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/aaronmurniadi/ofxhost/internal/domain/chain"
 	"github.com/aaronmurniadi/ofxhost/internal/port"
 )
@@ -24,47 +27,57 @@ var noiseParams = struct{ slope, offset string }{
 //
 // That rule is what keeps a saved chain reproducible. A user who sets the slope by hand for
 // a camera the database does not know would otherwise lose it on the next image.
-func seedNoise(instance port.Instance, camera port.CameraInfo, profiler port.NoiseProfiler) {
+func seedNoise(instance port.Instance, camera port.CameraInfo, profiler port.NoiseProfiler) error {
 	if instance == nil || profiler == nil || camera.Make == "" || camera.Model == "" || camera.ISO <= 0 {
-		return
+		return nil
 	}
 	profile, ok := profiler.Lookup(camera.Make, camera.Model, camera.ISO)
 	if !ok {
-		return
+		return nil
 	}
 
 	params := instance.Params()
-	setIfStillDefault(instance, params, noiseParams.slope, profile.A)
-	setIfStillDefault(instance, params, noiseParams.offset, profile.B)
+	return errors.Join(
+		setIfStillDefault(instance, params, noiseParams.slope, profile.A),
+		setIfStillDefault(instance, params, noiseParams.offset, profile.B),
+	)
 }
 
 // setIfStillDefault writes a value only when the parameter still holds what the plugin
 // declared as its default.
-func setIfStillDefault(instance port.Instance, params []port.ParamInfo, name string, value float64) {
+func setIfStillDefault(instance port.Instance, params []port.ParamInfo, name string, value float64) error {
 	if value <= 0 {
-		return
+		return nil
 	}
 	for _, param := range params {
 		if param.Name != name {
 			continue
 		}
 		if param.Kind != port.ParamDouble && param.Kind != port.ParamInteger {
-			return
+			return nil
 		}
 		if len(param.Defaults) == 0 {
-			return
+			return nil
 		}
 		current, err := instance.Values(name)
 		if err != nil || len(current.Nums) == 0 {
-			return
+			// The plugin will not report the value, so there is no way to tell whether
+			// the user has touched it. Leaving it alone keeps their number.
+			//nolint:nilerr // an unreadable value means "leave it alone", not "fail the add".
+			return nil
 		}
 		// A user who has touched this control keeps their number.
 		if current.Nums[0] != param.Defaults[0] {
-			return
+			return nil
 		}
-		_ = instance.SetValues(name, port.ParamValue{Nums: []float64{value}})
-		return
+		// A write that fails leaves the plugin on a generic sensor, which
+		// over-smooths a clean frame. It is reported rather than dropped.
+		if err := instance.SetValues(name, port.ParamValue{Nums: []float64{value}}); err != nil {
+			return fmt.Errorf("chain: seed %s from the camera noise model: %w", name, err)
+		}
+		return nil
 	}
+	return nil
 }
 
 // recordNoise copies a node's noise model into the chain model.

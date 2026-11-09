@@ -59,11 +59,16 @@ func New(host port.EffectHost) *Graph {
 	}
 }
 
-// Chain returns the model.
-func (g *Graph) Chain() *chain.Chain {
+// Snapshot returns a deep copy of the model, taken under the lock.
+//
+// It is a copy and not the live chain on purpose. The panels read the chain while a
+// parameter edit writes it, and handing out the live pointer meant the mutex guarded
+// the writer and nothing else: every reader walked the node list unlocked. A copy
+// costs a few hundred bytes per poll and makes the lock mean what it says.
+func (g *Graph) Snapshot() *chain.Chain {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.chain
+	return g.chain.Clone()
 }
 
 // LastError returns why the last instance creation failed, or nil.
@@ -110,8 +115,8 @@ func (g *Graph) AddWithInputSpace(pluginIndex int, space string) (int, error) {
 	defer g.mu.Unlock()
 	defer g.persistLocked()
 
-	initialiseInputSpace(instance, space)
-	seedNoise(instance, g.camera, g.noise)
+	initialiseErr := initialiseInputSpace(instance, space)
+	seedErr := seedNoise(instance, g.camera, g.noise)
 
 	node := chain.NewNode(pluginIndex, info.Identifier, info.Label)
 	position := g.chain.Append(node)
@@ -123,7 +128,10 @@ func (g *Graph) AddWithInputSpace(pluginIndex int, space string) (int, error) {
 	// into the model and recorded. A restore that found no values would bring the plugin
 	// back with its own default model instead of this camera's.
 	recordNoise(added, instance)
-	g.lastErr = nil
+	// A failed initialisation is not fatal: the node is added and renders, and the panel
+	// says which value the host could not set. Silently keeping the vendor's default is
+	// what D11 exists to prevent.
+	g.lastErr = errors.Join(initialiseErr, seedErr)
 	return position, nil
 }
 
@@ -158,7 +166,9 @@ func (g *Graph) SetCamera(camera port.CameraInfo) {
 		if instance == nil {
 			continue
 		}
-		seedNoise(instance, camera, g.noise)
+		if err := seedNoise(instance, camera, g.noise); err != nil {
+			g.lastErr = err
+		}
 		recordNoise(node, instance)
 	}
 }
@@ -313,9 +323,14 @@ func (g *Graph) ResetParamsWithInputSpace(index int, space string) (int, error) 
 	if err != nil {
 		return 0, err
 	}
-	initialiseInputSpace(instance, space)
-	seedNoise(instance, camera, profiler)
+	initialiseSpaceErr := initialiseInputSpace(instance, space)
+	seedErr := seedNoise(instance, camera, profiler)
 	g.refreshParams(index, instance)
+	if err := errors.Join(initialiseSpaceErr, seedErr); err != nil {
+		g.mu.Lock()
+		g.lastErr = err
+		g.mu.Unlock()
+	}
 	return changed, nil
 }
 

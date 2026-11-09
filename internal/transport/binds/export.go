@@ -14,7 +14,7 @@ import (
 
 // chainReader is the part of the chain graph an export reads.
 type chainReader interface {
-	Chain() *chainmod.Chain
+	Snapshot() *chainmod.Chain
 }
 
 // Export is the binding for writing a file.
@@ -258,7 +258,7 @@ func (e *Export) writeSidecar(exportPath string, state document.State) error {
 		ExportedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	if e.graph != nil {
-		sidecar.Chain = e.graph.Chain().Snapshot()
+		sidecar.Chain = e.graph.Snapshot().Snapshot()
 	}
 	return e.store.SaveExportSidecar(exportPath, state.Path, sidecar)
 }

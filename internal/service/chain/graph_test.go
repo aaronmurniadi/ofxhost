@@ -167,10 +167,10 @@ func TestAddCreatesAnInstance(t *testing.T) {
 	if position != 0 {
 		t.Fatalf("position = %d", position)
 	}
-	if graph.Chain().Len() != 1 {
-		t.Fatalf("the chain has %d nodes", graph.Chain().Len())
+	if graph.Snapshot().Len() != 1 {
+		t.Fatalf("the chain has %d nodes", graph.Snapshot().Len())
 	}
-	node := graph.Chain().Node(0)
+	node := graph.Snapshot().Node(0)
 	if node.Label != "grade" || node.Identifier != "test.grade" {
 		t.Fatalf("node = %+v", node)
 	}
@@ -192,8 +192,8 @@ func TestAddRefusesAPluginThatCannotInstantiate(t *testing.T) {
 		t.Fatal("a plugin that refuses to instantiate must be an error")
 	}
 	// The chain must not hold a node that cannot render.
-	if graph.Chain().Len() != 0 {
-		t.Fatalf("the chain holds %d nodes after a failed add", graph.Chain().Len())
+	if graph.Snapshot().Len() != 0 {
+		t.Fatalf("the chain holds %d nodes after a failed add", graph.Snapshot().Len())
 	}
 	if graph.LastError() == nil {
 		t.Fatal("the failure was not recorded")
@@ -242,8 +242,8 @@ func TestMoveKeepsTheInstanceWithItsNode(t *testing.T) {
 		t.Fatalf("Move: %v", err)
 	}
 
-	if graph.Chain().Node(0).Label != "second" || graph.Chain().Node(1).Label != "first" {
-		t.Fatalf("order = %q, %q", graph.Chain().Node(0).Label, graph.Chain().Node(1).Label)
+	if graph.Snapshot().Node(0).Label != "second" || graph.Snapshot().Node(1).Label != "first" {
+		t.Fatalf("order = %q, %q", graph.Snapshot().Node(0).Label, graph.Snapshot().Node(1).Label)
 	}
 	// The instance at position 1 must still be the "first" plugin, and must still
 	// hold the value it was given.
@@ -274,8 +274,8 @@ func TestRemoveFreesTheInstance(t *testing.T) {
 	if err := graph.Remove(0); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	if graph.Chain().Len() != 1 {
-		t.Fatalf("the chain has %d nodes", graph.Chain().Len())
+	if graph.Snapshot().Len() != 1 {
+		t.Fatalf("the chain has %d nodes", graph.Snapshot().Len())
 	}
 	host.mu.Lock()
 	closed := host.closed
@@ -437,7 +437,7 @@ func TestResetParams(t *testing.T) {
 		t.Fatal("ResetParams reported no change")
 	}
 	// The model must reflect the reset, or a saved chain would record the old value.
-	if got := graph.Chain().Node(0).Params["gain"].Nums; len(got) == 0 || got[0] != 1 {
+	if got := graph.Snapshot().Node(0).Params["gain"].Nums; len(got) == 0 || got[0] != 1 {
 		t.Fatalf("the model holds %v, want the default 1", got)
 	}
 }
@@ -470,10 +470,10 @@ func TestChainModelIsUsableWithoutAHost(t *testing.T) {
 	graph := New(nil)
 	defer graph.Close()
 
-	if graph.Chain() == nil {
+	if graph.Snapshot() == nil {
 		t.Fatal("the chain is nil")
 	}
-	if graph.Chain().Len() != 0 {
+	if graph.Snapshot().Len() != 0 {
 		t.Fatal("a new chain is not empty")
 	}
 	if _, err := graph.Apply(ramp(2, 2)); err != nil {
