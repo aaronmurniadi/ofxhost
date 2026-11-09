@@ -73,6 +73,15 @@ target_include_directories(ofxhost_host PUBLIC
 
 target_link_libraries(ofxhost_host PUBLIC EXPAT::EXPAT)
 
+# Expat is linked statically on Windows, and its header decides how to call it from the
+# define it was given: without XML_STATIC every entry point is declared `__declspec(dllimport)`
+# and the archive is linked against `__imp_XML_*` symbols that libexpat.a does not define.
+# The flag has to be here, not only in cgo: this library is compiled by CMake, and the cgo
+# file's CPPFLAGS never reach it.
+if(WIN32)
+  target_compile_definitions(ofxhost_host PUBLIC XML_STATIC)
+endif()
+
 # The host library is upstream code; its warnings are not ours to fix, and turning
 # them into errors here would make an upstream change break this build.
 if(MSVC)

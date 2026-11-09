@@ -1326,7 +1326,12 @@ first.
 Last, and deliberately so. macOS is where this is developed and measured; the other
 targets are packaging work over adapters that are already behind ports.
 
-- Windows: static triplet, expat, the single-file constraint if you keep it.
+- Windows: static link, expat, the single-file constraint.
+  Done and recorded: `-static` plus the full archive closure in
+  `internal/adapter/ofxhost/cgo_windows.go`, the matching defines so the headers do not
+  declare `dllimport`, and an assertion in the Windows action that fails when `objdump -p`
+  finds an import named `lib*` in the executable or the plugin. The first release shipped
+  without it and asked for `libexpat-1.dll` on a machine that had never built the app.
 - Linux: GTK4 + WebKitGTK, AppImage.
 - macOS Intel.
 - Only now build CI/CD.

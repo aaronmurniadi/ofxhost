@@ -117,6 +117,11 @@ runs:
     # path-type inherit is what puts the Go and Node directories of this job inside the MSYS2
     # environment: the shell that builds is MSYS2's, so a tool that only exists on the Windows
     # PATH would otherwise be invisible there.
+    #
+    # lerc, jbigkit and gcc-libs are named even though pacman installs them as dependencies:
+    # the static link in internal/adapter/ofxhost/cgo_windows.go names -lLerc, -ljbig and
+    # -lgomp, and a missing one fails as "cannot find -lLerc", which says nothing about the
+    # package that would have provided it.
     - name: Set up MSYS2 and install the toolchain
       id: msys2
       uses: msys2/setup-msys2@v2.33.0
@@ -139,6 +144,9 @@ runs:
           mingw-w64-x86_64-libjpeg-turbo
           mingw-w64-x86_64-libwebp
           mingw-w64-x86_64-libjxl
+          mingw-w64-x86_64-lerc
+          mingw-w64-x86_64-jbigkit
+          mingw-w64-x86_64-gcc-libs
 
     # Everything after this step runs in Git Bash, so the compiler has to be on the Windows
     # PATH too: that is where cgo and the checks below find it. The MSYS2 shell is used for the
@@ -297,6 +305,39 @@ runs:
         test "$MAGIC" = "4d5a" || { echo "$BIN is not a PE executable (magic $MAGIC)"; exit 1; }
         SIZE="$(stat -c%s "$BIN")"
         test "$SIZE" -gt 1000000 || { echo "$BIN is only $SIZE bytes; the link did not finish"; exit 1; }
+
+    # The link is static, and this is what proves it. Windows reports the first DLL it cannot
+    # find, which is how "libexpat-1.dll could not be found" reached a release: the zip ships
+    # the executable and Resources/, and the executable had been linked against mingw import
+    # libraries. Every library a mingw static link could reintroduce is named lib*, and no
+    # Windows system DLL is, so one prefix test covers the whole class.
+    #
+    # Both binaries are checked. The plugin is loaded at runtime by LoadLibrary, so a missing
+    # DLL there fails later and more confusingly than it does for the executable.
+    - name: Check both binaries import no DLL of their own
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.build-name }}
+      run: |
+        PLUGIN="build/ofxhost-native/bundled/OfxHost.ofx.bundle/Contents/Win64/OfxHost.ofx"
+        FAILED=0
+        for BINARY in "bin/${APP_NAME}.exe" "$PLUGIN"; do
+          test -f "$BINARY" || { echo "no binary at $BINARY"; exit 1; }
+          echo "== imports of $BINARY"
+          # mingw's objdump is first on PATH: the native build put mingw64/bin there.
+          IMPORTS="$(objdump -p "$BINARY" | awk '/DLL Name:/{print $3}')"
+          echo "$IMPORTS" | sed '/^$/d' | sort
+          BUNDLED="$(echo "$IMPORTS" | grep -i '^lib' || true)"
+          if [ -n "$BUNDLED" ]; then
+            echo "$BINARY imports libraries it would have to ship with it:"
+            echo "$BUNDLED"
+            echo "The link fell back to an import library. Check that -static is present in"
+            echo "internal/adapter/ofxhost/cgo_windows.go and that the MSYS2 package carries a"
+            echo ".a for each name in its group."
+            FAILED=1
+          fi
+        done
+        exit $FAILED
 
     - name: Package
       id: package

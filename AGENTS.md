@@ -6,6 +6,8 @@ Read `PLAN.md` first. It holds the decisions (D1–D13), the milestone order, an
 reasoning behind the architecture. This file holds what the plan does not: how to work
 in the tree without breaking it.
 
+Read `WAILS.md` which holds the best practices when dealing with Wails V3 project.
+
 ---
 
 ## 1. What this is
@@ -60,6 +62,8 @@ logic-level tests in the service package with fakes.
 
 ```sh
 # 1. Native library and the bundled plugins. Required before any go build after C++ changes.
+#    Run this after editing host.cpp, params.cpp, ofxhost_params.h or native/CMakeLists.txt:
+#    the archive is not rebuilt by `go build`, and the build succeeds either way.
 cmake -S internal/adapter/ofxhost/native -B build/ofxhost-native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/ofxhost-native -j
 #    -> build/ofxhost-native/lib/libofxhost.a          the host
@@ -77,7 +81,7 @@ Verify before claiming a change works:
 ```sh
 go build ./...                                  # -ld: warning lines are harmless
 go vet ./...
-go test ./...                                   # 19 packages
+go test ./...                                   # 25 packages with tests
 go run ./tools/layerguard
 cd frontend && npx tsc --noEmit && npm test
 ```
@@ -98,7 +102,7 @@ not failures.
   named.
 - **Errors are messages for a user or wrapped for a developer**, not both.
 - Write prose in plain English. Short sentences. Active voice.
-- Commits explain the *problem*, not a list of files. Never add AI attribution
+- Commits explain the _problem_, not a list of files. Never add AI attribution
   trailers.
 
 ### Frontend Library
@@ -151,7 +155,7 @@ What it taught stayed, because those findings were about behaviour and were righ
   Without it a `z-index` inside the layout paints over an open dropdown. Raising each
   popup's `z-index` until it wins is the wrong fix.
 - **A tooltip trigger must be the focusable element.** Wrapping the child in a span produces
-  a tooltip that appears on hover and never on Tab. Use `render` so the part *is* the
+  a tooltip that appears on hover and never on Tab. Use `render` so the part _is_ the
   control.
 - **The number field wants a `ScrubAreaCursor`**, and the draggable name should be a real
   `<label>` whose id the input points at.
@@ -235,7 +239,7 @@ decides it from the bytes and the domain keeps a plain value.
 
 ### The OFX `secret` property is a flag, not a kind
 
-Writing `OfxParamPropSecret` into the parameter *kind* replaced the real type. A group
+Writing `OfxParamPropSecret` into the parameter _kind_ replaced the real type. A group
 became "secret", the panel stopped seeing a group, and every control under it was drawn
 as a text box. One flag blanked 390 of one plugin's 830 parameters.
 
@@ -271,7 +275,7 @@ without copying.
 ### Long edge scaling must happen before the chain, not after
 
 Scaling the encoded PNG made the preview smaller and no faster. The cap belongs on the
-chain input, and the *project* long edge must travel with it: plugins size kernels and
+chain input, and the _project_ long edge must travel with it: plugins size kernels and
 noise models in project pixels, so a chain that only sees the shrunken frame computes
 them wrong by the scale factor.
 
@@ -330,6 +334,36 @@ no object had asked for yet.
 The flag now lives in `cgo_darwin.go`, `cgo_linux.go` and `cgo_windows.go`, after the
 archive, so the order is the same everywhere and the platform that tolerates the wrong
 order is not the one that proves it.
+
+### Windows linked against import libraries, and the release shipped without the DLLs
+
+The first Windows release ran on the build machine and nowhere else: it stopped at
+`libexpat-1.dll could not be found`. The zip contained `ofxhost.exe` and `Resources/`, which is
+what the packaging was written to do. The fault was the link. mingw prefers a `.dll.a` import
+library over a `.a` archive unless it is told otherwise, so the executable imported twelve
+mingw DLLs, and Windows reports only the first one it cannot find.
+
+`-static` in `internal/adapter/ofxhost/cgo_windows.go` fixes it, but the flag alone is not the
+whole fix. Three things have to agree:
+
+- **The libraries must be named.** A static archive does not record its dependencies, so the
+  transitive set — libjxl's `hwy` and `brotli`, libtiff's `z`, `deflate`, `lzma` and `zstd`,
+  libpng's `z` — is written out. `-Wl,--start-group ... -Wl,--end-group` lets GNU ld revisit
+  the list, because the other adapter packages also contribute `-l` flags to the same final
+  link line and the order cannot be controlled from one file.
+- **The headers must be told the library is static.** `XML_STATIC`, `LIBRAW_NODLL`,
+  `JXL_STATIC_DEFINE` and `JXL_THREADS_STATIC_DEFINE`, or every entry point is declared
+  `__declspec(dllimport)` and the linker looks for `__imp_*` symbols no archive defines. A
+  preprocessor flag reaches only the package that includes the header, so each one lives in
+  the package that needs it, and `XML_STATIC` is also set in `native/CMakeLists.txt` because
+  that library is compiled by CMake rather than by cgo.
+- **The plugin needs the same treatment.** It is loaded by `LoadLibrary`, so a missing DLL
+  there fails later and more confusingly. `plugins/CMakeLists.txt` links it with `-static`.
+
+The action asserts on the result rather than trusting the flags: every library a mingw static
+link could reintroduce is named `lib*`, and no Windows system DLL is, so one prefix test on
+`objdump -p` catches the whole class. A static link that silently fell back would fail the
+build instead of shipping.
 
 ### A distribution's library is older than Homebrew's
 
@@ -415,14 +449,14 @@ repository owns and builds**. The CMake step already in §3 produces it at
 It deliberately covers the awkward cases, so a test can describe behaviour instead of
 describing a vendor:
 
-| It declares | To test |
-|---|---|
-| a group holding a group | that the panel builds a tree, not a flat list |
-| a group marked secret, with a member | that the flag does not replace the kind |
-| double, integer, boolean, choice, string | the OFX type → kind mapping |
-| a `category` choice that rebuilds a `preset` choice | that the host sends `kOfxActionInstanceChanged` |
-| an `inputColorSpace` choice using the host's own space names | that the chain can initialise it |
-| a gain render | that a render produces pixels |
+| It declares                                                  | To test                                         |
+| ------------------------------------------------------------ | ----------------------------------------------- |
+| a group holding a group                                      | that the panel builds a tree, not a flat list   |
+| a group marked secret, with a member                         | that the flag does not replace the kind         |
+| double, integer, boolean, choice, string                     | the OFX type → kind mapping                     |
+| a `category` choice that rebuilds a `preset` choice          | that the host sends `kOfxActionInstanceChanged` |
+| an `inputColorSpace` choice using the host's own space names | that the chain can initialise it                |
+| a gain render                                                | that a render produces pixels                   |
 
 Add a parameter to the fixture rather than to a test's expectations of a vendor. If a test
 needs behaviour the fixture does not have, extend the fixture.

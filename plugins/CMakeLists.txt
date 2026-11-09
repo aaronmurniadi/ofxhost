@@ -49,6 +49,15 @@ set_target_properties(OfxHostBundled PROPERTIES
   SUFFIX ".ofx"
 )
 target_link_libraries(OfxHostBundled PRIVATE OfxSupport)
+
+# A plugin is loaded by the host at runtime, so a DLL it needs is a plugin that does not load.
+# `-static` links libgcc, libstdc++ and libwinpthread into the module, which is what keeps
+# OfxHost.ofx from importing libstdc++-6.dll and libgcc_s_seh-1.dll. The pairing with the
+# static link in the Windows cgo files is deliberate: one of the two being dynamic puts the
+# DLLs back, and the Windows action asserts on the imports of both binaries.
+if(WIN32)
+  target_link_options(OfxHostBundled PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
 # The Support library references OpenGL for its own utilities even when a plugin does not.
 if(APPLE)
   target_link_libraries(OfxHostBundled PRIVATE "-framework OpenGL")
