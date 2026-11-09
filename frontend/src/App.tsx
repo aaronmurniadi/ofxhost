@@ -21,7 +21,6 @@ import { createDebounced, type Debounced } from "./api/debounce";
 import { DEFAULT_PANELS, sessionApi, type PanelsDTO } from "./api/session";
 import Workspace from "./layout/Workspace";
 import ExportDialog from "./panels/ExportDialog";
-import OpenDialog from "./panels/OpenDialog";
 import ParametersPanel from "./panels/ParametersPanel";
 import PluginsPanel from "./panels/PluginsPanel";
 import PreviewPanel, { type PreviewState } from "./panels/PreviewPanel";
@@ -50,6 +49,24 @@ const RESIZE_DEBOUNCE_MS = 300;
 /** The Fit option, whose render size follows the panel rather than a number. */
 const FIT_RESOLUTION = 0;
 
+/**
+ * The space every file is developed into until the user picks another one.
+ *
+ * A Rec.2020 space is a wide gamut, so it is the honest choice for a RAW file: the sensor
+ * resolves more than sRGB, and developing into sRGB throws that away before the chain sees
+ * it. The name is read from the Go side's list at startup rather than hard-coded as an
+ * index, because the index is an implementation detail of the enum.
+ */
+const DEFAULT_SPACE_NAME = "Linear Rec.2020";
+
+/**
+ * Where the chosen space is remembered.
+ *
+ * The key is the one the colour space dialog used, so a choice made in an earlier build
+ * survives this change instead of being reset to the default.
+ */
+const SPACE_STORAGE_KEY = "ofxhost.workingSpace.v1";
+
 /** How often the shell asks whether a decode has landed. */
 const POLL_INTERVAL_MS = 120;
 
@@ -61,10 +78,29 @@ const POLL_INTERVAL_MS = 120;
  */
 const MAX_POLLS = 600;
 
+/**
+ * Opening is a decode in flight.
+ *
+ * The space travels beside the path because "a document is open" is not enough to know
+ * that the decode landed: a new request leaves the previous document in place until its
+ * own decode finishes, so the file already on screen would answer for the new one.
+ */
+interface Opening {
+  /** The file being developed. */
+  path: string;
+  /** The space it was asked for, by name. Empty when the space list could not be read. */
+  spaceName: string;
+}
+
 export default function App() {
   const [doc, setDoc] = useState<DocumentDTO | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
-  const [busy, setBusy] = useState(false);
+  // opening is the decode that is in flight, or null when none is. It carries the space
+  // by name so the poll can tell a new frame from the one already on screen.
+  const [opening, setOpening] = useState<Opening | null>(null);
+  // busy is true from the pick of a file until its frame is on screen. It is derived from
+  // opening, so the two cannot disagree.
+  const busy = opening !== null;
   const [message, setMessage] = useState("Open a RAW file to see the preview.");
   const [version, setVersion] = useState("");
   const [chain, setChain] = useState<ChainDTO | null>(null);
@@ -75,9 +111,6 @@ export default function App() {
   // is a decode, it decides whether the preview draws its spinner: from the user's side both
   // mean the program is working and the frame on screen is not final.
   const [rendering, setRendering] = useState(false);
-  // pendingPath is the file waiting for a colour space. Decision D8: the space is an
-  // input to the decode, so it is asked before the file opens.
-  const [pendingPath, setPendingPath] = useState("");
   // exporting shows the export dialog, which is only reachable once a file is open.
   const [exporting, setExporting] = useState(false);
   // panels is the window layout. It starts at the defaults so the first draw has
@@ -98,12 +131,41 @@ export default function App() {
   // status information rather than floating over the image.
   const [resolutions, setResolutions] = useState<string[]>([]);
   const [resolution, setResolution] = useState(0);
+  // inputSpace is the index into spaces that the next open is developed into.
+  const [spaces, setSpaces] = useState<string[]>([]);
+  const [inputSpace, setInputSpace] = useState(0);
 
   // The sizes are read once, and only when a file could be opened with one of them.
   useEffect(() => {
     void (async () => {
       try {
         setResolutions((await api.previewResolutions()) ?? []);
+      } catch {
+        // The control stays hidden when the list cannot be read.
+      }
+    })();
+  }, []);
+
+  // The colour spaces are read once as well. The chosen index is the space every open is
+  // developed into, and it is remembered, so a user who picked another space is not put
+  // back on the default at the next launch.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const available = await api.colorSpaces();
+        setSpaces(available);
+        const stored = window.localStorage.getItem(SPACE_STORAGE_KEY);
+        if (stored !== null) {
+          const index = Number(stored);
+          if (Number.isInteger(index) && index >= 0 && index < available.length) {
+            setInputSpace(index);
+            return;
+          }
+        }
+        const preferred = available.indexOf(DEFAULT_SPACE_NAME);
+        if (preferred >= 0) {
+          setInputSpace(preferred);
+        }
       } catch {
         // The control stays hidden when the list cannot be read.
       }
@@ -161,10 +223,10 @@ export default function App() {
 
     // Return to the picture that was open last time.
     //
-    // The working space is not restored from disk: a chain is not saved with the image
-    // (only an export can record one), so the space the file is developed into is asked
-    // for again rather than guessed. Reopening a file the user did not choose would be
-    // worse than starting at the picker, so this asks first.
+    // Only the path is offered, and the file is developed when the button is pressed: the
+    // pixels cost a decode, and reopening a file the user did not ask for at launch would
+    // spend seconds of their time before they chose anything. The space it will open in is
+    // the one in the control, which is the stored choice or the default.
     void (async () => {
       try {
         const session = await api.lastSession();
@@ -191,13 +253,29 @@ export default function App() {
   // file; the decode becomes visible through Current() once it lands. A repeating
   // timer is what waits for that, and the attempt cap is what keeps a genuine
   // failure from looking like an endless wait.
+  //
+  // The wait is for the requested space, not only for "a document is open". A new Open
+  // leaves the previous document in place until its own decode lands, so a space chosen
+  // for the file already on screen would otherwise be answered by the old pixels at once.
   useEffect(() => {
-    if (!busy) {
+    if (opening === null) {
       return;
     }
 
     let attempts = 0;
     let cancelled = false;
+
+    const landed = (current: DocumentDTO): boolean => {
+      if (!current.open || current.path !== opening.path) {
+        return false;
+      }
+      // An unreadable space list cannot be compared against, so the path is the only
+      // evidence available and the frame is taken as it arrives.
+      if (opening.spaceName === "") {
+        return true;
+      }
+      return current.workingSpace === opening.spaceName;
+    };
 
     const tick = async () => {
       if (cancelled) {
@@ -210,10 +288,10 @@ export default function App() {
         return;
       }
 
-      if (!current.open) {
+      if (!landed(current)) {
         if (attempts >= MAX_POLLS) {
           setMessage("The image did not open. See the log for the reason.");
-          setBusy(false);
+          setOpening(null);
           return;
         }
         window.setTimeout(tick, POLL_INTERVAL_MS);
@@ -226,14 +304,14 @@ export default function App() {
       }
       if (published.error) {
         setMessage(published.error);
-        setBusy(false);
+        setOpening(null);
         return;
       }
 
       setDoc(current);
       setPreview({ url: published.url, width: published.width, height: published.height });
       setMessage("");
-      setBusy(false);
+      setOpening(null);
       // The chain of the image that just landed is the one recorded for it, rebuilt by
       // the Go side while the decode was finishing. The list on screen was read before
       // any file was open, so it is empty and has to be read again here.
@@ -244,7 +322,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [busy, reloadChain]);
+  }, [opening, reloadChain]);
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => setVersion(""));
@@ -303,30 +381,57 @@ export default function App() {
     })();
   }, [renderTick, reloadChain]);
 
-  // chooseFile asks the user for a file and then for the space to develop it into.
+  // openInto starts a decode of one file into one space.
+  //
+  // The space is part of the request and not a setting applied afterwards: it is where
+  // the pixels are developed (D8), so it has to be known before the call. A failure here
+  // is a message and no decode, which is why the in-flight mark is cleared by the caller
+  // that sees the error rather than left to the poll.
+  const openInto = useCallback(
+    async (path: string, space: number) => {
+      if (path === "") {
+        return;
+      }
+      setOpening({ path, spaceName: spaces[space] ?? "" });
+      setMessage(`Opening ${path}…`);
+      const result = await api.open(path, space);
+      if (result.error !== "") {
+        setMessage(result.error);
+        setOpening(null);
+      }
+    },
+    [spaces],
+  );
+
+  // chooseFile asks the user for a file and develops it into the chosen space.
   const chooseFile = useCallback(async () => {
     const path = await api.pickFile();
     if (path === "") {
       return;
     }
-    setPendingPath(path);
-  }, []);
+    await openInto(path, inputSpace);
+  }, [openInto, inputSpace]);
 
-  // openWithSpace starts the decode once the space is known.
-  const openWithSpace = useCallback(async (space: number) => {
-    const path = pendingPath;
-    setPendingPath("");
-    if (path === "") {
-      return;
-    }
-    setBusy(true);
-    setMessage(`Opening ${path}…`);
-    const result = await api.open(path, space);
-    if (result.error !== "") {
-      setMessage(result.error);
-      setBusy(false);
-    }
-  }, [pendingPath]);
+  // chooseSpace records the space and develops the open file again.
+  //
+  // The space is decided by the decode (PLAN.md §7.5), so a pixel buffer that was built
+  // for the old one cannot be relabelled into the new one. Decoding the same path again
+  // is what makes the change visible in the picture rather than only in the choice; the
+  // chain comes back from the record the Go side keeps for that path.
+  const chooseSpace = useCallback(
+    (index: number) => {
+      setInputSpace(index);
+      window.localStorage.setItem(SPACE_STORAGE_KEY, String(index));
+      if (doc === null || doc.open !== true) {
+        return;
+      }
+      if (doc.path === "") {
+        return;
+      }
+      void openInto(doc.path, index);
+    },
+    [doc, openInto],
+  );
 
   // The last size reported to the host, so a repeated measurement is not treated as a change.
   const lastPanelSize = useRef({ width: 0, height: 0 });
@@ -375,7 +480,7 @@ export default function App() {
                 documentPath={doc?.path ?? ""}
                 onOpen={() => void chooseFile()}
                 lastImage={lastImage}
-                onReopenLast={() => setPendingPath(lastImage)}
+                onReopenLast={() => void openInto(lastImage, inputSpace)}
                 onExport={() => void setExporting(true)}
                 onOpenSettings={() => setSettingsOpen(true)}
                 status={{
@@ -389,6 +494,9 @@ export default function App() {
                 resolutions={resolutions}
                 resolution={resolution}
                 onChooseResolution={(index) => void chooseResolution(index)}
+                spaces={spaces}
+                inputSpace={inputSpace}
+                onChooseSpace={chooseSpace}
               />
             }
             parameters={
@@ -401,14 +509,6 @@ export default function App() {
           />
         ) : null}
       </main>
-
-      {pendingPath !== "" ? (
-        <OpenDialog
-          path={pendingPath}
-          onConfirm={(space) => void openWithSpace(space)}
-          onCancel={() => setPendingPath("")}
-        />
-      ) : null}
 
       {settingsOpen ? (
         <SettingsDialog

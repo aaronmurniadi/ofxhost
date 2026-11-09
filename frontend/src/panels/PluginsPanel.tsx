@@ -78,6 +78,12 @@ interface Props {
   resolution: number;
   /** Changes the preview render size. */
   onChooseResolution: (index: number) => void;
+  /** The colour space names, in enum order. Empty hides the control. */
+  spaces: string[];
+  /** The chosen index into `spaces`: the space a file is developed into. */
+  inputSpace: number;
+  /** Changes the space, which develops the open file again into it. */
+  onChooseSpace: (index: number) => void;
 }
 
 export default function PluginsPanel({
@@ -93,6 +99,9 @@ export default function PluginsPanel({
   resolutions,
   resolution,
   onChooseResolution,
+  spaces,
+  inputSpace,
+  onChooseSpace,
 }: Props) {
   const [chain, setChain] = useState<ChainDTO | null>(null);
   const [plugins, setPlugins] = useState<PluginDTO[]>([]);
@@ -167,6 +176,24 @@ export default function PluginsPanel({
             value={String(resolution)}
             onChange={(next) => onChooseResolution(Number(next))}
             options={resolutions.map((name, index) => ({ label: name, value: String(index) }))}
+          />
+        </div>
+      ) : null}
+
+      {/* The space every file is developed into. It sits beside the preview size because
+          both are view settings rather than edits to the picture, and because the previous
+          host keeps the colour space and the preview resolution in this same order in this
+          same panel (D12).
+          A change here decodes the open file again: the space is decided by the decode, so
+          the pixels cannot be relabelled afterwards (PLAN.md §7.5). */}
+      {spaces.length > 0 ? (
+        <div className="plugins__control">
+          <Select
+            id="input-space"
+            label="Input space"
+            value={String(inputSpace)}
+            onChange={(next) => onChooseSpace(Number(next))}
+            options={spaces.map((name, index) => ({ label: name, value: String(index) }))}
           />
         </div>
       ) : null}

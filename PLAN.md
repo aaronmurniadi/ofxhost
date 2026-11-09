@@ -30,7 +30,7 @@ These are settled. Do not reopen them without a written reason in this file.
 | D5 | **Static linking** for every native library | LGPL-2.1 relink obligation for libraw (§10) |
 | D6 | **No Metal in the first implementation.** Stubs behind the renderer port | `port.EffectHost` carries a `GPUBackend` seam with a CPU implementation and a no-op stub |
 | D7 | **No golden corpus, no porting from the C++ tree.** The old app is too crude to be a foundation | Requirements come from the OpenFX 1.5 standard and from this document, not from `src/` |
-| D8 | **The working space is the user's choice, asked when the file opens.** It becomes the input space of the first plugin. Nothing is compared against the camera's own JPEG | The decoder develops straight into the chosen space at 16 bits; the previous "matches the camera preview" check is dropped |
+| D8 | **The working space is the user's choice, kept in the Plugins panel.** It becomes the input space of the first plugin. Nothing is compared against the camera's own JPEG | The decoder develops straight into the chosen space at 16 bits; the previous "matches the camera preview" check is dropped. Amended: the choice is a dropdown under the preview size rather than a dialog before the open, and changing it develops the open file again (§7.5) |
 | D9 | **Base UI for components, `react-resizable-panels` for layout.** Panels resize and toggle; **docking is out of scope** | One drag-scrub number field instead of a hand-written one; a splitter library instead of the fixed CSS grid. `project.View` loses its three `show*` booleans and gains per-panel sizes, because a boolean that can disagree with a splitter is two sources of truth for one fact |
 | D9b | **Kumo UI was tried and reverted.** Base UI remains the only component library | It was adopted for the dialogs, dropdowns, tooltips, panels and controls, then removed at the project owner's direction. What it cost while it was in: the stylesheet went from 12 KB to 166 KB and the bundle from 408 KB to 587 KB, because Kumo ships all of Tailwind v4 including preflight. What it taught, and what was kept: a portal does not inherit the app's stacking context, so `#root` carries `isolation: isolate`; a tooltip trigger must be the focusable element, not a wrapper; and the number field wants a `ScrubAreaCursor`. Those three fixes came from reading the Kumo and Base UI docs and they stay |
 | D10 | **UI state is persisted; a chain is persisted too, under the image's path** (amended, see §5 item 5) | A user who spent time on a chain expects it back when the same image opens. The record goes in the state directory, never beside the photograph, so no file appears where the user did not ask for one. Restoring matches by plugin identifier, because the plugin list changes between launches |
@@ -591,9 +591,13 @@ pipeline's precision depend on a setting, which is how a "works in sRGB" bug shi
 
 - **A re-decode changes the space.** There is no cheap conversion after the fact: the
   decode is where the space is decided. The decode already runs off the UI thread, so
-  a re-open is a normal operation, but the dialog must say so rather than implying a
-  live switch.
-- **The prompt is a dialog with no cancel-and-continue.** Cancelling cancels the open.
+  a re-open is a normal operation, and choosing a different space for the file on screen
+  does exactly that: it decodes the same path again. The control says nothing about a
+  live switch, and the spinner over the picture marks the wait.
+- **The choice is remembered, and it has a default.** It lives in the settings the
+  colour space dialog already wrote, so a build with this change keeps the space a user
+  chose before. A first run starts on Linear Rec.2020: a RAW sensor resolves more than
+  sRGB, and developing into sRGB throws that away before the chain sees it.
 - **`Decoded.FileSpace` stops being "what the file said".** A RAW file declares no
   space at all. The field now means "the space the pixels are in", and every reader
   already treats it that way, so the name can stay.
@@ -610,7 +614,8 @@ pipeline's precision depend on a setting, which is how a "works in sRGB" bug shi
    the developed space, telling the chain a space the pixels are not in. Changing the
    space means opening the file again.
 5. `transport/binds` carries the space in `OpenRequest` and gained `PickFile`, backed by
-   a `desktop.FilePicker`. The frontend shows `OpenDialog` between the two calls.
+   a `desktop.FilePicker`. The space travels in the `Open` call, so the frontend passes
+   the value of the input space dropdown; there is no dialog between the two calls.
 6. `internal/cli render -space` is now the **working** space; the PNG is always written
    in sRGB.
 
