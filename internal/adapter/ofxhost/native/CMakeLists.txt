@@ -50,6 +50,7 @@ find_package(EXPAT REQUIRED)
 
 add_library(ofxhost_host STATIC
   ../host.cpp
+  ../params.cpp
   "${OFX_HOST_SRC}/ofxhBinary.cpp"
   "${OFX_HOST_SRC}/ofxhClip.cpp"
   "${OFX_HOST_SRC}/ofxhHost.cpp"

@@ -27,6 +27,7 @@
  */
 
 #include "ofxhost.h"
+#include "ofxhost_params.h"
 
 #include <algorithm>
 #include <cstdarg>
@@ -57,6 +58,10 @@
 #include "ofxhClip.h"
 #include "ofxhParam.h"
 #include "ofxhPropertySuite.h"
+
+// The parameter flag reader lives with the parameter classes it describes. Named here so the
+// description builder below reads as it did when both were in this file.
+using ofxhost::flagProperty;
 
 namespace {
 
@@ -184,275 +189,6 @@ class ClipImpl : public OFX::Host::ImageEffect::ClipInstance {
   GEOMETRY geometry() const;
 };
 
-// ---------------------------------------------------------------------------
-// The parameters: one value-storing class per OFX type
-// ---------------------------------------------------------------------------
-
-/* Every OFX parameter type needs a concrete host class, because the library
- * leaves the get and set of each shape to the host. They all do the same thing:
- * hold a value of the right shape and report it. A still-image host has one time,
- * so the time-based overloads ignore their argument; a keyframe-aware host would
- * not, and nothing here pretends to be one.
- *
- * The values are held as doubles even for the integer types, because that is the
- * shape the parameter suite and the pipeline both use: the host reads a number and
- * the plugin gets an int back.
- */
-
-/* Nullable reports whether an optional flag property is set on a parameter, so a
- * host answers "no" rather than inventing a value. */
-inline bool flagProperty(const OFX::Host::Param::Instance &param, const char *name) {
-  try {
-    return param.getProperties().getIntProperty(name, 0) != 0;
-  } catch (...) {
-    return false;
-  }
-}
-
-class IntegerImpl : public OFX::Host::Param::IntegerInstance {
- public:
-  IntegerImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set)
-      : OFX::Host::Param::IntegerInstance(desc, set) {
-    value_ = static_cast<int>(desc.getProperties().getDoubleProperty(kOfxParamPropDefault, 0));
-  }
-  OfxStatus get(int &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus get(OfxTime, int &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus set(int v) override { value_ = v; return kOfxStatOK; }
-  OfxStatus set(OfxTime, int v) override { value_ = v; return kOfxStatOK; }
-
- private:
-  int value_ = 0;
-};
-
-class DoubleImpl : public OFX::Host::Param::DoubleInstance {
- public:
-  DoubleImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set)
-      : OFX::Host::Param::DoubleInstance(desc, set) {
-    value_ = desc.getProperties().getDoubleProperty(kOfxParamPropDefault, 0);
-  }
-  OfxStatus get(double &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus get(OfxTime, double &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus set(double v) override { value_ = v; return kOfxStatOK; }
-  OfxStatus set(OfxTime, double v) override { value_ = v; return kOfxStatOK; }
-  // A still image has no animation, so a derivative is zero and an integral over
-  // one point is the value itself.
-  OfxStatus derive(OfxTime, double &v) override { v = 0.0; return kOfxStatOK; }
-  OfxStatus integrate(OfxTime, OfxTime, double &v) override { v = value_; return kOfxStatOK; }
-
- private:
-  double value_ = 0.0;
-};
-
-class BooleanImpl : public OFX::Host::Param::BooleanInstance {
- public:
-  BooleanImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set)
-      : OFX::Host::Param::BooleanInstance(desc, set) {
-    value_ = desc.getProperties().getIntProperty(kOfxParamPropDefault, 0) != 0;
-  }
-  OfxStatus get(bool &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus get(OfxTime, bool &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus set(bool v) override { value_ = v; return kOfxStatOK; }
-  OfxStatus set(OfxTime, bool v) override { value_ = v; return kOfxStatOK; }
-
- private:
-  bool value_ = false;
-};
-
-class ChoiceImpl : public OFX::Host::Param::ChoiceInstance {
- public:
-  ChoiceImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set)
-      : OFX::Host::Param::ChoiceInstance(desc, set) {
-    value_ = static_cast<int>(desc.getProperties().getDoubleProperty(kOfxParamPropDefault, 0));
-  }
-  OfxStatus get(int &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus get(OfxTime, int &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus set(int v) override { value_ = v; return kOfxStatOK; }
-  OfxStatus set(OfxTime, int v) override { value_ = v; return kOfxStatOK; }
-
- private:
-  int value_ = 0;
-};
-
-class StringImpl : public OFX::Host::Param::StringInstance {
- public:
-  StringImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set)
-      : OFX::Host::Param::StringInstance(desc, set) {
-    try {
-      value_ = desc.getProperties().getStringProperty(kOfxParamPropDefault, 0);
-    } catch (...) {
-      value_.clear();
-    }
-  }
-  OfxStatus get(std::string &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus get(OfxTime, std::string &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus set(const char *v) override { value_ = v != nullptr ? v : ""; return kOfxStatOK; }
-  OfxStatus set(OfxTime, const char *v) override { value_ = v != nullptr ? v : ""; return kOfxStatOK; }
-
- private:
-  std::string value_;
-};
-
-class PushButtonImpl : public OFX::Host::Param::PushbuttonInstance {
- public:
-  PushButtonImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set)
-      : OFX::Host::Param::PushbuttonInstance(desc, set) {}
-};
-
-/* A custom parameter carries an opaque value the host stores and hands back. The
- * pipeline never reads it; it exists because a plugin that declares one would fail
- * to instantiate without it. */
-class CustomImpl : public OFX::Host::Param::CustomInstance {
- public:
-  CustomImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set)
-      : OFX::Host::Param::CustomInstance(desc, set) {}
-  OfxStatus get(std::string &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus get(OfxTime, std::string &v) override { v = value_; return kOfxStatOK; }
-  OfxStatus set(const char *v) override { value_ = v != nullptr ? v : ""; return kOfxStatOK; }
-  OfxStatus set(OfxTime, const char *v) override { value_ = v != nullptr ? v : ""; return kOfxStatOK; }
-
- private:
-  std::string value_;
-};
-
-class GroupImpl : public OFX::Host::Param::GroupInstance {
- public:
-  explicit GroupImpl(OFX::Host::Param::Descriptor &desc) : OFX::Host::Param::GroupInstance(desc, nullptr) {}
-};
-
-class PageImpl : public OFX::Host::Param::PageInstance {
- public:
-  explicit PageImpl(OFX::Host::Param::Descriptor &desc) : OFX::Host::Param::PageInstance(desc, nullptr) {}
-};
-
-/* The multi-component types each have their own virtual signatures, so each gets
- * its own small class. They share one value holder to keep the arithmetic in one
- * place: four doubles, of which the type uses two, three or four. */
-struct Vec4 {
-  double v[4] = {0, 0, 0, 0};
-
-  static Vec4 fromDefaults(const OFX::Host::Param::Descriptor &desc, int dimension) {
-    Vec4 out;
-    for (int i = 0; i < dimension && i < 4; ++i) {
-      try {
-        out.v[i] = desc.getProperties().getDoubleProperty(kOfxParamPropDefault, i);
-      } catch (...) {
-        out.v[i] = 0.0;
-      }
-    }
-    return out;
-  }
-};
-
-class Double2DImpl : public OFX::Host::Param::Double2DInstance {
- public:
-  Double2DImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set, int dimension)
-      : OFX::Host::Param::Double2DInstance(desc, set), values_(Vec4::fromDefaults(desc, dimension)) {}
-  OfxStatus get(double &a, double &b) override { a = values_.v[0]; b = values_.v[1]; return kOfxStatOK; }
-  OfxStatus get(OfxTime, double &a, double &b) override { return get(a, b); }
-  OfxStatus set(double a, double b) override { values_.v[0] = a; values_.v[1] = b; return kOfxStatOK; }
-  OfxStatus set(OfxTime, double a, double b) override { return set(a, b); }
-
- private:
-  Vec4 values_;
-};
-
-class Integer2DImpl : public OFX::Host::Param::Integer2DInstance {
- public:
-  Integer2DImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set, int dimension)
-      : OFX::Host::Param::Integer2DInstance(desc, set), values_(Vec4::fromDefaults(desc, dimension)) {}
-  OfxStatus get(int &a, int &b) override {
-    a = static_cast<int>(values_.v[0]);
-    b = static_cast<int>(values_.v[1]);
-    return kOfxStatOK;
-  }
-  OfxStatus get(OfxTime, int &a, int &b) override { return get(a, b); }
-  OfxStatus set(int a, int b) override { values_.v[0] = a; values_.v[1] = b; return kOfxStatOK; }
-  OfxStatus set(OfxTime, int a, int b) override { return set(a, b); }
-
- private:
-  Vec4 values_;
-};
-
-class Double3DImpl : public OFX::Host::Param::Double3DInstance {
- public:
-  Double3DImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set, int dimension)
-      : OFX::Host::Param::Double3DInstance(desc, set), values_(Vec4::fromDefaults(desc, dimension)) {}
-  OfxStatus get(double &a, double &b, double &c) override {
-    a = values_.v[0]; b = values_.v[1]; c = values_.v[2];
-    return kOfxStatOK;
-  }
-  OfxStatus get(OfxTime, double &a, double &b, double &c) override { return get(a, b, c); }
-  OfxStatus set(double a, double b, double c) override {
-    values_.v[0] = a; values_.v[1] = b; values_.v[2] = c;
-    return kOfxStatOK;
-  }
-  OfxStatus set(OfxTime, double a, double b, double c) override { return set(a, b, c); }
-
- private:
-  Vec4 values_;
-};
-
-class Integer3DImpl : public OFX::Host::Param::Integer3DInstance {
- public:
-  Integer3DImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set, int dimension)
-      : OFX::Host::Param::Integer3DInstance(desc, set), values_(Vec4::fromDefaults(desc, dimension)) {}
-  OfxStatus get(int &a, int &b, int &c) override {
-    a = static_cast<int>(values_.v[0]);
-    b = static_cast<int>(values_.v[1]);
-    c = static_cast<int>(values_.v[2]);
-    return kOfxStatOK;
-  }
-  OfxStatus get(OfxTime, int &a, int &b, int &c) override { return get(a, b, c); }
-  OfxStatus set(int a, int b, int c) override {
-    values_.v[0] = a; values_.v[1] = b; values_.v[2] = c;
-    return kOfxStatOK;
-  }
-  OfxStatus set(OfxTime, int a, int b, int c) override { return set(a, b, c); }
-
- private:
-  Vec4 values_;
-};
-
-class RGBImpl : public OFX::Host::Param::RGBInstance {
- public:
-  RGBImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set, int dimension)
-      : OFX::Host::Param::RGBInstance(desc, set), values_(Vec4::fromDefaults(desc, dimension)) {}
-  OfxStatus get(double &a, double &b, double &c) override {
-    a = values_.v[0]; b = values_.v[1]; c = values_.v[2];
-    return kOfxStatOK;
-  }
-  OfxStatus get(OfxTime, double &a, double &b, double &c) override { return get(a, b, c); }
-  OfxStatus set(double a, double b, double c) override {
-    values_.v[0] = a; values_.v[1] = b; values_.v[2] = c;
-    return kOfxStatOK;
-  }
-  OfxStatus set(OfxTime, double a, double b, double c) override { return set(a, b, c); }
-
- private:
-  Vec4 values_;
-};
-
-class RGBAImpl : public OFX::Host::Param::RGBAInstance {
- public:
-  RGBAImpl(OFX::Host::Param::Descriptor &desc, OFX::Host::Param::SetInstance *set, int dimension)
-      : OFX::Host::Param::RGBAInstance(desc, set), values_(Vec4::fromDefaults(desc, dimension)) {}
-  OfxStatus get(double &a, double &b, double &c, double &d) override {
-    a = values_.v[0]; b = values_.v[1]; c = values_.v[2]; d = values_.v[3];
-    return kOfxStatOK;
-  }
-  OfxStatus get(OfxTime, double &a, double &b, double &c, double &d) override { return get(a, b, c, d); }
-  OfxStatus set(double a, double b, double c, double d) override {
-    values_.v[0] = a; values_.v[1] = b; values_.v[2] = c; values_.v[3] = d;
-    return kOfxStatOK;
-  }
-  OfxStatus set(OfxTime, double a, double b, double c, double d) override { return set(a, b, c, d); }
-
- private:
-  Vec4 values_;
-};
-
-// ---------------------------------------------------------------------------
-// The instance: one live plugin
 // ---------------------------------------------------------------------------
 
 /* InstanceImpl is one plugin instance.
@@ -664,57 +400,20 @@ class InstanceImpl : public OFX::Host::ImageEffect::Instance {
   // parameter. A type the host does not implement is refused by name rather than
   // silently given a wrong shape, so a plugin's parameter page is never wrong
   // about what a control does.
+  //
+  // The shapes themselves live in params.cpp: they hold a value and report it and
+  // touch nothing else here, so they were the one part of this file with a seam
+  // already in it. This override is the whole call into them; an unknown type comes
+  // back as nullptr and is reported here, where the callbacks are.
   OFX::Host::Param::Instance *newParam(const std::string &name,
                                        OFX::Host::Param::Descriptor &desc) override {
-    const std::string type = desc.getType();
-
-    if (type == kOfxParamTypeInteger) {
-      return new IntegerImpl(desc, this);
-    }
-    if (type == kOfxParamTypeDouble) {
-      return new DoubleImpl(desc, this);
-    }
-    if (type == kOfxParamTypeBoolean) {
-      return new BooleanImpl(desc, this);
-    }
-    if (type == kOfxParamTypeChoice) {
-      return new ChoiceImpl(desc, this);
-    }
-    if (type == kOfxParamTypeString) {
-      return new StringImpl(desc, this);
-    }
-    if (type == kOfxParamTypePushButton) {
-      return new PushButtonImpl(desc, this);
-    }
-    if (type == kOfxParamTypeGroup) {
-      return new GroupImpl(desc);
-    }
-    if (type == kOfxParamTypePage) {
-      return new PageImpl(desc);
-    }
-    if (type == kOfxParamTypeCustom) {
-      return new CustomImpl(desc, this);
-    }
-    if (type == kOfxParamTypeRGBA) {
-      return new RGBAImpl(desc, this, 4);
-    }
-    if (type == kOfxParamTypeRGB) {
-      return new RGBImpl(desc, this, 3);
-    }
-    if (type == kOfxParamTypeDouble2D) {
-      return new Double2DImpl(desc, this, 2);
-    }
-    if (type == kOfxParamTypeInteger2D) {
-      return new Integer2DImpl(desc, this, 2);
-    }
-    if (type == kOfxParamTypeDouble3D) {
-      return new Double3DImpl(desc, this, 3);
-    }
-    if (type == kOfxParamTypeInteger3D) {
-      return new Integer3DImpl(desc, this, 3);
+    OFX::Host::Param::Instance *created = ofxhost::createParam(desc, this);
+    if (created != nullptr) {
+      return created;
     }
 
     if (callbacks_.message != nullptr) {
+      const std::string type = desc.getType();
       const std::string text = "the parameter type " + type + " is not supported; " + name + " is unavailable";
       callbacks_.message(callbacks_.user, kOfxMessageWarning, text.c_str());
     }
