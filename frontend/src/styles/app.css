@@ -1169,6 +1169,25 @@ body,
 }
 
 /*
+ * The top-level entries of the tree stand apart a little; the members of a group do not.
+ *
+ * A plugin's own list is a sequence of unrelated things - a group, a control, another
+ * group - and at one pixel of separation they read as one solid block. Inside a group the
+ * spacing stays tight on purpose: the tree line is drawn against each child's own box, so a
+ * margin there would leave a gap in the vertical run, and the members of a group are one
+ * list rather than several.
+ *
+ * The gap is written as a sibling rule rather than as padding on the entries, so it appears
+ * only between two of them and never above the first.
+ */
+.panel--parameters > .params__section + .params__section,
+.panel--parameters > .params__section + .params__row,
+.panel--parameters > .params__row + .params__section,
+.panel--parameters > .params__row + .params__row {
+  margin-top: 6px;
+}
+
+/*
  * The tree, drawn the way Dear ImGui draws one.
  *
  * The reference is a style posted in ocornut/imgui#2920 (comment 615169533), and what makes it
