@@ -137,18 +137,19 @@ jobs:
       - name: Install dependencies
         run: |
           # The image points apt at an Azure mirror that has failed to resolve on
-          # some runners. A failed update rewrites the mirror list to the upstream
-          # archive and tries again, so a release does not depend on one DNS
-          # answer.
+          # some runners. Each attempt fails fast, the failed one rewrites the
+          # mirror list to the upstream archive, and the install retries, so a
+          # release does not depend on one DNS answer.
+          apt() { sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 "$@"; }
           for attempt in 1 2 3; do
-            if sudo apt-get update -o Acquire::Retries=3; then break; fi
+            if apt update --error-on=any; then break; fi
             echo "apt-get update failed (attempt $attempt); falling back to the upstream mirrors"
             sudo sed -i -E \
               's|https?://[a-z0-9.-]*archive\.ubuntu\.com|http://archive.ubuntu.com|g; s|https?://[a-z0-9.-]*security\.ubuntu\.com|http://security.ubuntu.com|g' \
               /etc/apt/apt-mirrors.txt /etc/apt/sources.list 2>/dev/null || true
-            sleep 10
+            sleep 5
           done
-          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
+          apt install -y --no-install-recommends \
             build-essential cmake ninja-build pkg-config git file wget xvfb zsync \
             libraw-dev libtiff-dev liblcms2-dev libwebp-dev zlib1g-dev libpng-dev \
             libgl1-mesa-dev libgl1-mesa-dri xorg-dev
