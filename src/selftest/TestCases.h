@@ -21,6 +21,7 @@ int testExportManager();
 
 // The bundled plugins and every installed one. src is the shared test image.
 int testNoiseProfiles();
+int testLensProfiles();
 int testDenoiseSeeding();
 int testDenoisePlugin();
 int testTransformPlugin(Image &src);

@@ -189,6 +189,7 @@ add_library(ofxhost_io STATIC
   src/codecs/ImageColor.cpp
   src/codecs/ImageWrite.cpp
   src/codecs/NoiseProfiles.cpp
+  src/codecs/LensProfiles.cpp
   src/persist/ProjectPersistSave.cpp
   src/persist/ProjectPersistLoad.cpp
   src/persist/daos/SidecarDao.cpp
@@ -197,7 +198,8 @@ add_library(ofxhost_io STATIC
 )
 target_include_directories(ofxhost_io PRIVATE third_party/stb third_party/tinyexr)
 target_compile_definitions(ofxhost_io PUBLIC
-  "OFX_NOISE_PROFILE_PATH=\"${CMAKE_SOURCE_DIR}/third_party/noiseprofiles/noiseprofiles.json\"")
+  "OFX_NOISE_PROFILE_PATH=\"${CMAKE_SOURCE_DIR}/third_party/noiseprofiles/noiseprofiles.json\""
+  "OFX_LENS_PROFILE_PATH=\"${CMAKE_SOURCE_DIR}/third_party/lensprofiles/lenses.json\"")
 target_link_libraries(ofxhost_io PUBLIC ofxhost_core ofxhost_platform PRIVATE ZLIB::ZLIB)
 
 if(TARGET PkgConfig::LIBRAW)
@@ -421,6 +423,9 @@ add_custom_command(TARGET OfxHost POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     ${CMAKE_SOURCE_DIR}/third_party/noiseprofiles/noiseprofiles.json
     $<TARGET_FILE_DIR:OfxHost>/noiseprofiles.json
+    COMMAND ${CMAKE_COMMAND} -E copy
+    ${CMAKE_SOURCE_DIR}/third_party/lensprofiles/lenses.json
+    $<TARGET_FILE_DIR:OfxHost>/lenses.json
 )
 
 # The self-test reads the same files, so it finds them beside its own binary.
@@ -428,6 +433,9 @@ add_custom_command(TARGET OfxHostTests POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     ${CMAKE_SOURCE_DIR}/third_party/noiseprofiles/noiseprofiles.json
     $<TARGET_FILE_DIR:OfxHostTests>/noiseprofiles.json
+    COMMAND ${CMAKE_COMMAND} -E copy
+    ${CMAKE_SOURCE_DIR}/third_party/lensprofiles/lenses.json
+    $<TARGET_FILE_DIR:OfxHostTests>/lenses.json
 )
 
 # A vcpkg static build needs the dependencies of the libraries found above:
@@ -469,6 +477,7 @@ set(OFX_BUNDLED_PLUGIN_SOURCES
   plugins/Transform.cpp
   plugins/AutoExposure.cpp
   plugins/Denoise.cpp
+  plugins/LensCorrection.cpp
   plugins/BundledPlugins.cpp
 )
 
@@ -512,6 +521,7 @@ if(WIN32)
   set(OFX_ICON_FONT_PATH "${CMAKE_SOURCE_DIR}/third_party/fontawesome/fa-solid-900.ttf")
   set(OFX_UI_FONT_PATH "${CMAKE_SOURCE_DIR}/third_party/inter/Inter.ttf")
   set(OFX_NOISE_PROFILE_PATH "${CMAKE_SOURCE_DIR}/third_party/noiseprofiles/noiseprofiles.json")
+  set(OFX_LENS_PROFILE_PATH "${CMAKE_SOURCE_DIR}/third_party/lensprofiles/lenses.json")
   set(OFX_APP_ICON_PATH "${CMAKE_SOURCE_DIR}/packaging/windows/ofxhost.ico")
   if(NOT EXISTS "${OFX_APP_ICON_PATH}")
     message(FATAL_ERROR "windows icon not found: ${OFX_APP_ICON_PATH}")
@@ -587,6 +597,9 @@ if(APPLE)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       ${CMAKE_SOURCE_DIR}/third_party/noiseprofiles/noiseprofiles.json
       ${CMAKE_BINARY_DIR}/OfxHost.app/Contents/Resources/noiseprofiles.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${CMAKE_SOURCE_DIR}/third_party/lensprofiles/lenses.json
+      ${CMAKE_BINARY_DIR}/OfxHost.app/Contents/Resources/lenses.json
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       ${OFX_BUNDLE}
       ${CMAKE_BINARY_DIR}/OfxHost.app/Contents/PlugIns/OfxHost.ofx.bundle

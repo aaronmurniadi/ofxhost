@@ -134,6 +134,18 @@ static bool loadRaw(const std::string &path, Image &out, ImageMeta &meta) {
   meta.cameraModel = trimmed(raw->imgdata.idata.model);
   meta.iso = (int)(raw->imgdata.other.iso_speed + 0.5f);
   meta.hasCamera = !meta.cameraMaker.empty() && !meta.cameraModel.empty();
+  // The lens block holds the reported lens, and imgdata.other the shot itself.
+  meta.lensMaker = trimmed(raw->imgdata.lens.LensMake);
+  meta.lensModel = trimmed(raw->imgdata.lens.Lens);
+  meta.focalLength = raw->imgdata.other.focal_len;
+  meta.aperture = raw->imgdata.other.aperture;
+  // LibRaw carries the focus distance only in per-brand maker note blocks, which
+  // this build does not read. It stays zero, and the vignetting lookup then uses
+  // the database row for a 10 m subject, which is the lensfun default.
+  if (raw->imgdata.lens.FocalLengthIn35mmFormat > 0) {
+    // A 35 mm equivalent focal length and the real one give the crop factor.
+    if (meta.focalLength > 0.0) meta.cropFactor = (double)raw->imgdata.lens.FocalLengthIn35mmFormat / meta.focalLength;
+  }
   raw->imgdata.params.output_bps = 16;
   raw->imgdata.params.gamm[0] = 1.0;
   raw->imgdata.params.gamm[1] = 1.0;

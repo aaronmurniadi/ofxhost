@@ -8,6 +8,7 @@
 #include "services/ParamBridge.h"
 #include "engine/RenderWorker.h"
 #include "codecs/ImageIO.h"
+#include "codecs/LensProfiles.h"
 #include "codecs/NoiseProfiles.h"
 #include "ofx/OfxHost.h"
 #include "ofxParam.h"
@@ -26,6 +27,63 @@ namespace fs = std::filesystem;
 
 // The bundled sensor noise profile table: it has to ship, and the lookup has to
 // match the camera and interpolate an ISO the database has no shot for.
+int testLensProfiles() {
+  LensCamera camera;
+  if (!lensCameraLookup("Nikon Corporation", "Nikon D90", camera)) return fail("lens profiles: D90 not found");
+  if (camera.mount != "Nikon F AF") return fail("lens profiles: D90 mount is wrong");
+  if (std::abs(camera.crop - 1.523) > 1e-6) return fail("lens profiles: D90 crop is wrong");
+
+  // A lens the database knows, at the focal length it is calibrated for.
+  LensShot shot;
+  shot.cameraMaker = "Nikon Corporation";
+  shot.cameraModel = "Nikon D90";
+  shot.lensMaker = "Nikon";
+  shot.lensModel = "Nikon AF Nikkor 50mm f/1.8D";
+  shot.focal = 50.0;
+  shot.aperture = 2.8;
+  LensProfile profile;
+  if (!lensProfileLookup(shot, profile)) return fail("lens profiles: 50mm f/1.8D not found");
+  if (profile.distortion != LensModel::PtLens) return fail("lens profiles: distortion model is wrong");
+  if (std::abs(profile.distortionTerms[0] - -0.00255) > 1e-6) return fail("lens profiles: ptlens a is wrong");
+  if (std::abs(profile.distortionTerms[1] - 0.00841) > 1e-6) return fail("lens profiles: ptlens b is wrong");
+  if (std::abs(profile.distortionTerms[2] - -0.01107) > 1e-6) return fail("lens profiles: ptlens c is wrong");
+  if (profile.tca != LensModel::TcaPoly3) return fail("lens profiles: TCA model is wrong");
+  if (std::abs(profile.tcaRed[0] - 1.0000537) > 1e-6) return fail("lens profiles: TCA red v is wrong");
+  if (std::abs(profile.tcaBlue[0] - 0.9998589) > 1e-6) return fail("lens profiles: TCA blue v is wrong");
+  if (!profile.hasVignetting()) return fail("lens profiles: vignetting missing");
+  // 2.8 sits between the 2.5 and the 3.5 rows, so k1 is the blend of them:
+  // -0.0795 + (-0.2566 - -0.0795) * 0.3. An exact aperture is not blended.
+  if (std::abs(profile.vignettingTerms[0] - -0.13263) > 1e-4)
+    return fail("lens profiles: interpolated vignetting k1 is wrong");
+  shot.aperture = 5.0;
+  LensProfile wideOpen;
+  if (!lensProfileLookup(shot, wideOpen)) return fail("lens profiles: f/5 lookup failed");
+  if (std::abs(wideOpen.vignettingTerms[0] - -0.2421) > 1e-6)
+    return fail("lens profiles: exact vignetting k1 is wrong");
+  shot.aperture = 2.8;
+
+  // The focal length between two calibrations interpolates, and one beyond the
+  // last calibration clamps instead of failing.
+  shot.focal = 35.0;
+  LensProfile wide;
+  if (!lensProfileLookup(shot, wide)) return fail("lens profiles: 35mm not found");
+  if (!wide.hasAnything()) return fail("lens profiles: 35mm has no profile");
+  shot.focal = 300.0;
+  LensProfile far;
+  if (!lensProfileLookup(shot, far)) return fail("lens profiles: 300mm not clamped");
+
+  // A lens the database does not know fails the lookup rather than guessing.
+  LensShot unknown;
+  unknown.cameraMaker = "Nikon Corporation";
+  unknown.cameraModel = "Nikon D90";
+  unknown.lensModel = "A lens nobody ever made 12mm f/0.5";
+  unknown.focal = 12.0;
+  LensProfile missing;
+  if (lensProfileLookup(unknown, missing)) return fail("lens profiles: an unknown lens matched");
+
+  return 0;
+}
+
 int testNoiseProfiles() {
   const std::vector<NoiseCamera> &table = noiseProfileTable();
   if (table.size() < 300) return fail("noise profiles: the bundled table did not load");

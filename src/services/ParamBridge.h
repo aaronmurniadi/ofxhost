@@ -21,6 +21,16 @@ int seedNoiseModelParams(ManagerSession session, Node &node);
 // Returns the number of nodes that took a profile.
 int seedNoiseModelParams(ManagerSession session);
 
+// Fills the lens correction polynomials of one node from the lens profile that
+// matches the camera, lens, focal length, and aperture of the open frame. Returns
+// the number of parameters it moved, so the caller can tell whether a profile was
+// applied.
+int seedLensCorrectionParams(ManagerSession session, Node &node);
+
+// Seeds every node in the chain with the lens profile of the open frame. Returns
+// the number of nodes that took a profile.
+int seedLensCorrectionParams(ManagerSession session);
+
 // True when at least one node is enabled, so a chain output exists at all.
 bool chainHasEnabledNode(ManagerSession session);
 void notifyChanged(Node &node, Param *p);

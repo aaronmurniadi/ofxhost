@@ -109,9 +109,15 @@ class OpenImageManagerImpl : public OpenImageManager {
   // the camera now open. Sets the status when a profile was applied, which is the
   // only cue the user gets for it.
   void seedNoiseForOpenCamera(const ImageMeta &meta) {
-    if (seedNoiseModelParams(session_) > 0)
+    bool reported = false;
+    if (seedNoiseModelParams(session_) > 0) {
       session_.reportStatus("Denoise (profiled): " + meta.cameraMaker + " " + meta.cameraModel + " ISO " +
                             std::to_string(meta.iso) + " profile applied");
+      reported = true;
+    }
+    if (seedLensCorrectionParams(session_) > 0 && !reported) {
+      session_.reportStatus("Lens Correction (profiled): " + meta.lensModel + " profile applied");
+    }
   }
 
   // True when opening this image would throw away work the user has to choose

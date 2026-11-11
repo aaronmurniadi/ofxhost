@@ -66,6 +66,8 @@ static bool appendNode(ManagerSession session, int pluginIndex) {
   // A new node takes the noise model of the camera the image came from, unless
   // the plugin is added for another reason and has no such parameters.
   seedNoiseModelParams(session, session.chain.nodes.back());
+  // The same camera and lens decide the lens correction of a new node.
+  seedLensCorrectionParams(session, session.chain.nodes.back());
   return true;
 }
 

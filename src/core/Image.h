@@ -85,6 +85,16 @@ struct ImageMeta {
   std::string cameraMaker;
   std::string cameraModel;
   int iso = 0;
+
+  // The lens and the shot, for the lens profile lookup. A zero focal means the
+  // file does not say what lens was used.
+  std::string lensMaker;
+  std::string lensModel;
+  double focalLength = 0.0;       // mm
+  double aperture = 0.0;          // f-number
+  double focusDistance = 0.0;     // metres, 0 when the file does not say
+  double cropFactor = 0.0;        // 0 when the file does not say
+  bool hasLens() const { return focalLength > 0.0; }
 };
 
 // Encoding settings for the raster export formats. Formats ignore what they cannot

@@ -2,6 +2,7 @@
 #include "core/RenderContext.h"
 
 #include "codecs/ImageIO.h"
+#include "codecs/LensProfiles.h"
 #include "codecs/NoiseProfiles.h"
 #include "ofx/OfxHost.h"
 #include "ofxImageEffect.h"
@@ -99,14 +100,15 @@ void syncChainColorSpaces(ManagerSession session) {
 
 // Writes value into the node parameter that carries the given label, when it is
 // a double parameter and the value is not already there. Returns the parameter it
-// changed.
-static Param *writeNodeDoubleParam(Node &node, const char *label, double value) {
+// changed. A secret parameter is skipped unless the caller asks for it, because a
+// secret one is the host's own and the user never edits it.
+static Param *writeNodeDoubleParam(Node &node, const char *label, double value, bool includeSecret = false) {
   if (!node.instance) return nullptr;
   for (auto &up : node.instance->params) {
     Param *p = up.get();
     if (p->kind != ParamType::Double) continue;
     if (sprop(p->props, kOfxPropLabel) != label) continue;
-    if (dprop(p->props, kOfxParamPropSecret, 0, 0) != 0) continue;
+    if (!includeSecret && dprop(p->props, kOfxParamPropSecret, 0, 0) != 0) continue;
     if (p->v.empty()) return nullptr;
     if (p->v[0] == value) return nullptr;  // already there, nothing to notify
     p->v[0] = value;
@@ -134,6 +136,105 @@ int seedNoiseModelParams(ManagerSession session) {
   int seeded = 0;
   for (Node &node : session.chain.nodes)
     if (seedNoiseModelParams(session, node) > 0) ++seeded;
+  return seeded;
+}
+
+// Converts the matched lens profile into the polynomials the effect evaluates.
+// lensfun's distortion models are all polynomials in r, so each one folds into
+// the single five-term form the plugin carries:
+//
+//   poly3   r_d = r * (1 - k1) + k1 * r^3
+//   poly5   r_d = r + k1 * r^3 + k2 * r^5
+//   ptlens  r_d = r * (1 - a - b - c) + c * r^2 + b * r^3 + a * r^4
+//
+// and its TCA models fold the same way into r * (a0 + a1 * r + a2 * r^2).
+struct LensPolynomials {
+  double distortion[5] = {1.0, 0.0, 0.0, 0.0, 0.0};
+  double red[3] = {1.0, 0.0, 0.0};
+  double blue[3] = {1.0, 0.0, 0.0};
+  double vignetting[3] = {0.0, 0.0, 0.0};
+};
+
+LensPolynomials polynomialsFor(const LensProfile &profile) {
+  LensPolynomials out;
+  if (profile.distortion == LensModel::Poly3) {
+    const double k1 = profile.distortionTerms[0];
+    out.distortion[0] = 1.0 - k1;
+    out.distortion[2] = k1;
+  } else if (profile.distortion == LensModel::Poly5) {
+    out.distortion[2] = profile.distortionTerms[0];
+    out.distortion[4] = profile.distortionTerms[1];
+  } else if (profile.distortion == LensModel::PtLens) {
+    const double a = profile.distortionTerms[0];
+    const double b = profile.distortionTerms[1];
+    const double c = profile.distortionTerms[2];
+    out.distortion[0] = 1.0 - a - b - c;
+    out.distortion[1] = c;
+    out.distortion[2] = b;
+    out.distortion[3] = a;
+  }
+  if (profile.tca == LensModel::TcaLinear) {
+    out.red[0] = profile.tcaRed[0];
+    out.blue[0] = profile.tcaBlue[0];
+  } else if (profile.tca == LensModel::TcaPoly3) {
+    for (int i = 0; i < 3; ++i) {
+      out.red[i] = profile.tcaRed[i];
+      out.blue[i] = profile.tcaBlue[i];
+    }
+  }
+  if (profile.vignetting == LensModel::VignettingPa)
+    for (int i = 0; i < 3; ++i) out.vignetting[i] = profile.vignettingTerms[i];
+  return out;
+}
+
+int seedLensCorrectionParams(ManagerSession session, Node &node) {
+  if (!node.instance) return 0;
+  const ImageMeta &meta = session.document.meta;
+  if (!meta.hasLens()) return 0;
+
+  LensShot shot;
+  shot.cameraMaker = meta.cameraMaker;
+  shot.cameraModel = meta.cameraModel;
+  shot.lensMaker = meta.lensMaker;
+  shot.lensModel = meta.lensModel;
+  shot.focal = meta.focalLength;
+  shot.aperture = meta.aperture;
+  shot.distance = meta.focusDistance;
+  shot.crop = meta.cropFactor;
+
+  LensProfile profile;
+  if (!lensProfileLookup(shot, profile)) return 0;
+  const LensPolynomials values = polynomialsFor(profile);
+
+  struct Write {
+    const char *label;
+    double value;
+  };
+  const Write writes[] = {
+      {"Distortion c1", values.distortion[0]}, {"Distortion c2", values.distortion[1]},
+      {"Distortion c3", values.distortion[2]}, {"Distortion c4", values.distortion[3]},
+      {"Distortion c5", values.distortion[4]}, {"TCA Red a0", values.red[0]},
+      {"TCA Red a1", values.red[1]},           {"TCA Red a2", values.red[2]},
+      {"TCA Blue a0", values.blue[0]},         {"TCA Blue a1", values.blue[1]},
+      {"TCA Blue a2", values.blue[2]},         {"Vignetting k1", values.vignetting[0]},
+      {"Vignetting k2", values.vignetting[1]}, {"Vignetting k3", values.vignetting[2]},
+  };
+
+  std::vector<Param *> changed;
+  {
+    std::lock_guard<std::mutex> lock(renderContext().values());
+    for (const Write &write : writes) {
+      if (Param *p = writeNodeDoubleParam(node, write.label, write.value, true)) changed.push_back(p);
+    }
+  }
+  for (Param *p : changed) notifyChanged(node, p);
+  return (int)changed.size();
+}
+
+int seedLensCorrectionParams(ManagerSession session) {
+  int seeded = 0;
+  for (Node &node : session.chain.nodes)
+    if (seedLensCorrectionParams(session, node) > 0) ++seeded;
   return seeded;
 }
 

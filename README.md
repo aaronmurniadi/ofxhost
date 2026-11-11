@@ -246,3 +246,9 @@ The sensor noise profile database in `third_party/noiseprofiles` is data from th
 its license, the GNU General Public License version 3 or later; the text is in
 `third_party/noiseprofiles/COPYING` next to it. It is read at runtime, and it is
 the only GPL-licensed material bundled with the app.
+
+The lens profile database in `third_party/lensprofiles` is data from the
+[lensfun](https://lensfun.github.io/) project and stays under its license,
+Creative Commons Attribution-ShareAlike 3.0 Unported; the text is in
+`third_party/lensprofiles/COPYING` next to it. It is read at runtime and is not
+modified.

@@ -56,6 +56,7 @@ cp "$BUILD/fa-solid-900.ttf" "$APPDIR/usr/bin/"
 cp "$BUILD/Inter.ttf" "$APPDIR/usr/bin/"
 # The host reads the sensor noise profiles next to its own binary as well.
 cp "$BUILD/noiseprofiles.json" "$APPDIR/usr/bin/"
+cp "$BUILD/lenses.json" "$APPDIR/usr/bin/"
 # Bundled OFX plugins are found in <exe dir>/Plugins.
 if [ -d "$BUILD/Plugins/OfxHost.ofx.bundle" ]; then
   mkdir -p "$APPDIR/usr/bin/Plugins"

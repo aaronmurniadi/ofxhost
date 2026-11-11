@@ -7,6 +7,7 @@ void getPluginIDs(OFX::PluginFactoryArray &ids) {
   registerTransformPlugin(ids);
   registerAutoExposurePlugin(ids);
   registerDenoisePlugin(ids);
+  registerLensCorrectionPlugin(ids);
 }
 
 }  // namespace Plugin
