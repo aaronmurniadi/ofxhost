@@ -82,8 +82,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # arm64 (Apple Silicon)
-          - os: macos-14
+          # arm64 (Apple Silicon). macos-14 resolves to a configuration this
+          # repository cannot use, so the job is cancelled before it starts.
+          - os: macos-15
             arch: arm64
           # x86_64 (Intel) — macos-13 is retired; use macos-15-intel
           - os: macos-15-intel
