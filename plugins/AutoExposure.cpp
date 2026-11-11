@@ -15,7 +15,7 @@
 #include <vector>
 
 #define kPluginName "Auto Exposure"
-#define kPluginGrouping "OFX Raw Host"
+#define kPluginGrouping "OfxHost"
 #define kPluginDescription "Meter the frame brightness and apply an exposure gain so the metered level lands on 18.4% gray."
 #define kPluginIdentifier "com.aaronmurniadi.ofxhost.autoexposure"
 #define kPluginVersionMajor 1

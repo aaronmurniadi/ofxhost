@@ -1,21 +1,13 @@
-# Builds the OpenFX Support library, which is what a plugin links against.
+# Builds the OpenFX Support library from third_party/openfx with one change.
 #
-# The host only needs HostSupport; the bundled plugins need this one, and the two are
-# different libraries that happen to live in the same submodule.
-#
-# One change from upstream. The support library's log-indent counter is a process-global int
-# (upstream's own comment calls it "not MP sane"), and action dispatches from the render and
-# the UI thread race on it. A private copy is patched to thread_local so the submodule stays
-# pristine. The anchor check keeps the patch honest: if upstream renames the line, configuring
-# fails instead of silently building the racy version.
+# The support lib's log-indent counter is a process-global int (upstream calls it
+# "not MP sane"), and action dispatches from the render and the UI threads race
+# on it. This patches a private copy to thread_local so the submodule stays
+# pristine. The anchor check keeps the patch honest: if upstream renames the
+# line, configuring fails instead of silently building the racy version.
 
-# OFX_ROOT rather than CMAKE_SOURCE_DIR: this file is included from a subdirectory whose
-# source dir is not the repository root, so the root would resolve to the wrong place.
-if(NOT DEFINED OFX_ROOT)
-  set(OFX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openfx")
-endif()
-set(OFX_SUPPORT_SRC "${OFX_ROOT}")
-set(OFX_SUPPORT_PATCHED_LOG "${CMAKE_BINARY_DIR}/ofxsLog.cpp")
+set(OFX_SUPPORT_SRC "${CMAKE_SOURCE_DIR}/third_party/openfx")
+set(OFX_SUPPORT_PATCHED_LOG "${CMAKE_CURRENT_BINARY_DIR}/ofxsLog.cpp")
 
 file(READ "${OFX_SUPPORT_SRC}/Support/Library/ofxsLog.cpp" _ofxs_log)
 string(REPLACE

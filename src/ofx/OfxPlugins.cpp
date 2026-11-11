@@ -1,0 +1,393 @@
+#include "ofx/OfxHost.h"
+#include "ofx/OfxHostPriv.h"
+#include "ofx/OfxEffectGpu.h"
+#include "ofx/OfxMetal.h"
+#include "ofxGPURender.h"
+#include "platform/Paths.h"
+
+#include "ofxParam.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <dlfcn.h>
+#else
+#include <unistd.h>
+#include <dlfcn.h>
+#endif
+
+namespace fs = std::filesystem;
+
+static void *loadLib(const fs::path &path) {
+#ifdef _WIN32
+  return (void *)LoadLibraryW(path.wstring().c_str());
+#else
+  return dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+#endif
+}
+static void *sym(void *lib, const char *name) {
+#ifdef _WIN32
+  return (void *)GetProcAddress((HMODULE)lib, name);
+#else
+  return dlsym(lib, name);
+#endif
+}
+static const char *loadErr() {
+#ifdef _WIN32
+  static char buf[64];
+  snprintf(buf, sizeof buf, "Win32 error %lu", GetLastError());
+  return buf;
+#else
+  return dlerror();
+#endif
+}
+
+// ------------------------------------------------------------- plugin loading
+
+OfxRegistry &ofxRegistry() {
+  static OfxRegistry registry;
+  return registry;
+}
+
+int OfxRegistry::indexOfLabel(const std::string &label) const {
+  for (int i = 0; i < (int)entries_.size(); ++i) {
+    if (entries_[i].label == label) return i;
+  }
+  return -1;
+}
+
+OfxStatus callAction(OfxPlugin *p, const char *action, Effect *e, PropSet *in, PropSet *out) {
+  OfxPropertySetHandle inHandle = nullptr;
+  if (in) inHandle = H(in);
+  OfxPropertySetHandle outHandle = nullptr;
+  if (out) outHandle = H(out);
+  return p->mainEntry(action, e, inHandle, outHandle);
+}
+bool ofxActionOk(OfxStatus s) { return s == kOfxStatOK || s == kOfxStatReplyDefault; }
+
+static fs::path pluginBinary(const fs::path &bundle) {
+  const fs::path contents = bundle / "Contents";
+  const std::string stem = bundle.stem().string();  // Foo.ofx
+#if defined(_WIN32)
+  const char *arch = "Win32";
+  if (sizeof(void *) == 8) arch = "Win64";
+#elif defined(__APPLE__)
+  const char *arch = "MacOS";
+#elif defined(__aarch64__) || defined(__arm64__)
+  const char *arch = "Linux-arm-64";
+#elif defined(__x86_64__)
+  const char *arch = "Linux-x86-64";
+#else
+  const char *arch = "Linux-x86";
+#endif
+  fs::path bin = contents / arch / stem;
+  if (fs::exists(bin)) return bin;
+#ifdef __APPLE__
+  // Universal / arm64 / x86_64 subdirs used by some vendors.
+  for (const char *sub : {"MacOS/arm64", "MacOS/x86_64", "MacOS/universal"}) {
+    bin = contents / sub / stem;
+    if (fs::exists(bin)) return bin;
+  }
+#endif
+  return contents / arch / stem;
+}
+
+static std::string pluginAuthor(OfxPlugin *p, const Effect &desc) {
+  const std::string grouping = sprop(desc.props, kOfxImageEffectPluginPropGrouping);
+  if (!grouping.empty()) return grouping;
+  const char *id = "";
+  if (p && p->pluginIdentifier) id = p->pluginIdentifier;
+  const std::string s = id;
+  const size_t d1 = s.find('.');
+  if (d1 == std::string::npos) {
+    if (s.empty()) return "Other";
+    return s;
+  }
+  const size_t d2 = s.find('.', d1 + 1);
+  if (d2 == std::string::npos) return s.substr(0, d1);
+  return s.substr(0, d2);
+}
+
+using OfxPluginCountFn = int (*)();
+using OfxPluginGetFn = OfxPlugin *(*)(int);
+
+// Registers every OFX filter plugin that the given entry points enumerate. Both
+// a plugin file and an effect linked into this executable come through here, so
+// the descriptor handling has one implementation.
+static void registerPlugins(OfxPluginCountFn count, OfxPluginGetFn get) {
+  for (int i = 0, n = count(); i < n; ++i) {
+    OfxPlugin *p = get(i);
+    if (!p || !p->setHost || !p->mainEntry || strcmp(p->pluginApi, kOfxImageEffectPluginApi) != 0) continue;
+    p->setHost(&gOfxHost);
+    if (!ofxActionOk(callAction(p, kOfxActionLoad, nullptr))) continue;
+     auto base = std::make_unique<Effect>();
+     propSetString(H(&base->props), kOfxPropType, 0, kOfxTypeImageEffect);
+     if (!ofxActionOk(callAction(p, kOfxActionDescribe, base.get()))) continue;
+    const bool metalCapable = sprop(base->props, kOfxImageEffectPropMetalRenderSupported) == "true";
+    if (metalCapable) std::fprintf(stderr, "[metal] plugin '%s' declares Metal render support\n", p->pluginIdentifier);
+    bool filter = false;
+    for (auto &v : base->props.m[kOfxImageEffectPropSupportedContexts]) filter |= v.s == kOfxImageEffectContextFilter;
+    if (!filter) continue;
+    auto ctx = cloneEffect(*base);
+    PropSet in;
+    propSetString(H(&in), kOfxImageEffectPropContext, 0, kOfxImageEffectContextFilter);
+    if (!ofxActionOk(callAction(p, kOfxImageEffectActionDescribeInContext, ctx.get(), &in))) continue;
+    const std::string label = sprop(base->props, kOfxPropLabel);
+    const std::string author = pluginAuthor(p, *base);
+    // A plugin without a label is listed by its identifier.
+    std::string listedLabel = label;
+    if (listedLabel.empty()) listedLabel = p->pluginIdentifier;
+    plugins().push_back({p, listedLabel, author, std::move(ctx), metalCapable});
+  }
+}
+
+static void loadBundle(const fs::path &bundle) {
+  const fs::path bin = pluginBinary(bundle);
+  void *lib = loadLib(bin);
+  if (!lib) {
+    fprintf(stderr, "Skipping %s: %s\n", bundle.string().c_str(), loadErr());
+    return;
+  }
+  auto setHost = reinterpret_cast<OfxStatus (*)(const OfxHost *)>(sym(lib, "OfxSetHost"));
+  auto count = reinterpret_cast<OfxPluginCountFn>(sym(lib, "OfxGetNumberOfPlugins"));
+  auto get = reinterpret_cast<OfxPluginGetFn>(sym(lib, "OfxGetPlugin"));
+  if (!count || !get) return;
+  if (setHost) setHost(&gOfxHost);
+  registerPlugins(count, get);
+}
+
+// The bundled Transform and Auto Exposure effects are compiled into the Windows
+// executable, so the release is a single file. The OFX support library supplies
+// these entry points for the factories linked in, and reports zero when there
+// are none.
+static void loadEmbeddedPlugins() {
+#if defined(OFX_EMBEDDED_PLUGIN)
+  registerPlugins(OfxGetNumberOfPlugins, OfxGetPlugin);
+#endif
+}
+
+void loadPlugins() {
+  loadEmbeddedPlugins();
+  std::vector<std::string> dirs;
+  if (const char *env = getenv("OFX_PLUGIN_PATH")) {
+    std::string s = env;
+#ifdef _WIN32
+    const char sep = ';';
+#else
+    const char sep = ':';
+#endif
+    for (size_t start = 0, end; start <= s.size(); start = end + 1) {
+      end = std::min(s.find(sep, start), s.size());
+      if (end > start) dirs.push_back(s.substr(start, end - start));
+    }
+  }
+#if defined(_WIN32)
+  dirs.push_back("C:\\Program Files\\Common Files\\OFX\\Plugins");
+#elif defined(__APPLE__)
+  dirs.push_back("/Library/OFX/Plugins");
+#else
+  dirs.push_back("/usr/OFX/Plugins");
+  dirs.push_back("/usr/local/OFX/Plugins");
+#endif
+  // Bundled plugins shipped with the app: <exe>/Plugins (dev build tree) and
+  // <exe>/../PlugIns (macOS app bundle Contents/PlugIns).
+  const fs::path exe = exeDir();
+  if (!exe.empty()) {
+    dirs.push_back((exe / "Plugins").string());
+    dirs.push_back((exe / ".." / "PlugIns").string());
+  }
+  for (auto &d : dirs) {
+    std::error_code ec;
+    for (auto it = fs::recursive_directory_iterator(d, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+      const fs::path &path = it->path();
+      if (path.extension() == ".bundle" && path.stem().extension() == ".ofx") {
+        loadBundle(path);
+        it.disable_recursion_pending();
+      }
+    }
+  }
+  std::sort(plugins().begin(), plugins().end(), [](const PluginEntry &a, const PluginEntry &b) {
+    if (a.author != b.author) return a.author < b.author;
+    return a.label < b.label;
+  });
+}
+
+std::unique_ptr<Effect> createInstance(PluginEntry &pe) {
+  auto e = cloneEffect(*pe.descriptor);
+  effectGpu(*e).metalCapable = pe.metalCapable;
+  OfxPropertySetHandle ep = H(&e->props);
+  propSetString(ep, kOfxPropType, 0, kOfxTypeImageEffectInstance);
+  propSetString(ep, kOfxImageEffectPropContext, 0, kOfxImageEffectContextFilter);
+  propSetInt(ep, kOfxPropIsInteractive, 0, 1);
+  propSetPointer(ep, kOfxPropInstanceData, 0, nullptr);
+  for (auto &p : e->params) {
+    p->v.resize(paramDimension(p->kind));
+    for (size_t i = 0; i < p->v.size(); ++i) p->v[i] = dprop(p->props, kOfxParamPropDefault, (int)i, 0);
+    if (paramIsString(p->kind)) p->s = sprop(p->props, kOfxParamPropDefault);
+  }
+  const double range[2] = {0, 0};
+  for (auto &c : e->clips) {
+    OfxPropertySetHandle cp = H(&c->props);
+    propSetString(cp, kOfxImageEffectPropPixelDepth, 0, kOfxBitDepthFloat);
+    propSetString(cp, kOfxImageClipPropUnmappedPixelDepth, 0, kOfxBitDepthFloat);
+    propSetString(cp, kOfxImageEffectPropComponents, 0, kOfxImageComponentRGBA);
+    propSetString(cp, kOfxImageClipPropUnmappedComponents, 0, kOfxImageComponentRGBA);
+    propSetString(cp, kOfxImageEffectPropPreMultiplication, 0, kOfxImageOpaque);
+    propSetString(cp, kOfxImageClipPropFieldOrder, 0, kOfxImageFieldNone);
+    propSetDouble(cp, kOfxImagePropPixelAspectRatio, 0, 1);
+    propSetDouble(cp, kOfxImageEffectPropFrameRate, 0, 24);
+    propSetN<double, propSetDouble>(cp, kOfxImageEffectPropFrameRange, 2, range);
+    propSetN<double, propSetDouble>(cp, kOfxImageEffectPropUnmappedFrameRange, 2, range);
+    propSetInt(cp, kOfxImageClipPropConnected, 0, 1);
+    propSetInt(cp, kOfxImageClipPropContinuousSamples, 0, 0);
+  }
+  if (!ofxActionOk(callAction(pe.plugin, kOfxActionCreateInstance, e.get()))) return nullptr;
+  refreshParamUiCache(e.get());
+  return e;
+}
+
+void Effect::setInputSize(int width, int height) {
+  std::lock_guard<std::mutex> lock(dimMutex);
+  w = width;
+  h = height;
+}
+
+// The descriptor effect holds no buffer, so a plain pointer copy stays safe.
+Effect::~Effect() {
+  if (!gpu) return;
+  if (gpu->srcMtl) ofxMetalBufferRelease(reinterpret_cast<OfxMetalBuffer *>(gpu->srcMtl));
+  if (gpu->dstMtl) ofxMetalBufferRelease(reinterpret_cast<OfxMetalBuffer *>(gpu->dstMtl));
+}
+
+// Lazily allocates the effect's GPU state on first use.
+EffectGpu &effectGpu(Effect &e) {
+  if (!e.gpu) e.gpu = std::make_unique<EffectGpu>();
+  return *e.gpu;
+}
+
+// Returns a buffer of at least wantBytes, and reuses the slot when it is large
+// enough. The scratch buffer therefore survives across renders of one instance.
+static void *ensureMetalBuffer(void *&slot, size_t &haveBytes, size_t wantBytes) {
+  if (slot && haveBytes >= wantBytes) return slot;
+  if (slot) ofxMetalBufferRelease(reinterpret_cast<OfxMetalBuffer *>(slot));
+  slot = ofxMetalBufferCreate(wantBytes);
+  if (slot) haveBytes = wantBytes;
+  else haveBytes = 0;
+  return slot;
+}
+
+void queryOutputSize(OfxPlugin *p, Effect *e, int inW, int inH, int *outW, int *outH) {
+  *outW = inW;
+  *outH = inH;
+  if (!p || !e || inW <= 0 || inH <= 0) return;
+  // The plugin may query clip RoDs while answering; give it the input size.
+  {
+    std::lock_guard<std::mutex> lock(e->dimMutex);
+    e->w = inW;
+    e->h = inH;
+    e->outW = inW;
+    e->outH = inH;
+  }
+  PropSet in, out;
+  OfxPropertySetHandle a = H(&in);
+  propSetDouble(a, kOfxPropTime, 0, 0);
+  const double scale[2] = {1, 1};
+  propSetN<double, propSetDouble>(a, kOfxImageEffectPropRenderScale, 2, scale);
+  const OfxStatus st = callAction(p, kOfxImageEffectActionGetRegionOfDefinition, e, &in, &out);
+  if (st != kOfxStatOK) return;
+  auto it = out.m.find(kOfxImageEffectPropRegionOfDefinition);
+  if (it == out.m.end() || it->second.size() < 4) return;
+  const double x1 = it->second[0].d, y1 = it->second[1].d;
+  const double x2 = it->second[2].d, y2 = it->second[3].d;
+  if (!std::isfinite(x1) || !std::isfinite(y1) || !std::isfinite(x2) || !std::isfinite(y2)) return;
+  const double dw = x2 - x1, dh = y2 - y1;
+  if (dw < 1 || dh < 1 || dw > 32768 || dh > 32768) return;
+  *outW = (int)std::lround(dw);
+  *outH = (int)std::lround(dh);
+}
+
+bool effectUsesMetal(const Effect *e) { return e && e->gpu && e->gpu->metalCapable && ofxMetalAvailable(); }
+
+OfxStatus renderEffect(OfxPlugin *plugin, Effect *e, float *src, float *dst, int w, int h, int outW, int outH, int gen,
+                       void *srcMtl, void *dstMtl, bool draft, double renderScale) {
+  e->src = src;
+  e->dst = dst;
+  {
+    std::lock_guard<std::mutex> lock(e->dimMutex);
+    e->w = w;
+    e->h = h;
+    e->outW = outW;
+    e->outH = outH;
+  }
+  e->renderGen = gen;
+  EffectGpu &g = effectGpu(*e);
+  PropSet in;
+  OfxPropertySetHandle a = H(&in);
+  const int window[4] = {0, 0, outW, outH};
+  // The proxy scale of this pass. A preview or a draft is rendered smaller than
+  // the project, so plugins that size something in project pixels (a denoiser's
+  // noise model, a blur radius) can follow the frame they are handed.
+  const double scale[2] = {renderScale, renderScale};
+  propSetDouble(a, kOfxPropTime, 0, 0);
+  propSetString(a, kOfxImageEffectPropFieldToRender, 0, kOfxImageFieldNone);
+  propSetN<int, propSetInt>(a, kOfxImageEffectPropRenderWindow, 4, window);
+  propSetN<double, propSetDouble>(a, kOfxImageEffectPropRenderScale, 2, scale);
+  propSetInt(a, kOfxImageEffectPropSequentialRenderStatus, 0, 0);
+  propSetInt(a, kOfxImageEffectPropInteractiveRenderStatus, 0, gen != 0);
+  if (draft)
+    propSetInt(a, kOfxImageEffectPropRenderQualityDraft, 0, 1);
+  else
+    propSetInt(a, kOfxImageEffectPropRenderQualityDraft, 0, 0);
+  g.metalEnabled = g.metalCapable && ofxMetalAvailable();
+  g.curSrcMtl = nullptr;
+  g.curDstMtl = nullptr;
+  if (g.metalEnabled) {
+    propSetInt(a, kOfxImageEffectPropMetalEnabled, 0, 1);
+    propSetPointer(a, kOfxImageEffectPropMetalCommandQueue, 0, ofxMetalCommandQueue());
+    void *useSrc = srcMtl;
+    void *useDst = dstMtl;
+    if (!useSrc) {
+      const size_t srcBytes = (size_t)w * h * 4 * sizeof(float);
+      useSrc = ensureMetalBuffer(g.srcMtl, g.srcMtlBytes, srcBytes);
+      if (!useSrc) return kOfxStatErrMemory;
+      if (src) std::memcpy(ofxMetalBufferContents(reinterpret_cast<OfxMetalBuffer *>(useSrc)), src, srcBytes);
+    }
+    if (!useDst) {
+      const size_t dstBytes = (size_t)outW * outH * 4 * sizeof(float);
+      useDst = ensureMetalBuffer(g.dstMtl, g.dstMtlBytes, dstBytes);
+      if (!useDst) return kOfxStatErrMemory;
+    }
+    g.curSrcMtl = useSrc;
+    g.curDstMtl = useDst;
+  } else {
+    propSetInt(a, kOfxImageEffectPropMetalEnabled, 0, 0);
+  }
+  const OfxStatus st = callAction(plugin, kOfxImageEffectActionRender, e, &in);
+  // Chained GPU renders keep the buffers on the GPU: the chain owns the sync and
+  // the readback. A single-node caller (dstMtl null) keeps the old behavior and
+  // gets the GPU result copied back to the CPU dst here.
+  if (g.metalEnabled && !dstMtl && st == kOfxStatOK && g.dstMtl && dst) {
+    ofxMetalSync();
+    const void *d = ofxMetalBufferContents(reinterpret_cast<OfxMetalBuffer *>(g.dstMtl));
+    if (d) std::memcpy(dst, d, (size_t)outW * outH * 4 * sizeof(float));
+  }
+  if (st != kOfxStatOK && g.metalCapable) {
+    std::fprintf(stderr, "[metal] render failed: status=%d (0x%08x) metal=%d plugin=%p\n", (int)st, (unsigned int)st,
+                 (int)g.metalEnabled, (void *)plugin);
+  }
+  e->src = e->dst = nullptr;
+  g.curSrcMtl = nullptr;
+  g.curDstMtl = nullptr;
+  g.metalEnabled = false;
+  return st;
+}
+

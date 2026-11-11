@@ -1,0 +1,132 @@
+#!/bin/sh
+# Builds <build>/AppImage/OfxHost-Linux-<arch>.AppImage from an already built
+# binary. Needs APPIMAGETOOL (path or name of appimagetool) and, when the binary
+# links shared libraries from the system, ldd.
+#
+# Usage: VERSION=1.2.3 APPIMAGETOOL=/path/to/appimagetool packaging/linux/build-appimage.sh
+#
+# Set UPDATE_INFORMATION to make the AppImage updateable. appimagetool then embeds
+# the string and writes <appimage>.zsync beside the AppImage, which must be published
+# next to it. appimagetool needs zsyncmake for that, and finds it on PATH or uses the
+# copy bundled in the appimagetool AppImage. See
+# https://docs.appimage.org/packaging-guide/optional/updates.html
+set -e
+cd "$(dirname "$0")/../.."
+
+BUILD=${BUILD_DIR:-build}
+OUT=${OUT_DIR:-$BUILD/AppImage}
+NAME=OfxHost
+APPDIR="$OUT/$NAME.AppDir"
+TOOL=${APPIMAGETOOL:-appimagetool}
+VERSION=${VERSION:-0.0.0}
+UPDATE_INFORMATION=${UPDATE_INFORMATION:-}
+
+case "$(uname -m)" in
+  aarch64|arm64) APPTARGET=arm_aarch64 ;;
+  *) APPTARGET=x86_64 ;;
+esac
+
+BIN="$BUILD/$NAME"
+if [ ! -x "$BIN" ]; then
+  BIN="$BUILD/Release/$NAME"
+fi
+if [ ! -x "$BIN" ]; then
+  echo "error: no built binary at $BUILD/$NAME; build with cmake first" >&2
+  exit 1
+fi
+if ! command -v "$TOOL" >/dev/null 2>&1 && [ ! -x "$TOOL" ]; then
+  echo "error: appimagetool not found; set APPIMAGETOOL to its path" >&2
+  exit 1
+fi
+
+rm -rf "$OUT"
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib" \
+         "$APPDIR/usr/share/applications" \
+         "$APPDIR/usr/share/icons/hicolor/256x256/apps" \
+         "$APPDIR/usr/share/metainfo"
+
+cp "$BIN" "$APPDIR/usr/bin/$NAME"
+# --selftest forwards to the test binary, which the smoke test calls through the
+# app binary with the AppImage mounted.
+if [ -x "$BUILD/OfxHostTests" ]; then
+  cp "$BUILD/OfxHostTests" "$APPDIR/usr/bin/OfxHostTests"
+fi
+# The host reads the interface and icon fonts next to its own binary.
+cp "$BUILD/fa-solid-900.ttf" "$APPDIR/usr/bin/"
+cp "$BUILD/Inter.ttf" "$APPDIR/usr/bin/"
+# The host reads the sensor noise profiles next to its own binary as well.
+cp "$BUILD/noiseprofiles.json" "$APPDIR/usr/bin/"
+# Bundled OFX plugins are found in <exe dir>/Plugins.
+if [ -d "$BUILD/Plugins/OfxHost.ofx.bundle" ]; then
+  mkdir -p "$APPDIR/usr/bin/Plugins"
+  cp -R "$BUILD/Plugins/OfxHost.ofx.bundle" "$APPDIR/usr/bin/Plugins/"
+fi
+cp packaging/linux/ofxhost.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/ofxhost.png"
+cp packaging/linux/ofxhost.png "$APPDIR/ofxhost.png"
+cp packaging/linux/ofxhost.desktop "$APPDIR/usr/share/applications/ofxhost.desktop"
+cp packaging/linux/ofxhost.desktop "$APPDIR/ofxhost.desktop"
+cp packaging/linux/ofxhost.appdata.xml "$APPDIR/usr/share/metainfo/"
+cp packaging/linux/AppRun "$APPDIR/AppRun"
+chmod +x "$APPDIR/AppRun"
+for doc in README.md LICENSE; do
+  if [ -f "$doc" ]; then cp "$doc" "$APPDIR/"; fi
+done
+
+# Library exclusions follow the AppImage excludelist: these must come from the
+# host system, because substituting them breaks the runtime or the GPU driver.
+isSystemLib() {
+  case "$1" in
+    ld-linux*) return 0 ;;
+    libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libresolv.so*|libnsl.so*) return 0 ;;
+    libgcc_s.so*|libstdc++.so*|libz.so*|libexpat.so*) return 0 ;;
+    libGL.so*|libGLX*|libEGL*|libOpenGL*|libGLdispatch*) return 0 ;;
+    libdrm.so*|libglib-2.0*|libgobject-2.0*|libgio-2.0*|libgmodule-2.0*|libgthread-2.0*) return 0 ;;
+    libX11.so*|libX11-xcb*|libxcb.so*|libXau.so*|libXdmcp.so*|libXext.so*) return 0 ;;
+    libXrender.so*|libXfixes.so*|libXrandr.so*|libXi.so*|libXcursor.so*|libXinerama.so*) return 0 ;;
+    libXxf86vm.so*|libxshmfence.so*|libfontconfig.so*|libfreetype.so*|libwayland-*) return 0 ;;
+  esac
+  return 1
+}
+
+if command -v ldd >/dev/null 2>&1; then
+  ldd "$APPDIR/usr/bin/$NAME" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^\//) print $i }' |
+    sort -u | while read -r lib; do
+      name=$(basename "$lib")
+      if isSystemLib "$name"; then continue; fi
+      cp -L "$lib" "$APPDIR/usr/lib/$name"
+    done
+fi
+
+APPIMAGE="$OUT/$NAME-Linux-$APPTARGET.AppImage"
+# zsyncmake names its output after the base name of the AppImage and writes it to
+# the directory it runs in, and appimagetool hands it the AppImage without asking
+# for another output path. The file therefore lands in this directory and not
+# beside the AppImage, which the release and the checks below expect.
+ZSYNC_IN_CWD="$(basename "$APPIMAGE").zsync"
+
+# appimagetool embeds the update information and writes the .zsync file only when
+# it is given the string, so an empty value must not reach the argument list.
+set -- --no-appstream
+if [ -n "$UPDATE_INFORMATION" ]; then
+  set -- "$@" -u "$UPDATE_INFORMATION"
+  # Drop the copy a previous build left here, so a failed run cannot be read as
+  # this one's output.
+  rm -f "$ZSYNC_IN_CWD"
+fi
+
+ARCH="$APPTARGET" VERSION="$VERSION" NO_STRIP=1 APPIMAGE_EXTRACT_AND_RUN=1 \
+  "$TOOL" "$@" "$APPDIR" "$APPIMAGE"
+
+echo "Built $(pwd)/$APPIMAGE"
+if [ -n "$UPDATE_INFORMATION" ]; then
+  if [ ! -f "$APPIMAGE.zsync" ] && [ -f "$ZSYNC_IN_CWD" ]; then
+    mv "$ZSYNC_IN_CWD" "$APPIMAGE.zsync"
+  fi
+  if [ ! -f "$APPIMAGE.zsync" ]; then
+    echo "error: appimagetool wrote no .zsync file for the update information" >&2
+    echo "error: install the zsync package, or use the appimagetool AppImage that bundles zsyncmake" >&2
+    exit 1
+  fi
+  echo "Embedded update information: $UPDATE_INFORMATION"
+  echo "Built $(pwd)/$APPIMAGE.zsync"
+fi

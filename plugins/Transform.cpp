@@ -14,7 +14,7 @@
 #include <memory>
 
 #define kPluginName "Transform"
-#define kPluginGrouping "OFX Raw Host"
+#define kPluginGrouping "OfxHost"
 #define kPluginDescription "Zoom into an aspect-ratio region, then rotate the result."
 #define kPluginIdentifier "com.aaronmurniadi.ofxhost.transform"
 #define kPluginVersionMajor 1

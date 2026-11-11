@@ -1,208 +1,389 @@
 name: Release
 
-# Builds the application for macOS (both architectures), for Linux and for Windows, and
-# attaches the artefacts to a release.
-#
-# The work is in .github/actions/wails3-macos, wails3-linux and wails3-windows, one call per
-# runner. Those actions are the Wails Build Action's shape - pinned Go and Node, a build, an
-# .app bundle or a tarball or a zip, a checksum, an artifact - with its two Wails v2 steps
-# replaced by their v3 equivalents. The header of the macOS action records why the upstream action
-# cannot build this project: it installs the v2 CLI and calls `wails build --platform ...
-# -o ...`, and the v3 CLI has neither flag.
-#
-# macOS is two jobs, not one universal build. Each architecture links its own Homebrew
-# bottles, so each needs a runner of its own architecture: macos-15 for arm64,
-# macos-15-intel for x86_64. A universal app assembled across two runners would need a lipo
-# merge over every Mach-O file in the bundle, which is more moving parts than a second job.
-
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
+    # A push to release/vX.X.X publishes the build as vX.X.X-dev-<short sha>,
+    # so each pre-release has its own tag. The merge of that branch into main,
+    # tagged vX.X.X, publishes the same build as stable.
+    branches: ['release/v*']
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to release (for example v0.2.0). Leave empty to build only.'
-        required: false
-        type: string
-      publish:
-        description: 'Publish a release for that tag. Off builds the artefacts and stops.'
-        required: false
-        type: boolean
-        default: false
-      platforms:
-        description: 'Which platforms to build. A manual run can build one to test it.'
-        required: false
-        type: choice
-        default: all
-        options:
-          - all
-          - macos
-          - linux
-          - windows
-  # A pull request that changes the pipeline itself, and nothing else. Three builds take a
-  # while, so it is not something every pull request should pay for; a manual run does the
-  # same job with a button.
-  pull_request:
-    paths:
-      - '.github/workflows/release.yml'
-      - '.github/actions/**'
 
+# Build jobs read the repository only. The publish job asks for write access for
+# itself, so a build step cannot create a release.
 permissions:
-  contents: write
+  contents: read
 
 env:
-  APP_NAME: ofxhost
-  # What the About panel reports, injected as -X main.version. A tag push names itself, a
-  # manual run uses the tag it was given, and anything else is "dev" so an unversioned build is
-  # recognisable rather than pretending to be a release.
-  APP_VERSION: ${{ github.event.inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'dev' }}
-  # Pinned rather than "latest": a release build should change because the code changed,
-  # not because a tool moved under it.
-  WAILS_VERSION: v3.1.0
-  TASK_VERSION: v3.54.0
-  GO_VERSION: '1.26'
-  NODE_VERSION: '22'
+  # appimagetool runs inside the release job, so it is pinned to one release and
+  # checked against the digest GitHub publishes for that asset. The "continuous"
+  # tag is a moving target and must not be used.
+  APPIMAGETOOL_VERSION: 1.9.1
+  APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
 
 jobs:
-  macos:
-    name: macOS (${{ matrix.arch }})
-    # A manual run names the platform it wants. A tag push and a pull request build all of
-    # them, because a release with one platform missing is not a release.
-    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'macos'
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # `arch` names the artifact, `goarch` is what the toolchain is told. They are not the
-        # same word for Intel: Go calls it amd64, and GOARCH=x86_64 is not a GOOS/GOARCH pair
-        # at all, so `go env` fails before a single file is compiled.
-        include:
-          - arch: arm64
-            goarch: arm64
-            # macos-14 resolves to a configuration this repository cannot use; macos-15 is the
-            # current arm64 image and the one that runs.
-            runner: macos-15
-          # macos-13 was retired, and a job queued on it waits forever rather than failing.
-          # macos-15-intel is the current Intel image.
-          - arch: x86_64
-            goarch: amd64
-            runner: macos-15-intel
-
-    steps:
-      - name: Check out
-        uses: actions/checkout@v7.0.1
-        with:
-          # The OpenFX headers and HostSupport are a submodule, and the host does not
-          # compile without them.
-          submodules: recursive
-
-      - name: Build, verify and package
-        uses: ./.github/actions/wails3-macos
-        with:
-          build-name: ${{ env.APP_NAME }}
-          build-platform: darwin/${{ matrix.arch }}
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
-          wails-version: ${{ env.WAILS_VERSION }}
-          task-version: ${{ env.TASK_VERSION }}
-          version: ${{ env.APP_VERSION }}
-
-  # One job. The tarball is the only Linux artefact, and the runner is x86_64 to match it.
-  linux:
-    name: Linux (${{ matrix.arch }})
-    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'linux'
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            goarch: amd64
-
-    steps:
-      - name: Check out
-        uses: actions/checkout@v7.0.1
-        with:
-          submodules: recursive
-
-      - name: Build, verify and package
-        uses: ./.github/actions/wails3-linux
-        with:
-          build-name: ${{ env.APP_NAME }}
-          build-platform: linux/${{ matrix.arch }}
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
-          wails-version: ${{ env.WAILS_VERSION }}
-          task-version: ${{ env.TASK_VERSION }}
-          version: ${{ env.APP_VERSION }}
-
-  # One job. The zip is the only Windows artefact, and the runner is x86_64 to match it.
-  windows:
-    name: Windows (${{ matrix.arch }})
-    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'windows'
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            goarch: amd64
-
-    steps:
-      - name: Check out
-        uses: actions/checkout@v7.0.1
-        with:
-          submodules: recursive
-
-      - name: Build, verify and package
-        uses: ./.github/actions/wails3-windows
-        with:
-          build-name: ${{ env.APP_NAME }}
-          build-platform: windows/${{ matrix.arch }}
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
-          wails-version: ${{ env.WAILS_VERSION }}
-          task-version: ${{ env.TASK_VERSION }}
-          version: ${{ env.APP_VERSION }}
-
-  release:
-    name: Publish the release
-    needs: [macos, linux, windows]
-    # A release needs every platform, so a manual run that built one of them does not publish.
-    # Without the all-platforms test, this job would fail against the artifacts it did not build.
-    if: |
-      (startsWith(github.ref, 'refs/tags/v') || inputs.publish)
-      && (github.event_name != 'workflow_dispatch' || inputs.platforms == 'all')
+  # One job decides the version, the release tag, and the pre-release flag, so
+  # every build job stamps the same numbers and the publish job names one tag.
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      is_release: ${{ steps.version.outputs.is_release }}
+      appimage_target: ${{ steps.version.outputs.appimage_target }}
     steps:
-      - name: Check out
-        uses: actions/checkout@v7.0.1
+      - id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          version="0.0.0"
+          tag=""
+          prerelease="false"
+          is_release="false"
+          # The release that the AppImage update information names. A stable build
+          # follows "latest", which GitHub resolves to the newest non-prerelease
+          # release.
+          appimage_target="latest"
+          if [ "$REF_TYPE" = "tag" ]; then
+            # The tag vX.X.X carries the version X.X.X.
+            version="${REF_NAME#v}"
+            tag="$REF_NAME"
+            is_release="true"
+          elif [[ "$REF_NAME" == release/v* ]]; then
+            # The branch release/vX.X.X carries the version X.X.X and the tag
+            # vX.X.X-dev-<short sha>. The short sha keeps every pre-release tag
+            # unique, so a later push adds a release instead of overwriting one.
+            # The build keeps the numeric version, because the Windows file
+            # version and the macOS bundle version accept digits and dots only.
+            version="${REF_NAME#release/v}"
+            tag="v${version}-dev-${SHA:0:6}"
+            prerelease="true"
+            is_release="true"
+            # Follow the pre-release list, so a development build is never offered
+            # a stable release that is older than the build itself.
+            appimage_target="latest-pre"
+          fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "prerelease=$prerelease"
+            echo "is_release=$is_release"
+            echo "appimage_target=$appimage_target"
+          } >> "$GITHUB_OUTPUT"
+          echo "version=$version tag=$tag prerelease=$prerelease is_release=$is_release appimage_target=$appimage_target"
 
-      - name: Collect the builds
-        uses: actions/download-artifact@v8.0.2
+  macos:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # arm64 (Apple Silicon)
+          - os: macos-14
+            arch: arm64
+          # x86_64 (Intel) — macos-13 is retired; use macos-15-intel
+          - os: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install dependencies
+        run: brew install cmake libraw libtiff little-cms2 webp jpeg-xl
+      - name: Build and package DMG
+        env:
+          # These values reach the script through the environment, not through the
+          # script text, so a tag or branch name cannot break out of a quote.
+          ARCH: ${{ matrix.arch }}
+          VERSION_LABEL: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          rm -rf build
+          ARCHS="$ARCH" VERSION_LABEL="$VERSION_LABEL" VERSION="$VERSION" ./build.sh
+          # Verify binary arch matches the matrix target
+          lipo -info build/OfxHost.app/Contents/MacOS/OfxHost | tee /dev/stderr | grep -q "$ARCH"
+          mkdir -p build/dmg
+          cp -R build/OfxHost.app build/dmg/
+          ln -sf /Applications build/dmg/Applications
+          hdiutil create -volname "OfxHost" -srcfolder build/dmg -format UDZO -ov \
+            "build/OfxHost-macOS-${{ matrix.arch }}.dmg"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: OfxHost-macOS-${{ matrix.arch }}
+          path: build/OfxHost-macOS-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+  linux:
+    needs: prepare
+    runs-on: ubuntu-22.04
+    env:
+      # AppImageUpdate reads this string out of the AppImage and fetches the
+      # .zsync published beside the AppImage in the release it names. The target
+      # comes from the prepare job, so a pre-release follows the pre-release list
+      # and a stable build follows the newest stable release.
+      UPDATE_INFORMATION: gh-releases-zsync|${{ github.repository_owner }}|${{ github.event.repository.name }}|${{ needs.prepare.outputs.appimage_target }}|OfxHost-Linux-x86_64.AppImage.zsync
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git file wget xvfb zsync \
+            libraw-dev libtiff-dev liblcms2-dev libwebp-dev zlib1g-dev libpng-dev \
+            libgl1-mesa-dev libgl1-mesa-dri xorg-dev
+      # Ubuntu 22.04 has no libjxl package (JPEG XL arrives in 24.04), so build
+      # it here and keep the older glibc baseline of this runner.
+      - name: Build JPEG XL
+        run: |
+          git clone --depth 1 --branch v0.11.1 --recurse-submodules --shallow-submodules \
+            https://github.com/libjxl/libjxl.git /tmp/libjxl
+          cmake -S /tmp/libjxl -B /tmp/libjxl-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DBUILD_TESTING=OFF \
+            -DJPEGXL_ENABLE_BENCHMARK=OFF \
+            -DJPEGXL_ENABLE_DEVTOOLS=OFF \
+            -DJPEGXL_ENABLE_DOXYGEN=OFF \
+            -DJPEGXL_ENABLE_EXAMPLES=OFF \
+            -DJPEGXL_ENABLE_FUZZERS=OFF \
+            -DJPEGXL_ENABLE_JNI=OFF \
+            -DJPEGXL_ENABLE_MANPAGES=OFF \
+            -DJPEGXL_ENABLE_PLUGINS=OFF \
+            -DJPEGXL_ENABLE_SKCMS=OFF \
+            -DJPEGXL_ENABLE_TOOLS=OFF \
+            -DJPEGXL_ENABLE_VIEWERS=OFF \
+            -DJPEGXL_FORCE_SYSTEM_HWY=OFF \
+            -DJPEGXL_FORCE_SYSTEM_BROTLI=OFF
+          cmake --build /tmp/libjxl-build --parallel "$(nproc)"
+          sudo cmake --install /tmp/libjxl-build
+          sudo ldconfig
+          pkg-config --modversion libjxl libjxl_threads
+      - name: Configure and build
+        env:
+          VERSION_LABEL: ${{ needs.prepare.outputs.tag }}
+        run: |
+          # The AppImage targets X11; GLFW would otherwise enable Wayland when
+          # the runner image happens to ship libwayland-dev without wayland-scanner.
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGLFW_BUILD_WAYLAND=OFF "-DOFX_VERSION_LABEL=$VERSION_LABEL"
+          cmake --build build --parallel "$(nproc)"
+      - name: Self-test
+        run: |
+          # Runs under a virtual display; a runner without GPU acceleration may
+          # lack OpenGL 3.2, which is a runner limit and not a build failure.
+          # The self-test lives in OfxHostTests, so it needs no GL context;
+          # xvfb-run stays because a plugin may create one.
+          xvfb-run -a ./build/OfxHostTests
+      - name: Build AppImage
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          wget -q -O /tmp/appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage"
+          echo "${APPIMAGETOOL_SHA256}  /tmp/appimagetool" | sha256sum -c -
+          chmod +x /tmp/appimagetool
+          APPIMAGETOOL=/tmp/appimagetool packaging/linux/build-appimage.sh
+          test -x build/AppImage/OfxHost-Linux-x86_64.AppImage
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: OfxHost-Linux-x86_64
+          path: |
+            build/AppImage/OfxHost-Linux-x86_64.AppImage
+            build/AppImage/OfxHost-Linux-x86_64.AppImage.zsync
+          if-no-files-found: error
+
+  windows:
+    needs: prepare
+    runs-on: windows-2022
+    env:
+      # The static triplet links every dependency and the C runtime into the
+      # executable, so the release is one file with no DLLs beside it.
+      VCPKG_DEFAULT_TRIPLET: x64-windows-static
+      VCPKG_DEFAULT_HOST_TRIPLET: x64-windows
+      # vcpkg dropped its x-gha backend, so cache the built packages as files and
+      # let actions/cache store the directory.
+      VCPKG_BINARY_SOURCES: clear;files,C:/vcpkg-cache,readwrite
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Cache vcpkg packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: C:\vcpkg-cache
+          # Key on the run, not on the manifest, so a version bump does not throw
+          # away every built package. vcpkg looks packages up by an ABI hash, so
+          # an entry that no longer matches is simply rebuilt and added.
+          key: vcpkg-${{ runner.os }}-x64-windows-static-${{ github.run_id }}
+          restore-keys: vcpkg-${{ runner.os }}-x64-windows-static-
+      - name: Install vcpkg
+        shell: cmd
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git C:\vcpkg
+          C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      - name: Configure and build
+        shell: pwsh
+        env:
+          # The tag reaches the script through the environment, not through the
+          # script text, so it cannot break out of a quote.
+          OFX_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:OFX_TAG
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake `
+            -DVCPKG_OVERLAY_TRIPLETS=packaging/vcpkg-triplets `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+            "-DOFX_VERSION_LABEL=$tag"
+          if ($LASTEXITCODE -ne 0) { throw 'cmake configure failed' }
+          cmake --build build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'the build failed' }
+      - name: Package the executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'build/OfxHost-Windows-x64.exe'
+          Copy-Item build/Release/OfxHost.exe $exe
+          Get-Item $exe | Select-Object Name, Length
+      - name: Smoke-test the executable
+        shell: pwsh
+        env:
+          OFX_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'build/OfxHost-Windows-x64.exe'
+          # One file: the icon font and the bundled effects must live inside it,
+          # the C runtime must not be a DLL the user has to install, and the
+          # executable must not open a console window.
+          $image = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($exe))
+          if ($image -notmatch 'Font Awesome') { throw 'the icon font is not embedded in the executable' }
+          if ($image -notmatch 'Inter') { throw 'the interface font is not embedded in the executable' }
+          $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue | Select-Object -Last 1
+          if ($dumpbin) {
+            $imports = & $dumpbin.FullName /dependents $exe | Out-String
+            if ($imports -match 'MSVCP140|VCRUNTIME140') { throw "the executable still imports the MSVC runtime:`n$imports" }
+            $headers = & $dumpbin.FullName /headers $exe | Out-String
+            $subsystem = ($headers -split "`n" | Select-String 'subsystem' | Select-Object -First 1).Line
+            Write-Host "subsystem:$subsystem"
+            if ($headers -notmatch 'subsystem \(Windows GUI\)') { throw 'the executable still uses the console subsystem' }
+          } else {
+            Write-Host '::warning::dumpbin not found; the static runtime and subsystem checks were skipped'
+          }
+          # Runs every plugin on a small image, so this fails when a dependency is
+          # missing or a linked-in bundled effect cannot be registered.
+          # Start-Process waits for the process and captures the streams, which
+          # works the same for the GUI subsystem.
+          $stdout = 'build/selftest.stdout.txt'
+          $stderr = 'build/selftest.stderr.txt'
+          $proc = Start-Process -FilePath $exe -ArgumentList '--selftest' -Wait -PassThru `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $out = "$(Get-Content $stdout -Raw)$(Get-Content $stderr -Raw)"
+          Write-Host $out
+          if ($proc.ExitCode -ne 0) { throw "selftest exited with $($proc.ExitCode)" }
+          if ($out -notmatch 'ok  Transform') { throw 'the executable does not register the Transform effect' }
+          if ($out -notmatch 'ok  Auto Exposure') { throw 'the executable does not register the Auto Exposure effect' }
+          if ($out -notmatch 'ok  noise profiles') { throw 'the executable does not carry the noise profiles' }
+          if ($out -notmatch 'ok  bundled fonts') { throw 'the executable does not load the bundled fonts' }
+          $expected = $env:OFX_VERSION
+          $actual = (Get-Item $exe).VersionInfo.FileVersion
+          if ($actual -ne $expected) { throw "the file version is '$actual', expected '$expected'" }
+          Write-Host "file version: $actual"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: OfxHost-Windows-x64
+          path: build/OfxHost-Windows-x64.exe
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, macos, linux, windows]
+    if: needs.prepare.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    # Creating the release and uploading its assets needs write access, and this
+    # is the only job that asks for it.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
-
-      - name: List what will be published
-        run: ls -la dist
-
-      - name: Publish
-        uses: softprops/action-gh-release@v3.0.4
-        with:
-          # A tag push names itself. A manual run needs the tag, and refusing without one
-          # keeps a release from being published against the default branch.
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: ${{ github.event.inputs.tag || github.ref_name }}
-          # Published, not drafted. The four artefacts have each been built and verified by
-          # the job that produced them, and a release that waits for a person to press a
-          # button is a release nobody pressed. Set this to true to stage it instead.
-          draft: false
-          generate_release_notes: true
-          files: |
-            dist/*.zip
-            dist/*.tar.gz
-            dist/*.sha256
+      - name: Publish release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # A dev tag carries a short sha, so the notes file keeps the version
+          # name without the sha suffix.
+          NOTES_TAG="$TAG"
+          if [[ "$TAG" == *-dev-* ]]; then
+            NOTES_TAG="${TAG%-*}"
+          fi
+          NOTES=$(mktemp)
+          {
+            if [ -f "docs/releases/${TAG}.md" ]; then
+              cat "docs/releases/${TAG}.md"
+              echo
+            elif [ -f "docs/releases/${NOTES_TAG}.md" ]; then
+              cat "docs/releases/${NOTES_TAG}.md"
+              echo
+            fi
+            echo "## Downloads"
+            echo
+            echo "- **macOS (Apple Silicon):** \`OfxHost-macOS-arm64.dmg\`"
+            echo "- **macOS (Intel):** \`OfxHost-macOS-x86_64.dmg\`"
+            echo "- **Windows (x64):** \`OfxHost-Windows-x64.exe\`"
+            echo "- **Linux (x86_64):** \`OfxHost-Linux-x86_64.AppImage\`"
+            echo
+            # A pre-release has no stable predecessor to compare against.
+            if [ "$PRERELEASE" = "false" ]; then
+              PREV=$(git tag --sort=-v:refname | grep -v -- '-dev' | awk -v t="$TAG" '$0 != t { print; exit }')
+              if [ -n "${PREV:-}" ]; then
+                echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"
+              fi
+            fi
+          } > "$NOTES"
+
+          FLAGS=()
+          if [ "$PRERELEASE" = "true" ]; then
+            FLAGS+=(--prerelease --latest=false)
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file "$NOTES" "${FLAGS[@]}"
+          else
+            # A branch push has no tag yet, so point the new tag at this commit.
+            gh release create "$TAG" --title "$TAG" --notes-file "$NOTES" --target "$GITHUB_SHA" "${FLAGS[@]}"
+          fi
+          # The .zsync must sit beside the AppImage, because AppImageUpdate
+          # resolves the update information to it. A pre-release tag is unique per
+          # push, so replacing its assets is harmless. A stable release tag is not,
+          # so the upload fails there instead of swapping artifacts that existing
+          # installations already trust.
+          CLOBBER=()
+          if [ "$PRERELEASE" = "true" ]; then
+            CLOBBER+=(--clobber)
+          fi
+          gh release upload "$TAG" dist/*.dmg dist/*.exe dist/*.AppImage dist/*.zsync "${CLOBBER[@]}"
+          # The published asset list is the one link in the chain that no
+          # build-time check can see.
+          ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          if ! printf '%s\n' "$ASSETS" | grep -qx 'OfxHost-Linux-x86_64.AppImage.zsync'; then
+            echo "::error::the release $TAG does not publish OfxHost-Linux-x86_64.AppImage.zsync"
+            exit 1
+          fi

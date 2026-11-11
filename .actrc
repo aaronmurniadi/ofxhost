@@ -1,0 +1,7 @@
+# nektos/act settings. act reads this file before the command line, so a flag
+# here applies to every local run of .github/workflows/release.yml.
+#
+# Both runner labels map to the 22.04 image, because the linux job keeps the
+# glibc baseline of ubuntu-22.04 and the prepare job must match it.
+-P ubuntu-latest=catthehacker/ubuntu:act-22.04
+-P ubuntu-22.04=catthehacker/ubuntu:act-22.04

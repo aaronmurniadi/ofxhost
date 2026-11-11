@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "ofxhost",
+  "version-string": "0.4.3",
+  "description": "Minimal still-image OpenFX plugin host.",
+  "homepage": "https://github.com/aaronmurniadi/ofxhost",
+  "dependencies": [
+    "libraw",
+    "tiff",
+    "lcms",
+    "libwebp",
+    "libjxl",
+    "zlib"
+  ]
+}

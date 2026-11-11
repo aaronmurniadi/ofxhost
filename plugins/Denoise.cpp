@@ -17,7 +17,7 @@
 #include <vector>
 
 #define kPluginName "Denoise (profiled)"
-#define kPluginGrouping "OFX Raw Host"
+#define kPluginGrouping "OfxHost"
 #define kPluginDescription "Denoise with a Poisson-Gaussian noise model: a variance stabilizing transform, edge-aware a-trous wavelets, and BayesShrink thresholds."
 #define kPluginIdentifier "com.aaronmurniadi.ofxhost.denoiseprofiled"
 #define kPluginVersionMajor 1
