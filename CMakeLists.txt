@@ -141,8 +141,7 @@ endif()
 
 # --- Modules ---
 # One target per layer, and every target links only downwards. A wrong-direction
-# #include therefore fails to compile instead of passing review. Backend
-# restructure steps live only in restructure-plan.md.
+# #include therefore fails to compile instead of passing review.
 #
 #   app/        composition root            -> everything
 #   ui/         ImGui panels, GL, dialogs   -> services model engine gfx core
