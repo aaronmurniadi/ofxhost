@@ -1,0 +1,65 @@
+# Build image for the Linux release job.
+#
+# The release builds inside this image so that a run never reaches the Ubuntu
+# package mirrors, which have failed to resolve on some runners and left the
+# dependency install sitting in apt for the whole job. Everything the build and
+# the AppImage need is installed here once, including the JPEG XL copy that
+# Ubuntu 22.04 does not package.
+#
+# The base stays ubuntu:22.04 on purpose: the AppImage keeps that glibc
+# baseline, and 24.04 would raise it.
+#
+#   docker build -f packaging/linux/Dockerfile.build -t ghcr.io/<owner>/ofxhost-linux-build:22.04 packaging/linux
+#   docker push ghcr.io/<owner>/ofxhost-linux-build:22.04
+#
+# .github/workflows/build-image.yml does both when it is started by hand.
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# The same set the release job used to apt-get install, plus ca-certificates for
+# the clone below and xauth, which xvfb-run needs.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential cmake ninja-build pkg-config git file wget ca-certificates \
+      xvfb xauth zsync \
+      libraw-dev libtiff-dev liblcms2-dev libwebp-dev zlib1g-dev libpng-dev \
+      libgl1-mesa-dev libgl1-mesa-dri xorg-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Ubuntu 22.04 has no libjxl package (JPEG XL arrives in 24.04), so the library
+# is built here instead of on every release run. The flags match the ones the
+# release used: no tests, no tools, no docs, and no optional dependencies.
+ARG LIBJXL_VERSION=v0.11.1
+RUN git clone --depth 1 --branch "${LIBJXL_VERSION}" --recurse-submodules --shallow-submodules \
+      https://github.com/libjxl/libjxl.git /tmp/libjxl \
+ && cmake -S /tmp/libjxl -B /tmp/libjxl-build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      -DBUILD_TESTING=OFF \
+      -DJPEGXL_ENABLE_BENCHMARK=OFF \
+      -DJPEGXL_ENABLE_DEVTOOLS=OFF \
+      -DJPEGXL_ENABLE_DOXYGEN=OFF \
+      -DJPEGXL_ENABLE_EXAMPLES=OFF \
+      -DJPEGXL_ENABLE_FUZZERS=OFF \
+      -DJPEGXL_ENABLE_JNI=OFF \
+      -DJPEGXL_ENABLE_MANPAGES=OFF \
+      -DJPEGXL_ENABLE_PLUGINS=OFF \
+      -DJPEGXL_ENABLE_SKCMS=OFF \
+      -DJPEGXL_ENABLE_TOOLS=OFF \
+      -DJPEGXL_ENABLE_VIEWERS=OFF \
+      -DJPEGXL_FORCE_SYSTEM_HWY=OFF \
+      -DJPEGXL_FORCE_SYSTEM_BROTLI=OFF \
+ && cmake --build /tmp/libjxl-build --parallel "$(nproc)" \
+ && cmake --install /tmp/libjxl-build \
+ && ldconfig \
+ && pkg-config --modversion libjxl libjxl_threads \
+ && rm -rf /tmp/libjxl /tmp/libjxl-build
+
+# appimagetool ships as an AppImage, and a container has no FUSE. The release job
+# sets APPIMAGE_EXTRACT_AND_RUN, which unpacks the tool instead of mounting it,
+# and this is the switch that makes that work.
+ENV APPIMAGE_EXTRACT_AND_RUN=1
+
+WORKDIR /src
