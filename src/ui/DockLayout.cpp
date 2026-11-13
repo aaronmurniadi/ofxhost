@@ -34,6 +34,9 @@ static void buildDefaultLayout(ImGuiID dockspaceId) {
 
   ImGui::DockBuilderDockWindow(kPlugins, dockPlugins);
   ImGui::DockBuilderDockWindow(kParameters, dockParameters);
+  // The layer stack shares the parameter node, because the two are read together:
+  // select a layer, then its plugins.
+  ImGui::DockBuilderDockWindow(kLayers, dockParameters);
   ImGui::DockBuilderDockWindow(kFilmstrip, dockBottom);
   ImGui::DockBuilderDockWindow(kPreview, dockMain);
 

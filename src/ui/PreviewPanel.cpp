@@ -1,5 +1,8 @@
 #include "ui/UiFrame.h"
 
+#include "core/Layer.h"
+#include "services/managers/layers/LayerManager.h"
+
 #include "imgui.h"
 #include "imgui_internal.h"  // RenderTextEllipsis, also used by the param labels
 
@@ -13,6 +16,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -172,8 +176,55 @@ void drawPreviewPanel(App &app) {
       app.gui.previewPanY = 0.0f;
     }
   }
-  if (active && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-    app.gui.previewPanX += ImGui::GetIO().MouseDelta.x;
-    app.gui.previewPanY += ImGui::GetIO().MouseDelta.y;
+  // Canvas pixels per screen pixel. The preview texture may be smaller than the
+  // canvas, and the zoom and the fit scale it again, so both ratios count.
+  const double previewPerCanvasX = app.document.full.w > 0 ? (double)app.previewTexture.w / (double)app.document.full.w : 1.0;
+  const double previewPerCanvasY = app.document.full.h > 0 ? (double)app.previewTexture.h / (double)app.document.full.h : 1.0;
+  const double screenPerPreviewX = app.previewTexture.w > 0 ? (double)dispW / (double)app.previewTexture.w : 1.0;
+  const double screenPerPreviewY = app.previewTexture.h > 0 ? (double)dispH / (double)app.previewTexture.h : 1.0;
+  const double canvasPerScreenX = previewPerCanvasX > 0.0 ? 1.0 / (screenPerPreviewX * previewPerCanvasX) : 1.0;
+  const double canvasPerScreenY = previewPerCanvasY > 0.0 ? 1.0 / (screenPerPreviewY * previewPerCanvasY) : 1.0;
+
+  const std::vector<Layer> &layers = app.document.layers;
+  const int selected = app.document.selectedLayer;
+  const bool selectedInRange = selected >= 0 && selected < (int)layers.size();
+
+  if (selectedInRange) {
+    // The frame of the selected layer, so a layer that sits over the canvas can
+    // be seen at all. Canvas y grows upward, the screen grows downward.
+    const Layer &layer = layers[(size_t)selected];
+    const double cosT = std::cos(layer.xf.rotation * (3.14159265358979323846 / 180.0));
+    const double sinT = std::sin(layer.xf.rotation * (3.14159265358979323846 / 180.0));
+    const double halfW = (double)(layer.fullW > 0 ? layer.fullW : layer.px.w) * layer.xf.scale * 0.5;
+    const double halfH = (double)(layer.fullH > 0 ? layer.fullH : layer.px.h) * layer.xf.scale * 0.5;
+    const double cx = (double)app.document.full.w * 0.5 + layer.xf.x;
+    const double cy = (double)app.document.full.h * 0.5 + layer.xf.y;
+    auto toScreen = [&](double ux, double uy) {
+      const double x = cx + cosT * ux - sinT * uy;
+      const double y = cy + sinT * ux + cosT * uy;
+      return ImVec2(p0.x + (float)(x * previewPerCanvasX * screenPerPreviewX),
+                    p1.y - (float)(y * previewPerCanvasY * screenPerPreviewY));
+    };
+    const ImVec2 corners[4] = {toScreen(-halfW, -halfH), toScreen(halfW, -halfH), toScreen(halfW, halfH),
+                               toScreen(-halfW, halfH)};
+    const ImU32 outline = ImGui::GetColorU32(ImGuiCol_ButtonHovered, layer.visible ? 0.9f : 0.35f);
+    dl->PushClipRect(canvasPos, canvasMax, true);
+    dl->AddPolyline(corners, 4, outline, ImDrawFlags_Closed, 1.5f);
+    dl->PopClipRect();
   }
+
+  const bool spaceHeld = ImGui::IsKeyDown(ImGuiKey_Space);
+  const bool dragging = ImGui::IsMouseDragging(ImGuiMouseButton_Left);
+  if (!active || !dragging) return;
+  const ImVec2 delta = ImGui::GetIO().MouseDelta;
+  const bool moveLayer =
+      app.gui.previewTool == PreviewTool::MoveLayer && selectedInRange && !spaceHeld && app.layerManager != nullptr;
+  if (!moveLayer) {
+    app.gui.previewPanX += delta.x;
+    app.gui.previewPanY += delta.y;
+    return;
+  }
+  // Screen y grows downward and canvas y grows upward, so the vertical delta
+  // changes sign on the way into the layer.
+  app.layerManager->nudge(selected, (double)delta.x * canvasPerScreenX, -(double)delta.y * canvasPerScreenY);
 }

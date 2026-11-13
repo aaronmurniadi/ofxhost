@@ -63,14 +63,23 @@ inline constexpr int kUiFontPtAuto = 0;
 inline constexpr int kUiFontPtMin = 8;
 inline constexpr int kUiFontPtMax = 64;
 
+// What a left drag on the preview canvas does. Pan moves the view; MoveLayer
+// moves the selected layer over the canvas, which is how two shots are aligned.
+// Holding Space pans either way.
+enum class PreviewTool { Pan = 0, MoveLayer };
+inline constexpr int kPreviewToolCount = 2;
+inline constexpr const char *kPreviewTools[kPreviewToolCount] = {"Pan", "Move layer"};
+
 // UI-only state: layout, theme, view transform, persistable preferences.
 struct GuiState {
   bool showPlugins = true;
   bool showParameters = true;
   bool showFilmstrip = false;
+  bool showLayers = true;
   int themeIndex = 2;  // Photoshop; app-level, so it never travels in a project or a sidecar
   int uiFontPt = kUiFontPtAuto;  // interface font size in points; 0 follows the system
   int settingsSection = 0;     // row selected in the settings modal sidebar
+  PreviewTool previewTool = PreviewTool::Pan;
   float previewZoom = 1.0f;  // 1 = fit in view
   float previewPanX = 0.0f;
   float previewPanY = 0.0f;

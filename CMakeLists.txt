@@ -309,6 +309,7 @@ add_library(ofxhost_ui STATIC
   src/ui/ParametersPanel.cpp
   src/ui/PreviewPanel.cpp
   src/ui/FilmstripPanel.cpp
+  src/ui/LayersPanel.cpp
 )
 if(APPLE)
   target_sources(ofxhost_ui PRIVATE src/ui/MacPinch.m)

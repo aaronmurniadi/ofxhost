@@ -99,10 +99,12 @@ static void drawMenuBar(App &app) {
 #ifdef __APPLE__
       ImGui::MenuItem("Plugins", "⌘+[", &app.gui.showPlugins);
       ImGui::MenuItem("Parameters", "⌘+]", &app.gui.showParameters);
+      ImGui::MenuItem("Layers", "⌘+;", &app.gui.showLayers);
       ImGui::MenuItem("Filmstrip", "⌘+\\", &app.gui.showFilmstrip);
 #else
       ImGui::MenuItem("Plugins", "Ctrl+[", &app.gui.showPlugins);
       ImGui::MenuItem("Parameters", "Ctrl+]", &app.gui.showParameters);
+      ImGui::MenuItem("Layers", "Ctrl+;", &app.gui.showLayers);
       ImGui::MenuItem("Filmstrip", "Ctrl+\\", &app.gui.showFilmstrip);
 #endif
       ImGui::EndMenu();
@@ -526,6 +528,10 @@ void drawUiFrame(App &app) {
   }
   if (app.gui.showParameters) {
     if (ImGui::Begin(DockLayout::kParameters, &app.gui.showParameters)) drawParametersPanel(app);
+    ImGui::End();
+  }
+  if (app.gui.showLayers) {
+    if (ImGui::Begin(DockLayout::kLayers, &app.gui.showLayers)) drawLayersPanel(app);
     ImGui::End();
   }
   {
