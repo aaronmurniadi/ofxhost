@@ -12,6 +12,13 @@ int testColorSpaceConversion();
 int testColorSpaceConversionThreaded();
 int testPluginColorSpaceMapping();
 
+// Layer compositing: blends, placement, rotation, stack rules, thread split.
+int testLayerBlendModes();
+int testLayerPlacement();
+int testLayerRotation();
+int testLayerStackRules();
+int testLayerThreaded();
+
 // State files, settings, fonts, and update checking.
 int testBundledFonts();
 int testFontSizeMigration();

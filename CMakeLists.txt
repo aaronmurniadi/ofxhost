@@ -188,6 +188,7 @@ add_library(ofxhost_io STATIC
   src/codecs/ImageLoad.cpp
   src/codecs/ImageColor.cpp
   src/codecs/ImageWrite.cpp
+  src/codecs/Composite.cpp
   src/codecs/NoiseProfiles.cpp
   src/codecs/LensProfiles.cpp
   src/persist/ProjectPersistSave.cpp
@@ -340,6 +341,7 @@ add_library(ofxhost_selftest OBJECT
   src/selftest/TestState.cpp
   src/selftest/TestPlugins.cpp
   src/selftest/TestConcurrency.cpp
+  src/selftest/TestLayers.cpp
 )
 # The cases reach into the UI themes and into the codecs directly, so the test
 # objects link the whole stack.
