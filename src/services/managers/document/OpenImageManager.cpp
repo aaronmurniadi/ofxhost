@@ -96,6 +96,22 @@ class OpenImageManagerImpl : public OpenImageManager {
   }
 
  private:
+  // The second decode of the image already on screen: the preview develop landed
+  // first, and this one carries the same frame at full resolution. Only the
+  // pixels and the preview change; the chain, the view, and the metadata belong to
+  // the first result.
+  bool upgradeToFullDevelop(DecodedImage &decoded) {
+    if (decoded.quality != DecodeQuality::Full) return false;
+    if (!session_.document.proxy) return false;
+    if (decoded.path != session_.document.path) return false;
+    session_.render.waitIdle();  // the worker reads the buffer being replaced
+    session_.document.full = std::move(decoded.full);
+    session_.document.proxy = false;
+    session_.rebuildPreviewImage();
+    session_.reportStatus("Developed " + fs::path(decoded.path).filename().string() + " at full resolution");
+    return true;
+  }
+
   // Applies a sidecar to the image now open: the input space the user picked for
   // the chain, and the chain itself.
   void applySidecarFor(const PersistSidecar &sidecar) {
@@ -134,9 +150,12 @@ class OpenImageManagerImpl : public OpenImageManager {
   // thread: the slow part was the decode, which the worker already did.
   void applyDecoded(DecodedImage &&decoded) {
     const std::string name = fs::path(decoded.path).filename().string();
+    if (upgradeToFullDevelop(decoded)) return;
+    const bool proxy = decoded.quality == DecodeQuality::Preview;
     session_.render.waitIdle();  // worker reads inputSpace; stop it before swapping the image
     adoptDocument(session_.document, decoded.path, std::move(decoded.full), decoded.fileSpace,
                   decoded.workingSpace, decoded.meta);
+    session_.document.proxy = proxy;
     resetViewFor(session_.gui);
     session_.reportStatus("Loaded " + name + " (" + colorSpaceName(decoded.fileSpace) + ")");
     session_.filmstrip.index = filmstripIndexForPath(session_.filmstrip, decoded.path);
@@ -163,6 +182,12 @@ class OpenImageManagerImpl : public OpenImageManager {
   // is pumped in, so the window keeps drawing while a RAW develops.
   void startDecode(const std::string &path, bool useSavedChain) {
     const std::string name = fs::path(path).filename().string();
+    // The frame on screen is this file at half size, and its full decode is
+    // already on the way, so a second request would only repeat the work.
+    if (path == session_.document.path && session_.document.proxy) {
+      session_.reportStatus(name + " is still developing at full resolution");
+      return;
+    }
     if (!session_.opener.start(path, useSavedChain)) {
       // The worker queues the request, so it opens right after the decode that
       // already runs.

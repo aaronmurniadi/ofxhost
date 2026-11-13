@@ -83,7 +83,9 @@ void drawPreviewPanel(App &app) {
 
   // A decode in flight covers the canvas, so the user sees progress instead of a
   // frozen window. The previous image stays underneath until the new one lands.
-  if (app.opener.busy()) {
+  // Only the first result covers it: once the preview decode has landed, the
+  // frame stays on screen while the full decode of the same file runs.
+  if (app.opener.opening()) {
     const std::string name = std::filesystem::path(app.opener.path()).filename().string();
     drawOpeningState(dl, canvasPos, canvasSize, name);
     return;

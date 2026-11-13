@@ -7,6 +7,11 @@
 #include "core/Image.h"
 #include "codecs/FileFormats.h"
 
+// How much work the RAW decoder does. A preview decode bins the sensor data 2x2
+// and demosaics a quarter of the pixels, so the frame lands in a fraction of the
+// time; a full decode is the one export and a 1:1 zoom need.
+enum class DecodeQuality { Preview, Full };
+
 // Loads RAW via LibRaw (linear, camera WB), TIFF via libtiff, or PNG/JPEG/EXR via stb/tinyexr.
 // detected: inferred Input Color Space (RAW / untagged float → Linear Rec.2020; untagged LDR → sRGB;
 // embedded ICC → nearest of the four tags). Does not convert pixels.
@@ -16,8 +21,9 @@
 // The preview display and the plugin Input Color Space read working, while
 // detected describes the file and travels in the sidecar and the export metadata.
 // meta, when given, receives the camera and ISO the decoder found.
+// quality only changes a RAW decode; every other codec returns the stored pixels.
 bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorSpace &working,
-               ImageMeta *meta = nullptr);
+               ImageMeta *meta = nullptr, DecodeQuality quality = DecodeQuality::Full);
 // maxEdge 0 = full size; otherwise downsamples so longest edge <= maxEdge.
 bool makePreview(const Image &src, int maxEdge, Image &out);
 

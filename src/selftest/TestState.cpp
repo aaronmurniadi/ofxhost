@@ -349,6 +349,9 @@ int testOpenWithSidecarPrompt() {
   app.documents->openPath(imageA);
   if (!finishOpen(app)) return fail("open prompt: the decode did not finish");
   if (rc == 0 && app.document.path != imageA) rc = fail("open prompt: the first image did not open");
+  // A codec that decodes in one pass has nothing left to develop, so its frame is
+  // not a proxy and the export may read it.
+  if (rc == 0 && app.document.proxy) rc = fail("open prompt: a single-pass decode opened as a proxy");
   if (rc == 0 && app.gui.showSidecarPrompt) rc = fail("open prompt: the first image asked");
   if (rc == 0) applyChain(app.session(), makeChain(100.0));
   if (rc == 0 && openZoom(app) != 100.0) rc = fail("open prompt: the chain of the first image did not apply");
@@ -669,3 +672,4 @@ int testExportManager() {
   printf("ok  export manager\n");
   return 0;
 }
+

@@ -57,6 +57,9 @@ class ExportManagerImpl : public ExportManager {
   ExportManagerImpl(ManagerSession session, SidecarDao &sidecar) : session_(session), sidecar_(sidecar) {}
 
   bool canExport() const override {
+    // A proxy frame is half-size, so an export of it would be smaller than the
+    // file. The full develop lands within a moment of the open.
+    if (session_.document.proxy) return false;
     return !session_.document.full.px.empty() && !session_.chain.nodes.empty();
   }
 
@@ -73,6 +76,10 @@ class ExportManagerImpl : public ExportManager {
 
   void doExport(const ExportRequest &request) override {
     // Validation is business logic, so it lives here and not in the dialog.
+    if (session_.document.proxy) {
+      session_.reportStatus("Still developing this RAW at full resolution. Try the export again in a moment.");
+      return;
+    }
     if (!canExport()) return;
     if (request.outPath.empty()) return;
     std::string outPath = request.outPath;

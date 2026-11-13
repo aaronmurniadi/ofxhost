@@ -120,7 +120,7 @@ static std::string trimmed(const char *text) {
   return value.substr(first);
 }
 
-static bool loadRaw(const std::string &path, Image &out, ImageMeta &meta) {
+static bool loadRaw(const std::string &path, Image &out, ImageMeta &meta, DecodeQuality quality) {
   std::lock_guard<std::mutex> lock(gLibRawDecodeMutex);
   // LibRaw is about 750 KB, which is larger than the 512 KB stack a worker
   // thread gets, so it lives on the heap. A local here overflows the stack while
@@ -152,6 +152,10 @@ static bool loadRaw(const std::string &path, Image &out, ImageMeta &meta) {
   raw->imgdata.params.no_auto_bright = 1;
   raw->imgdata.params.use_camera_wb = 1;
   raw->imgdata.params.output_color = 1;
+  // A preview decode halves both edges, which is what the fit-to-preview frame
+  // shows anyway. The demosaic then runs on a quarter of the pixels, and that
+  // stage is the slowest one in the whole open.
+  if (quality == DecodeQuality::Preview) raw->imgdata.params.half_size = 1;
   if (raw->dcraw_process() != LIBRAW_SUCCESS) return false;
   libraw_processed_image_t *img = raw->dcraw_make_mem_image();
   if (!img || img->type != LIBRAW_IMAGE_BITMAP || img->colors < 3) {
@@ -512,7 +516,8 @@ bool makePreview(const Image &src, int maxEdge, Image &out) {
   return true;
 }
 
-bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorSpace &working, ImageMeta *meta) {
+bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorSpace &working, ImageMeta *meta,
+               DecodeQuality quality) {
   PerfScope _ps("loadImage");
   out = {};
   detected = ColorSpace::sRGB;
@@ -527,7 +532,7 @@ bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorS
   // carries no tag, and its sensor wide gamut fits Rec.2020 better than Rec.709.
   const bool raw = format && format->codec == ImageCodec::Raw;
   if (raw) {
-    if (!loadRaw(path, out, found)) return false;
+    if (!loadRaw(path, out, found, quality)) return false;
     if (meta) *meta = found;
     detected = ColorSpace::LinearRec2020;
     working = detected;
@@ -568,8 +573,9 @@ bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorS
     working = linearWorkingSpace(detected);
     return true;
   }
-  // A RAW file whose extension the table does not list.
-  if (loadRaw(path, out, found)) {
+  // A RAW file whose extension the table does not list. The name cannot say
+  // that a full decode is needed later, so this one always develops fully.
+  if (loadRaw(path, out, found, DecodeQuality::Full)) {
     if (meta) *meta = found;
     detected = ColorSpace::LinearRec2020;
     working = detected;
