@@ -12,7 +12,10 @@
 #include "services/ParamBridge.h"
 #include "services/StateMapping.h"
 
+#include <algorithm>
+#include <deque>
 #include <filesystem>
+#include <map>
 #include <utility>
 
 namespace fs = std::filesystem;
@@ -29,6 +32,31 @@ void adoptDocument(DocumentState &document, const std::string &path, Image &&img
   document.workingSpace = working;
   document.inputSpace = working;
   document.meta = meta;
+}
+
+// A layer inside the folder of the image is stored relative to it, so a folder
+// that moves as a whole still finds its layers. Anything else keeps its absolute
+// path, because a relative path out of the folder would be unreadable.
+std::string layerPathForStore(const std::filesystem::path &baseDir, const std::string &path) {
+  if (baseDir.empty() || path.empty()) return path;
+  std::error_code ec;
+  const std::filesystem::path absPath = std::filesystem::absolute(path, ec);
+  if (ec) return path;
+  const std::filesystem::path dirAbs = std::filesystem::absolute(baseDir, ec);
+  if (ec) return path;
+  const std::filesystem::path rel = absPath.lexically_relative(dirAbs);
+  if (rel.empty() || rel.native().empty()) return path;
+  if (*rel.begin() == "..") return path;
+  return rel.generic_string();
+}
+
+// The inverse: a relative path is resolved against the image folder.
+std::string layerPathFromStore(const std::filesystem::path &baseDir, const std::string &stored) {
+  if (stored.empty()) return stored;
+  const std::filesystem::path p(stored);
+  if (p.is_absolute()) return stored;
+  if (baseDir.empty()) return stored;
+  return (baseDir / p).lexically_normal().string();
 }
 
 // A new image opens fit in view, so the zoom and pan of the previous one do not
@@ -89,7 +117,7 @@ class OpenImageManagerImpl : public OpenImageManager {
   void saveCurrentInputSidecar() override {
     if (session_.document.path.empty()) return;
     sidecar_.save(session_.document.path, session_.document.fileSpace, session_.document.inputSpace,
-                  captureChain(session_.chain));
+                  captureChain(session_.chain), captureLayers());
   }
 
   void persistWorkspace() override {
@@ -139,6 +167,21 @@ class OpenImageManagerImpl : public OpenImageManager {
       layer.workingSpace = target;
     }
 
+    // A restore carries the placement the sidecar recorded; a layer the user
+    // added arrives with the defaults of a new layer.
+    auto restored = pendingPlacements_.find(decoded.path);
+    if (restored != pendingPlacements_.end()) {
+      const PersistLayer &saved = restored->second;
+      layer.xf.x = saved.x;
+      layer.xf.y = saved.y;
+      layer.xf.scale = saved.scale;
+      layer.xf.rotation = saved.rotation;
+      layer.opacity = (float)saved.opacity;
+      layer.blend = blendModeFromName(saved.blend);
+      layer.visible = saved.visible;
+      pendingPlacements_.erase(restored);
+    }
+
     session_.render.waitIdle();  // the worker borrows the stack
     session_.document.layers.push_back(std::move(layer));
     session_.document.selectedLayer = (int)session_.document.layers.size() - 1;
@@ -146,6 +189,65 @@ class OpenImageManagerImpl : public OpenImageManager {
     const size_t count = session_.document.layers.size();
     session_.reportStatus("Added " + name + " as layer " + std::to_string(count) + " of " +
                           std::to_string(count));
+    startNextLayerDecode();
+  }
+
+  // Reads the stack of the open image into the sidecar shape. A layer with no
+  // file behind it cannot be decoded again, so it is not recorded.
+  std::vector<PersistLayer> captureLayers() const {
+    std::vector<PersistLayer> out;
+    const fs::path baseDir = fs::path(session_.document.path).parent_path();
+    out.reserve(session_.document.layers.size());
+    for (const Layer &layer : session_.document.layers) {
+      if (layer.path.empty()) continue;
+      PersistLayer saved;
+      saved.path = layerPathForStore(baseDir, layer.path);
+      saved.x = layer.xf.x;
+      saved.y = layer.xf.y;
+      saved.scale = layer.xf.scale;
+      saved.rotation = layer.xf.rotation;
+      saved.opacity = layer.opacity;
+      saved.blend = blendModeName(layer.blend);
+      saved.visible = layer.visible;
+      out.push_back(std::move(saved));
+    }
+    return out;
+  }
+
+  // A stack is restored one file at a time through the open worker, so the frame
+  // keeps drawing while the layers decode. A file that is gone is dropped with a
+  // status line, and the rest of the stack still loads.
+  void startRestoreLayers(const std::vector<PersistLayer> &layers) {
+    pendingLayers_.clear();
+    pendingPlacements_.clear();
+    const fs::path baseDir = fs::path(session_.document.path).parent_path();
+    for (const PersistLayer &layer : layers) {
+      PersistLayer resolved = layer;
+      resolved.path = layerPathFromStore(baseDir, layer.path);
+      pendingLayers_.push_back(std::move(resolved));
+    }
+    startNextLayerDecode();
+  }
+
+  void startNextLayerDecode() {
+    while (!pendingLayers_.empty()) {
+      PersistLayer next = std::move(pendingLayers_.front());
+      pendingLayers_.pop_front();
+      const std::string name = fs::path(next.path).filename().string();
+      if (!isSupportedImagePath(next.path)) {
+        session_.reportStatus("Layer " + name + " is not an image any more");
+        continue;
+      }
+      // The worker remembers one request, so a layer is handed over only when it
+      // is free; the rest wait for the pump that applies this one.
+      if (!session_.opener.start(next.path, /*useSavedChain=*/false, DecodeTarget::Layer,
+                                 session_.layerCapEdge())) {
+        pendingLayers_.push_front(std::move(next));
+        return;
+      }
+      pendingPlacements_[next.path] = next;
+      return;
+    }
   }
 
   // Applies a sidecar to the image now open: the input space the user picked for
@@ -191,21 +293,30 @@ class OpenImageManagerImpl : public OpenImageManager {
     session_.render.waitIdle();  // worker reads inputSpace; stop it before swapping the image
     adoptDocument(session_.document, decoded.path, std::move(decoded.full), decoded.fileSpace,
                   decoded.workingSpace, decoded.meta);
+    // A stack belongs to the image it was built for.
+    session_.document.layers.clear();
+    session_.document.selectedLayer = -1;
+    pendingLayers_.clear();
+    pendingPlacements_.clear();
     session_.document.proxy = proxy;
     resetViewFor(session_.gui);
     session_.reportStatus("Loaded " + name + " (" + colorSpaceName(decoded.fileSpace) + ")");
     session_.filmstrip.index = filmstripIndexForPath(session_.filmstrip, decoded.path);
 
+    // The stack belongs to the image, not to the chain, so it is restored
+    // whatever the user answered about the chain.
     PersistSidecar saved;
+    const bool hasSidecar = sidecar_.load(decoded.path, saved);
     if (!decoded.useSavedChain) {
       // The user chose the parameters of the image that was open, so they carry
       // into this image as they are.
       session_.reportStatus("Loaded " + name + " with the parameters of the previous image");
-    } else if (sidecar_.load(decoded.path, saved)) {
+    } else if (hasSidecar) {
       applySidecarFor(saved);
     } else {
       seedNoiseForOpenCamera(decoded.meta);
     }
+    if (hasSidecar) startRestoreLayers(saved.layers);
 
     session_.rebuildPreviewImage();
     // The chain carries the document input space into its first plugin, and no
@@ -236,6 +347,10 @@ class OpenImageManagerImpl : public OpenImageManager {
   ManagerSession session_;
   SidecarDao &sidecar_;
   WorkspaceProjectDao &project_;
+  // Layers the open image recorded, waiting for their decode, and the placement
+  // each decode has to be applied with.
+  std::deque<PersistLayer> pendingLayers_;
+  std::map<std::string, PersistLayer> pendingPlacements_;
 };
 
 }  // namespace

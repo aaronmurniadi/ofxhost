@@ -14,7 +14,7 @@ class SidecarDao {
   virtual ~SidecarDao() = default;
   virtual bool load(const std::string &imagePath, PersistSidecar &out) = 0;
   virtual bool save(const std::string &imagePath, ColorSpace fileSpace, ColorSpace chainInputSpace,
-                    const PersistChain &chain) = 0;
+                    const PersistChain &chain, const std::vector<PersistLayer> &layers = {}) = 0;
   virtual bool saveExport(const std::string &exportPath, const std::string &sourceImagePath,
                           ColorSpace fileSpace, const PersistChain &chain) = 0;
 };

@@ -133,8 +133,13 @@ void drawLayersPanel(App &app) {
     ImGui::SameLine();
 
     const std::string name = layerName(layer);
+    // A layer restored from a sidecar holds no pixels until its decode lands, so
+    // the row says so instead of looking like an empty layer.
+    const char *state = "";
+    if (layer.px.px.empty()) state = " (loading)";
+    else if (layer.locked) state = " (locked)";
     char label[320];
-    std::snprintf(label, sizeof label, "%s%s", name.c_str(), layer.locked ? " (locked)" : "");
+    std::snprintf(label, sizeof label, "%s%s", name.c_str(), state);
     if (ImGui::Selectable(label, selected == i, ImGuiSelectableFlags_AllowOverlap)) app.layerManager->selectLayer(i);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%d x %d", layer.path.c_str(), layer.fullW, layer.fullH);
 

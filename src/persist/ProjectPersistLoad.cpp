@@ -69,6 +69,27 @@ bool loadChain(const JsonValue &chain, PersistChain &out) {
   return true;
 }
 
+// A layer entry the sidecar cannot describe is skipped, so one damaged entry does
+// not cost the whole stack.
+void loadLayers(const JsonValue &layers, std::vector<PersistLayer> &out) {
+  out.clear();
+  if (layers.kind != JsonValue::Kind::Array) return;
+  for (const JsonValue &entry : layers.arr) {
+    if (entry.kind != JsonValue::Kind::Object) continue;
+    PersistLayer layer;
+    layer.path = entry.text("path", layer.path);
+    if (layer.path.empty()) continue;
+    layer.x = entry.number("x", layer.x);
+    layer.y = entry.number("y", layer.y);
+    layer.scale = entry.number("scale", layer.scale);
+    layer.rotation = entry.number("rotation", layer.rotation);
+    layer.opacity = entry.number("opacity", layer.opacity);
+    layer.blend = entry.text("blend", layer.blend);
+    layer.visible = entry.boolean("visible", layer.visible);
+    out.push_back(std::move(layer));
+  }
+}
+
 bool readAllText(const std::string &path, std::string &out) {
   std::ifstream f(path, std::ios::binary);
   if (!f) return false;
@@ -97,6 +118,7 @@ static bool parseSidecar(const std::string &json, PersistSidecar &out) {
   out.chainInputColorSpace = root.text("chainInputColorSpace", out.chainInputColorSpace);
   out.exportedAt = root.text("exportedAt", out.exportedAt);
   if (const JsonValue *chainValue = root.find("chain")) loadChain(*chainValue, out.chain);
+  if (const JsonValue *layersValue = root.find("layers")) loadLayers(*layersValue, out.layers);
   return true;
 }
 

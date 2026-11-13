@@ -159,6 +159,35 @@ Input and export sidecars share the same `sidecar` object:
 - `params`: keyed by OFX parameter **name** (stable). Values are numbers, booleans, or strings depending on type; multi-dimensional params are JSON arrays.
 - `pluginIdentifier`: used to rebind plugins if install order changes; `pluginLabel` is informational.
 
+## Layers in an input sidecar
+
+An image can carry images layered over it. Their placement is stored beside the
+chain, in the same sidecar:
+
+```json
+{
+  "format": "ofxhost-sidecar",
+  "version": 1,
+  "kind": "input",
+  "sourcePath": "DSC_0001.cr2",
+  "chain": { "selectedNode": -1, "nodes": [] },
+  "layers": [
+    { "path": "scan-back.tif", "x": 12.5, "y": -4, "scale": 1.0, "rotation": 0.0,
+      "opacity": 1.0, "blend": "Normal", "visible": true }
+  ]
+}
+```
+
+- `path` is relative to the folder of the image when the layer lives inside it,
+  so a folder that moves as a whole still finds its layers; otherwise it is
+  absolute.
+- `x` and `y` are canvas pixels from the canvas centre, `rotation` is in degrees
+  counter-clockwise, and `blend` is one of `Normal`, `Multiply`, `Screen`, `Add`.
+- The pixels are not stored. The open path decodes every layer again, one file at
+  a time, so a stack of RAW files does not hold the interface while it loads.
+- A sidecar with no `layers` describes one image, which is every sidecar written
+  before layers existed.
+
 ## Versioning
 
 `version` is incremented when incompatible changes are made. The host ignores

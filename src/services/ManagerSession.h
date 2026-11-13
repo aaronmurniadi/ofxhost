@@ -13,6 +13,7 @@
 #include "services/Filmstrip.h"
 #include "services/OpenWorker.h"
 
+#include <algorithm>
 #include <string>
 
 struct ManagerSession {
@@ -37,6 +38,15 @@ struct ManagerSession {
     in.previewSpace = gui.previewSpace;
     in.previewMaxEdge = previewMaxEdge(gui);
     return in;
+  }
+
+  // Long edge a layer is decoded at: the size the stack is shown at, and never
+  // more than the canvas itself, which would hold pixels no pass reads.
+  int layerCapEdge() const {
+    int cap = previewMaxEdge(gui);
+    const int canvasEdge = std::max(document.full.w, document.full.h);
+    if (canvasEdge > 0 && (cap <= 0 || cap > canvasEdge)) cap = canvasEdge;
+    return cap;
   }
 
   void scheduleRender() { render.request(renderInputs()); }

@@ -1,7 +1,6 @@
 #include "services/managers/layers/LayerManager.h"
 
 #include "engine/RenderWorker.h"
-#include "model/GuiState.h"
 #include "persist/ProjectPersist.h"
 #include "services/Filmstrip.h"
 #include "services/ManagerSession.h"
@@ -45,7 +44,7 @@ class LayerManagerImpl : public LayerManager {
       session_.reportStatus(name + " is already a layer");
       return;
     }
-    if (!session_.opener.start(path, /*useSavedChain=*/false, DecodeTarget::Layer, layerCapEdge())) {
+    if (!session_.opener.start(path, /*useSavedChain=*/false, DecodeTarget::Layer, session_.layerCapEdge())) {
       session_.reportStatus("Adds " + name + " after the current decode");
       return;
     }
@@ -126,15 +125,6 @@ class LayerManagerImpl : public LayerManager {
     session_.render.waitIdle();
     edit(session_.document.layers[(size_t)index]);
     session_.rebuildPreviewImage();
-  }
-
-  // Long edge a layer is decoded at: the preview size the stack is shown at, and
-  // never more than the canvas itself, which would hold pixels no pass reads.
-  int layerCapEdge() const {
-    int cap = previewMaxEdge(session_.gui);
-    const int canvasEdge = std::max(session_.document.full.w, session_.document.full.h);
-    if (canvasEdge > 0 && (cap <= 0 || cap > canvasEdge)) cap = canvasEdge;
-    return cap;
   }
 
   ManagerSession session_;

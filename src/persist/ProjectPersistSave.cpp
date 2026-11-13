@@ -227,8 +227,27 @@ static std::string iso8601Now() {
   return buf;
 }
 
+// The layer list of a sidecar. Each entry is a placement, not pixels: the open
+// path decodes the files again.
+JsonValue makeLayersJson(const std::vector<PersistLayer> &layers) {
+  JsonValue list = JsonValue::makeArray();
+  for (const PersistLayer &layer : layers) {
+    JsonValue entry = JsonValue::makeObject();
+    entry.set("path", JsonValue::makeString(layer.path));
+    entry.set("x", JsonValue::makeDouble(layer.x));
+    entry.set("y", JsonValue::makeDouble(layer.y));
+    entry.set("scale", JsonValue::makeDouble(layer.scale));
+    entry.set("rotation", JsonValue::makeDouble(layer.rotation));
+    entry.set("opacity", JsonValue::makeDouble(layer.opacity));
+    entry.set("blend", JsonValue::makeString(layer.blend));
+    entry.set("visible", JsonValue::makeBool(layer.visible));
+    list.arr.push_back(std::move(entry));
+  }
+  return list;
+}
+
 bool saveInputSidecar(const std::string &imagePath, ColorSpace fileSpace, ColorSpace chainInputSpace,
-                      const PersistChain &chain) {
+                      const PersistChain &chain, const std::vector<PersistLayer> &layers) {
   JsonValue root = JsonValue::makeObject();
   root.set("format", JsonValue::makeString("ofxhost-sidecar"));
   root.set("version", JsonValue::makeInt(1));
@@ -237,6 +256,7 @@ bool saveInputSidecar(const std::string &imagePath, ColorSpace fileSpace, ColorS
   root.set("inputColorSpace", JsonValue::makeString(colorSpaceName(fileSpace)));
   root.set("chainInputColorSpace", JsonValue::makeString(colorSpaceName(chainInputSpace)));
   root.set("chain", makeChainJson(chain));
+  if (!layers.empty()) root.set("layers", makeLayersJson(layers));
   return writeFile(inputSidecarPath(imagePath), root.dump());
 }
 

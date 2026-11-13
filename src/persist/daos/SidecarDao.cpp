@@ -9,8 +9,8 @@ class SidecarDaoImpl : public SidecarDao {
   }
 
   bool save(const std::string &imagePath, ColorSpace fileSpace, ColorSpace chainInputSpace,
-            const PersistChain &chain) override {
-    return saveInputSidecar(imagePath, fileSpace, chainInputSpace, chain);
+            const PersistChain &chain, const std::vector<PersistLayer> &layers) override {
+    return saveInputSidecar(imagePath, fileSpace, chainInputSpace, chain, layers);
   }
 
   bool saveExport(const std::string &exportPath, const std::string &sourceImagePath, ColorSpace fileSpace,

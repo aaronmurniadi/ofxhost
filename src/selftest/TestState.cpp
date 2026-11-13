@@ -515,6 +515,40 @@ int testLayerAdd() {
     if (app.opener.busy()) rc = fail("layer: a text file started a decode");
   }
 
+  // The stack belongs to the image, so it is written to the sidecar and restored
+  // when the image opens again, placement included.
+  if (rc == 0) {
+    app.layerManager->resetTransform(0);
+    app.layerManager->nudge(0, 5.0, -3.0);
+    app.layerManager->setOpacity(0, 0.75f);
+    app.documents->saveCurrentInputSidecar();
+
+    PersistSidecar saved;
+    if (!loadInputSidecar(underPath, saved)) return fail("layer: the sidecar was not written");
+    if (saved.layers.size() != 1) return fail("layer: the sidecar holds no layer");
+    if (saved.layers[0].path != "over.png") return fail("layer: the layer path is not relative to the image");
+    if (saved.layers[0].x != 5.0 || saved.layers[0].y != -3.0) return fail("layer: the placement was not saved");
+
+    // Open another image, then come back: the stack has to be rebuilt.
+    app.documents->openPath(overPath);
+    if (!finishOpen(app)) return fail("layer: the second open did not finish");
+    if (!app.document.layers.empty()) return fail("layer: the stack followed the wrong image");
+    app.documents->openPath(underPath);
+    // The image decodes first, then each restored layer decodes after it, so the
+    // pump runs until the stack is back and the worker is idle.
+    for (int i = 0; i < 4000; ++i) {
+      app.documents->pumpOpen();
+      if (!app.opener.busy() && app.document.layers.size() == 1) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    if (app.document.layers.size() != 1) return fail("layer: the stack was not restored");
+    if (app.document.layers[0].px.px.empty()) return fail("layer: the restored layer has no pixels");
+    if (app.document.layers[0].xf.x != 5.0 || app.document.layers[0].xf.y != -3.0)
+      return fail("layer: the restored placement is wrong");
+    if (std::fabs(app.document.layers[0].opacity - 0.75f) > 1e-4f)
+      return fail("layer: the restored opacity is wrong");
+  }
+
   // Removing the layer brings the base image back.
   if (rc == 0) {
     app.layerManager->removeLayer(0);

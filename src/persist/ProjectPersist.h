@@ -56,6 +56,19 @@ struct PersistChain {
   std::vector<PersistNode> nodes;
 };
 
+// One image layered over the sidecar's image. The path is relative to the folder
+// of that image when it sits inside it, so a folder that moves together still
+// finds its layers. The pixels are not stored: they are decoded again on open.
+struct PersistLayer {
+  std::string path;
+  double x = 0.0, y = 0.0;   // canvas pixels from the canvas centre
+  double scale = 1.0;
+  double rotation = 0.0;     // degrees, positive counter-clockwise
+  double opacity = 1.0;
+  std::string blend = "Normal";
+  bool visible = true;
+};
+
 struct PersistSidecar {
   std::string kind;
   std::string sourcePath;
@@ -63,6 +76,9 @@ struct PersistSidecar {
   std::string chainInputColorSpace;  // space the user picked for the chain
   std::string exportedAt;
   PersistChain chain;
+  // Images layered over the image the sidecar belongs to, bottom first. A
+  // sidecar written before layers existed carries none, which means one image.
+  std::vector<PersistLayer> layers;
 };
 
 // Paths of the app-level state files. Each returns a path under the per-user
@@ -99,7 +115,7 @@ bool saveGlobalSettings(const PersistGui &gui, const PersistAppearance &appearan
 // interface.
 bool loadInputSidecar(const std::string &imagePath, PersistSidecar &out);
 bool saveInputSidecar(const std::string &imagePath, ColorSpace fileSpace, ColorSpace chainInputSpace,
-                      const PersistChain &chain);
+                      const PersistChain &chain, const std::vector<PersistLayer> &layers = {});
 bool saveExportSidecar(const std::string &exportPath, const std::string &sourceImagePath, ColorSpace fileSpace,
                        const PersistChain &chain);
 

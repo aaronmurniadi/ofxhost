@@ -16,6 +16,7 @@ void writeAppearance(JsonValue &gui, const PersistAppearance &appearance);
 void loadAppearance(const JsonValue &gui, PersistAppearance &appearance);
 JsonValue makeUpdatesJson(const PersistUpdates &u);
 JsonValue makeChainJson(const PersistChain &chain);
+JsonValue makeLayersJson(const std::vector<PersistLayer> &layers);
 
 bool writeFile(const std::filesystem::path &path, const std::string &body);
 bool readAllText(const std::string &path, std::string &out);
@@ -24,3 +25,4 @@ bool readAllText(const std::string &path, std::string &out);
 void loadGui(const JsonValue &gui, PersistGui &g);
 void loadUpdates(const JsonValue &updates, PersistUpdates &u);
 bool loadChain(const JsonValue &chain, PersistChain &out);
+void loadLayers(const JsonValue &layers, std::vector<PersistLayer> &out);
