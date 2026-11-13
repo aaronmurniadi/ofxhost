@@ -49,6 +49,22 @@ ExportJob captureExportJob(ManagerSession &session, std::string outPath) {
   job.opts.lossless = session.gui.exportLossless;
   job.chain = captureChain(session.chain);
   job.writeSidecar = session.gui.exportSidecar;
+  job.workingSpace = session.document.workingSpace;
+  // Placed layers travel as their placement, not as pixels: the export thread
+  // decodes each one at full size.
+  job.layers.reserve(session.document.layers.size());
+  for (const Layer &layer : session.document.layers) {
+    if (layer.path.empty()) continue;  // no file behind it, so it cannot be decoded again
+    ExportLayer placed;
+    placed.path = layer.path;
+    placed.fullW = layer.fullW;
+    placed.fullH = layer.fullH;
+    placed.xf = layer.xf;
+    placed.opacity = layer.opacity;
+    placed.blend = layer.blend;
+    placed.visible = layer.visible;
+    job.layers.push_back(std::move(placed));
+  }
   return job;
 }
 

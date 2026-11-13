@@ -8,8 +8,15 @@
 #include "codecs/Composite.h"
 #include "core/Layer.h"
 #include "core/StatusSink.h"
+#include "engine/ExportJob.h"
+#include "engine/ExportWorker.h"
 #include "engine/RenderInputs.h"
 #include "engine/RenderWorker.h"
+
+#include <cstdio>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 #include <cmath>
 #include <cstring>
@@ -233,5 +240,102 @@ int testLayerPreviewFlatten() {
   if (preview.w != 8 || preview.h != 8 || !near(texel(preview, 4, 4, 0), 0.1f, 1e-3f))
     return fail("layer: single image preview path");
   printf("ok  layer preview flatten\n");
+  return 0;
+}
+
+int testLayerExport() {
+  // The export decodes every placed layer at full size and flattens before the
+  // chain runs. With an empty chain the written file is the composite itself, so
+  // the case can read the pixel back and check the layer landed on top.
+  const fs::path base = fs::temp_directory_path() / "ofxhost-selftest-layer-export";
+  std::error_code ec;
+  fs::remove_all(base, ec);
+  fs::create_directories(base, ec);
+
+  Image under = flatLayer(8, 8, 0.25f, 0.25f, 0.25f, 1.0f).px;
+  Image over = flatLayer(8, 8, 0.8f, 0.8f, 0.8f, 1.0f).px;
+  const std::string underPath = (base / "under.png").string();
+  const std::string overPath = (base / "over.png").string();
+  const std::string outPath = (base / "out.png").string();
+  if (!writeImage(under, underPath) || !writeImage(over, overPath)) return fail("layer export: test images");
+
+  ExportJob job;
+  ColorSpace detected = ColorSpace::sRGB;
+  ColorSpace working = ColorSpace::sRGB;
+  ImageMeta meta;
+  if (!loadImage(underPath, job.src, detected, working, &meta)) return fail("layer export: base decode");
+  job.workingSpace = working;
+  job.chainSpace = working;
+  job.exportSpace = ColorSpace::sRGB;
+  job.outPath = outPath;
+  job.opts.bitDepth = 8;
+  ExportLayer placed;
+  placed.path = overPath;
+  placed.fullW = 8;
+  placed.fullH = 8;
+  job.layers.push_back(placed);
+
+  ChainState chain;  // no plugin, so the composite is what gets written
+  StatusSink status;
+  RenderSchedule schedule;
+  ExportWorker worker;
+  bool done = false;
+  ExportResult result;
+  const bool started =
+      worker.start(chain, std::move(job), schedule, [&](ExportResult r) {
+        result = std::move(r);
+        done = true;
+      });
+  if (!started) return fail("layer export: the worker refused the job");
+  worker.wait();
+  if (!done || !result.ok) {
+    if (!result.message.empty()) std::fprintf(stderr, "layer export: %s\n", result.message.c_str());
+    return fail("layer export: the export failed");
+  }
+
+  Image written;
+  ColorSpace writtenSpace = ColorSpace::sRGB;
+  ColorSpace writtenWorking = ColorSpace::sRGB;
+  if (!loadImage(outPath, written, writtenSpace, writtenWorking, nullptr)) return fail("layer export: read back");
+  if (written.w != 8 || written.h != 8) return fail("layer export: the canvas size changed");
+  // The expected value is what the same file decodes to, so the case does not
+  // depend on the transfer curve the codecs happened to use.
+  Image overDecoded;
+  ColorSpace overSpace = ColorSpace::sRGB;
+  ColorSpace overWorking = ColorSpace::sRGB;
+  if (!loadImage(overPath, overDecoded, overSpace, overWorking, nullptr)) return fail("layer export: layer decode");
+  const float expect = overDecoded.px[0];
+  if (std::fabs(written.px[0] - expect) > 0.02f) {
+    std::fprintf(stderr, "layer export: wrote %.4f, layer is %.4f\n", written.px[0], expect);
+    return fail("layer export: the layer is not in the file");
+  }
+
+  // A layer whose file is gone must fail the export instead of writing a frame
+  // that silently misses it.
+  ExportJob broken;
+  broken.src = under;
+  broken.workingSpace = working;
+  broken.chainSpace = working;
+  broken.exportSpace = ColorSpace::sRGB;
+  broken.outPath = (base / "broken.png").string();
+  ExportLayer missing;
+  missing.path = (base / "gone.png").string();
+  missing.fullW = 8;
+  missing.fullH = 8;
+  broken.layers.push_back(missing);
+  done = false;
+  result = ExportResult();
+  if (!worker.start(chain, std::move(broken), schedule, [&](ExportResult r) {
+        result = std::move(r);
+        done = true;
+      }))
+    return fail("layer export: the worker refused the second job");
+  worker.wait();
+  if (!done || result.ok) return fail("layer export: a missing layer was exported anyway");
+  if (result.message.find("gone.png") == std::string::npos)
+    return fail("layer export: the failure does not name the layer");
+
+  fs::remove_all(base, ec);
+  printf("ok  layer export\n");
   return 0;
 }
