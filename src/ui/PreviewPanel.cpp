@@ -16,6 +16,15 @@
 
 namespace fs = std::filesystem;
 
+// One wheel notch is one zoom step. A trackpad sends part of a notch, so the
+// step follows the delta instead of snapping to a whole one. The sign of the
+// delta picks the direction, so a scroll down gives the inverse.
+static float wheelZoomFactor(float wheel) {
+  if (wheel == 0.0f) return 1.0f;
+  constexpr float kStep = 1.1f;
+  return std::pow(kStep, wheel);
+}
+
 // Padding of the preview corner overlays from the panel edge.
 constexpr float kOverlayPad = 8.0f;
 
@@ -127,17 +136,18 @@ void drawPreviewPanel(App &app) {
   if (canvasHovered) {
     float zoomFactor = 1.0f;
 #if defined(__APPLE__)
-    if (pinch != 0.0f) {
-      zoomFactor *= (1.0f + pinch);
-    } else {
+    // macOS reports a pinch and a two-finger scroll as the same kind of event, so
+    // the gesture is read first and only one of the two drives the zoom.
+    if (pinch != 0.0f) zoomFactor = 1.0f + pinch;
+    else zoomFactor = wheelZoomFactor(ImGui::GetIO().MouseWheel);
+    // The wheel zooms, so the horizontal scroll is the one axis left for panning.
+    // A diagonal gesture reports both, and there the zoom wins.
+    if (ImGui::GetIO().MouseWheel == 0.0f) {
       constexpr float kPanScale = 10.0f;
       app.gui.previewPanX += ImGui::GetIO().MouseWheelH * kPanScale;
-      app.gui.previewPanY += ImGui::GetIO().MouseWheel * kPanScale;
     }
 #else
-    const float wheel = ImGui::GetIO().MouseWheel;
-    if (wheel > 0.0f) zoomFactor *= 1.1f;
-    else if (wheel < 0.0f) zoomFactor *= 1.0f / 1.1f;
+    zoomFactor = wheelZoomFactor(ImGui::GetIO().MouseWheel);
 #endif
     if (zoomFactor != 1.0f) {
       const float oldZoom = app.gui.previewZoom;
