@@ -54,9 +54,18 @@ int testTiffDecode() {
     Image img;
     ColorSpace cs = ColorSpace::sRGB;
     ColorSpace working = ColorSpace::sRGB;
-    if (!loadImage(p.string(), img, cs, working) || img.w != 2 || img.h != 2) {
+    int frameW = 0, frameH = 0;
+    if (!loadImage(p.string(), img, cs, working, nullptr, DecodeQuality::Full, &frameW, &frameH) || img.w != 2 ||
+        img.h != 2) {
       if (half) return fail("tiff load half");
       return fail("tiff load");
+    }
+    // A codec that returns the stored pixels returns its own frame. Only a RAW
+    // preview develop holds a buffer smaller than the frame it came from, and a
+    // layer placed from such a buffer is drawn at its frame size.
+    if (frameW != img.w || frameH != img.h) {
+      if (half) return fail("tiff frame half");
+      return fail("tiff frame");
     }
     if (img.px[(size_t)1 * 2 * 4 + 0] < 0.9f) {
       if (half) return fail("tiff pixels half");

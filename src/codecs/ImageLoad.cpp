@@ -120,7 +120,11 @@ static std::string trimmed(const char *text) {
   return value.substr(first);
 }
 
-static bool loadRaw(const std::string &path, Image &out, ImageMeta &meta, DecodeQuality quality) {
+// frameW and frameH, when given, receive the size of the source frame. A preview
+// decode develops at half size, so the buffer is smaller than the frame it came
+// from, and a caller that places the image needs the frame, not the buffer.
+static bool loadRaw(const std::string &path, Image &out, ImageMeta &meta, DecodeQuality quality, int *frameW = nullptr,
+                    int *frameH = nullptr) {
   std::lock_guard<std::mutex> lock(gLibRawDecodeMutex);
   // LibRaw is about 750 KB, which is larger than the 512 KB stack a worker
   // thread gets, so it lives on the heap. A local here overflows the stack while
@@ -128,6 +132,10 @@ static bool loadRaw(const std::string &path, Image &out, ImageMeta &meta, Decode
   std::unique_ptr<LibRaw> raw(new LibRaw);
   if (raw->open_file(path.c_str()) != LIBRAW_SUCCESS) return false;
   if (raw->unpack() != LIBRAW_SUCCESS) return false;
+  // Sizes still describe the full frame here. The develop below rewrites them, so
+  // the frame is read now.
+  if (frameW) *frameW = (int)raw->imgdata.sizes.width;
+  if (frameH) *frameH = (int)raw->imgdata.sizes.height;
   // LibRaw rewrites the maker and model into its own camera table spelling, which
   // is the spelling the noise profile database uses.
   meta.cameraMaker = trimmed(raw->imgdata.idata.make);
@@ -516,9 +524,11 @@ bool makePreview(const Image &src, int maxEdge, Image &out) {
   return true;
 }
 
-bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorSpace &working, ImageMeta *meta,
-               DecodeQuality quality) {
-  PerfScope _ps("loadImage");
+// The decode itself. frameW and frameH are reported only when the decoder knows a
+// frame larger than the buffer it returned; every other codec returns the stored
+// pixels, so its buffer is its frame and the wrapper fills those in.
+static bool loadImageImpl(const std::string &path, Image &out, ColorSpace &detected, ColorSpace &working,
+                          ImageMeta *meta, DecodeQuality quality, int *frameW, int *frameH) {
   out = {};
   detected = ColorSpace::sRGB;
   working = ColorSpace::sRGB;
@@ -533,7 +543,7 @@ bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorS
   // Color Space control shows, and the control stays free to pick a wider space.
   const bool raw = format && format->codec == ImageCodec::Raw;
   if (raw) {
-    if (!loadRaw(path, out, found, quality)) return false;
+    if (!loadRaw(path, out, found, quality, frameW, frameH)) return false;
     if (meta) *meta = found;
     detected = ColorSpace::LinearRec709;
     working = detected;
@@ -576,13 +586,26 @@ bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorS
   }
   // A RAW file whose extension the table does not list. The name cannot say
   // that a full decode is needed later, so this one always develops fully.
-  if (loadRaw(path, out, found, DecodeQuality::Full)) {
+  if (loadRaw(path, out, found, DecodeQuality::Full, frameW, frameH)) {
     if (meta) *meta = found;
     detected = ColorSpace::LinearRec709;
     working = detected;
     return true;
   }
   return false;
+}
+
+bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorSpace &working, ImageMeta *meta,
+               DecodeQuality quality, int *frameW, int *frameH) {
+  PerfScope _ps("loadImage");
+  int reportedW = 0, reportedH = 0;
+  const bool ok = loadImageImpl(path, out, detected, working, meta, quality, &reportedW, &reportedH);
+  if (ok) {
+    // A buffer with no frame behind it is its own frame.
+    if (frameW) *frameW = reportedW > 0 ? reportedW : out.w;
+    if (frameH) *frameH = reportedH > 0 ? reportedH : out.h;
+  }
+  return ok;
 }
 
 bool loadThumbnailRGBA(const std::string &path, int maxEdge, std::vector<unsigned char> &rgba, int &w, int &h) {

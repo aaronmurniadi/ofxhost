@@ -61,10 +61,14 @@ bool OpenWorker::develop(const std::string &path, bool useSavedChain, unsigned g
   // A layer is never the document image, so it never reports a proxy quality and
   // never asks for the second develop below.
   if (target == DecodeTarget::Layer) decoded.quality = DecodeQuality::Full;
-  const bool ok = loadImage(path, decoded.full, decoded.fileSpace, decoded.workingSpace, &decoded.meta, quality);
+  // The frame size, not the buffer size: a preview develop returns half the frame,
+  // and a layer that believed the buffer would be drawn at half scale.
+  int frameW = 0, frameH = 0;
+  const bool ok = loadImage(path, decoded.full, decoded.fileSpace, decoded.workingSpace, &decoded.meta, quality,
+                            &frameW, &frameH);
   decoded.ok = ok;
-  decoded.frameW = decoded.full.w;
-  decoded.frameH = decoded.full.h;
+  decoded.frameW = frameW > 0 ? frameW : decoded.full.w;
+  decoded.frameH = frameH > 0 ? frameH : decoded.full.h;
   // A layer is held at the size the stack works at, so a 24 MP file does not sit
   // in memory at full size for a preview pass to shrink it again.
   if (ok && capEdge > 0 && std::max(decoded.full.w, decoded.full.h) > capEdge) {

@@ -22,8 +22,13 @@ enum class DecodeQuality { Preview, Full };
 // detected describes the file and travels in the sidecar and the export metadata.
 // meta, when given, receives the camera and ISO the decoder found.
 // quality only changes a RAW decode; every other codec returns the stored pixels.
+// frameW and frameH, when given, receive the size of the source frame. They differ
+// from out.w and out.h when a preview decode developed at half size, which is the
+// case for a RAW frame; a caller that places the image needs the frame, not the
+// buffer it holds.
 bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorSpace &working,
-               ImageMeta *meta = nullptr, DecodeQuality quality = DecodeQuality::Full);
+               ImageMeta *meta = nullptr, DecodeQuality quality = DecodeQuality::Full, int *frameW = nullptr,
+               int *frameH = nullptr);
 // maxEdge 0 = full size; otherwise downsamples so longest edge <= maxEdge.
 bool makePreview(const Image &src, int maxEdge, Image &out);
 
