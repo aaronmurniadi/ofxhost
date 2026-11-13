@@ -41,6 +41,7 @@ int runSelfTest() {
   if (const int rc = testStateFilesAreAppLevel()) return rc;
   if (const int rc = testUpdateVersionOrdering()) return rc;
   if (const int rc = testColorSpaceConversion()) return rc;
+  if (const int rc = testColorSpaceConversionThreaded()) return rc;
   if (const int rc = testPluginColorSpaceMapping()) return rc;
   loadPlugins();
   if (plugins().empty()) return fail("no OFX filter plugins found");

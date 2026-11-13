@@ -155,3 +155,57 @@ int testColorSpaceConversion() {
   printf("ok  color space conversion\n");
   return 0;
 }
+
+// The conversion splits its rows across threads once a frame is large enough, so
+// a frame-sized image exercises a path the small cases never reach. The rows are
+// independent, so any row of the threaded result must match the same row
+// converted on its own.
+int testColorSpaceConversionThreaded() {
+  Image img;
+  img.w = 1280;
+  img.h = 1024;  // above the row-splitting threshold
+  img.px.assign((size_t)img.w * img.h * 4, 1.0f);
+  for (int y = 0; y < img.h; ++y)
+    for (int x = 0; x < img.w; ++x) {
+      const size_t i = ((size_t)y * img.w + x) * 4;
+      img.px[i + 0] = 0.02f + 0.9f * (float)x / (float)img.w;
+      img.px[i + 1] = 0.10f + 0.5f * (float)y / (float)img.h;
+      img.px[i + 2] = 0.05f + 0.7f * (float)(x + y) / (float)(img.w + img.h);
+      img.px[i + 3] = 1.0f;
+    }
+  const Image original = img;
+
+  // One row on its own, so the threaded result has a reference to match.
+  Image referenceRow;
+  referenceRow.w = img.w;
+  referenceRow.h = 1;
+  const int probeRow = 700;
+  referenceRow.px.assign(img.px.begin() + (size_t)probeRow * img.w * 4,
+                         img.px.begin() + (size_t)(probeRow + 1) * img.w * 4);
+  if (!convertColorSpace(referenceRow, ColorSpace::sRGB, ColorSpace::LinearRec709,
+                         RenderIntent::RelativeColorimetric))
+    return fail("convert: the single row probe failed");
+
+  if (!convertColorSpace(img, ColorSpace::sRGB, ColorSpace::LinearRec709, RenderIntent::RelativeColorimetric))
+    return fail("convert: a frame-sized conversion failed");
+  for (int x = 0; x < img.w; ++x)
+    for (int c = 0; c < 3; ++c) {
+      const size_t i = ((size_t)probeRow * img.w + x) * 4 + c;
+      if (std::abs(img.px[i] - referenceRow.px[(size_t)x * 4 + c]) > 1e-5f)
+        return fail("convert: a threaded row differs from the same row alone");
+    }
+  for (size_t i = 0; i < img.px.size(); i += 4) {
+    if (!std::isfinite(img.px[i]) || !std::isfinite(img.px[i + 1]) || !std::isfinite(img.px[i + 2]))
+      return fail("convert: a frame-sized conversion is not finite");
+    if (img.px[i + 3] != 1.0f) return fail("convert: a frame-sized conversion dropped alpha");
+  }
+
+  if (!convertColorSpace(img, ColorSpace::LinearRec709, ColorSpace::sRGB, RenderIntent::RelativeColorimetric))
+    return fail("convert: the frame-sized round trip failed");
+  for (size_t i = 0; i < img.px.size(); ++i) {
+    if (std::abs(img.px[i] - original.px[i]) > 2e-3f)
+      return fail("convert: the frame-sized round trip drifted");
+  }
+  printf("ok  color space conversion at frame size\n");
+  return 0;
+}

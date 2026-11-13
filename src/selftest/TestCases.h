@@ -9,6 +9,7 @@ int testTiffDecode();
 int testPngColorSpace();
 int testRowOrder();
 int testColorSpaceConversion();
+int testColorSpaceConversionThreaded();
 int testPluginColorSpaceMapping();
 
 // State files, settings, fonts, and update checking.

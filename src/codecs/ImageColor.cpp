@@ -372,6 +372,17 @@ ColorSpace classifyIcc(const std::vector<uint8_t> &icc) {
   return pick;
 }
 
+// Converts rows [y0, y1) of a width-wide RGBA float buffer in place. buffer is
+// scratch the caller owns and holds one row, so the transform never reads and
+// writes one buffer.
+static void convertRows(cmsHTRANSFORM xform, float *px, int width, std::vector<float> &buffer, int y0, int y1) {
+  for (int y = y0; y < y1; ++y) {
+    const size_t off = (size_t)y * (size_t)width * 4;
+    cmsDoTransform(xform, px + off, buffer.data(), (cmsUInt32Number)width);
+    std::memcpy(px + off, buffer.data(), buffer.size() * sizeof(float));
+  }
+}
+
 // Converts an image in place between two color spaces with the given rendering
 // intent. Returns false when a profile or a transform cannot be built, and then
 // leaves the pixels untouched. A request where both spaces are equal succeeds
@@ -383,17 +394,43 @@ bool convertColorSpace(Image &img, ColorSpace from, ColorSpace to, RenderIntent 
   cmsHPROFILE src = cachedProfile(from);
   cmsHPROFILE dst = cachedProfile(to);
   if (!src || !dst) return false;
-  cmsHTRANSFORM xform = cmsCreateTransform(src, TYPE_RGBA_FLT, dst, TYPE_RGBA_FLT, (cmsUInt32Number)intent,
-                                           cmsFLAGS_NOCACHE | cmsFLAGS_COPY_ALPHA);
-  if (!xform) return false;
-  // One row at a time, so the transform never reads and writes one buffer.
-  std::vector<float> row((size_t)img.w * 4);
-  for (int y = 0; y < img.h; ++y) {
-    const size_t off = (size_t)y * (size_t)img.w * 4;
-    cmsDoTransform(xform, img.px.data() + off, row.data(), (cmsUInt32Number)img.w);
-    std::memcpy(img.px.data() + off, row.data(), row.size() * sizeof(float));
+
+  // Rows split across threads, because a full frame at the preview size costs
+  // about a third of a second on one core and every row is independent.
+  const size_t totalPx = (size_t)img.w * (size_t)img.h;
+  unsigned int nThreads = std::min(std::max(1u, std::thread::hardware_concurrency()), 4u);
+  if ((size_t)img.h < nThreads) nThreads = (unsigned int)img.h;
+  if (totalPx < ((size_t)1 << 20)) nThreads = 1;
+
+  // One transform per thread: lcms keeps state inside a transform, so two
+  // threads share none. They are built here, before any pixel changes, so a
+  // transform that cannot be built leaves the image untouched as a whole.
+  std::vector<cmsHTRANSFORM> transforms(nThreads, nullptr);
+  for (unsigned int t = 0; t < nThreads; ++t) {
+    transforms[t] = cmsCreateTransform(src, TYPE_RGBA_FLT, dst, TYPE_RGBA_FLT, (cmsUInt32Number)intent,
+                                       cmsFLAGS_NOCACHE | cmsFLAGS_COPY_ALPHA);
+    if (transforms[t]) continue;
+    for (cmsHTRANSFORM built : transforms)
+      if (built) cmsDeleteTransform(built);
+    return false;
   }
-  cmsDeleteTransform(xform);
+
+  std::vector<std::thread> threads;
+  threads.reserve(nThreads);
+  const int rowsPerThread = (img.h + (int)nThreads - 1) / (int)nThreads;
+  for (unsigned int t = 0; t < nThreads; ++t) {
+    const int y0 = (int)t * rowsPerThread;
+    if (y0 >= img.h) break;
+    int y1 = y0 + rowsPerThread;
+    if (y1 > img.h) y1 = img.h;
+    threads.emplace_back([&img, &transforms, t, y0, y1] {
+      std::vector<float> buffer((size_t)img.w * 4);
+      convertRows(transforms[t], img.px.data(), img.w, buffer, y0, y1);
+    });
+  }
+  for (auto &thread : threads) thread.join();
+  for (cmsHTRANSFORM built : transforms)
+    if (built) cmsDeleteTransform(built);
   return true;
 }
 
