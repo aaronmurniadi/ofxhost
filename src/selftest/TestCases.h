@@ -18,6 +18,7 @@ int testLayerPlacement();
 int testLayerRotation();
 int testLayerStackRules();
 int testLayerThreaded();
+int testLayerPreviewFlatten();
 
 // State files, settings, fonts, and update checking.
 int testBundledFonts();

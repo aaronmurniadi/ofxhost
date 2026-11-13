@@ -48,6 +48,7 @@ int runSelfTest() {
   if (const int rc = testLayerRotation()) return rc;
   if (const int rc = testLayerStackRules()) return rc;
   if (const int rc = testLayerThreaded()) return rc;
+  if (const int rc = testLayerPreviewFlatten()) return rc;
   loadPlugins();
   if (plugins().empty()) return fail("no OFX filter plugins found");
   if (const int rc = testResetNodeParams()) return rc;

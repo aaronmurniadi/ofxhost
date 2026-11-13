@@ -32,6 +32,7 @@ struct ManagerSession {
     in.chain = &chain;
     in.full = &document.full;
     in.preview = &document.preview;
+    in.layers = &document.layers;
     in.workingSpace = document.workingSpace;
     in.previewSpace = gui.previewSpace;
     in.previewMaxEdge = previewMaxEdge(gui);

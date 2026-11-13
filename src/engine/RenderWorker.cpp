@@ -2,10 +2,12 @@
 
 #include "core/RenderContext.h"
 #include "core/perf.h"
+#include "codecs/Composite.h"
 #include "engine/ChainRenderer.h"
 #include "ofx/OfxRegistry.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <utility>
 
@@ -81,11 +83,31 @@ void RenderWorker::recolor(const RenderInputs &inputs) {
 
 void RenderWorker::rebuildPreview(const RenderInputs &inputs) {
   if (!inputs.hasFull() || !inputs.preview) return;
-  // makePreview rewrites the preview image, which the worker may be reading.
+  // The rebuild rewrites the preview image, which the worker may be reading.
   waitIdle();
   builtPreviewMaxEdge_ = inputs.previewMaxEdge;
-  makePreview(*inputs.full, inputs.previewMaxEdge, *inputs.preview);
+  buildPreviewImage(inputs, *inputs.preview);
   request(inputs);
+}
+
+// Fills preview from the full image and the layers above it. A document with no
+// overlay goes through makePreview, which is the resampler the single-image
+// document has always used; a stack is flattened instead, because only the
+// compositor knows where each layer sits.
+void RenderWorker::buildPreviewImage(const RenderInputs &inputs, Image &out) {
+  const Image &full = *inputs.full;
+  if (!inputs.layers || inputs.layers->empty()) {
+    makePreview(full, inputs.previewMaxEdge, out);
+    return;
+  }
+  const int longEdge = std::max(full.w, full.h);
+  int w = full.w, h = full.h;
+  if (inputs.previewMaxEdge > 0 && longEdge > inputs.previewMaxEdge) {
+    const double scale = (double)inputs.previewMaxEdge / (double)longEdge;
+    w = std::max(1, (int)std::floor(full.w * scale));
+    h = std::max(1, (int)std::floor(full.h * scale));
+  }
+  if (!compositeLayers(full, *inputs.layers, full.w, full.h, w, h, out)) makePreview(full, inputs.previewMaxEdge, out);
 }
 
 void RenderWorker::pumpUpload(GlTexture &texture) {

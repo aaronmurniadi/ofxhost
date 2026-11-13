@@ -3,8 +3,10 @@
 #pragma once
 
 #include "core/Image.h"
+#include "core/Layer.h"
 
 #include <string>
+#include <vector>
 
 struct DocumentState {
   std::string path;
@@ -26,4 +28,9 @@ struct DocumentState {
   // Camera and ISO of the open frame, when the decoder found them (RAW only).
   // The Denoise plugin turns them into a sensor noise model.
   ImageMeta meta;
+  // Images layered on top of `full`, in stack order: the first entry is the one
+  // drawn directly over the document image. The document image itself stays in
+  // `full`, so a single-image document costs no second copy of its pixels and
+  // every reader of `full` keeps its meaning.
+  std::vector<Layer> layers;
 };

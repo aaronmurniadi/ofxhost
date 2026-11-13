@@ -60,6 +60,8 @@ class RenderWorker {
 
  private:
   void run();
+  // Fills preview from the full image and the layers above it.
+  void buildPreviewImage(const RenderInputs &inputs, Image &out);
   void publish(Image img, ColorSpace from, ColorSpace to);
   void showSourcePreview(const RenderInputs &inputs);
 

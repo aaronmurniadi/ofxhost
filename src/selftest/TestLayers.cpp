@@ -7,6 +7,9 @@
 
 #include "codecs/Composite.h"
 #include "core/Layer.h"
+#include "core/StatusSink.h"
+#include "engine/RenderInputs.h"
+#include "engine/RenderWorker.h"
 
 #include <cmath>
 #include <cstring>
@@ -186,5 +189,49 @@ int testLayerThreaded() {
   if (one.w != four.w || one.h != four.h) return fail("layer: threaded sizes differ");
   if (one.px != four.px) return fail("layer: the row split changed a pixel");
   printf("ok  layer thread split\n");
+  return 0;
+}
+
+int testLayerPreviewFlatten() {
+  // The preview worker flattens the stack, so an overlay has to reach the frame
+  // the chain renders. Both spaces are the same here, so the numbers survive the
+  // display conversion and the case can read them.
+  Image base;
+  base.w = 8;
+  base.h = 8;
+  base.px.assign((size_t)base.w * base.h * 4, 0.1f);
+  for (size_t i = 0; i < (size_t)base.w * base.h; ++i) base.px[i * 4 + 3] = 1.0f;
+
+  std::vector<Layer> over;
+  over.push_back(flatLayer(8, 8, 0.9f, 0.9f, 0.9f, 1.0f));
+
+  StatusSink status;
+  RenderWorker worker(status);
+  Image preview;
+  ChainState chain;
+  RenderInputs in;
+  in.chain = &chain;
+  in.full = &base;
+  in.preview = &preview;
+  in.layers = &over;
+  in.workingSpace = ColorSpace::LinearRec709;
+  in.previewSpace = ColorSpace::LinearRec709;
+  in.previewMaxEdge = 0;
+  worker.rebuildPreview(in);
+  if (preview.w != 8 || preview.h != 8) return fail("layer: preview size with a stack");
+  if (!near(texel(preview, 4, 4, 0), 0.9f, 1e-3f)) return fail("layer: overlay missing from the preview");
+
+  // Hiding the overlay must bring the base back, unchanged.
+  over[0].visible = false;
+  worker.rebuildPreview(in);
+  if (!near(texel(preview, 4, 4, 0), 0.1f, 1e-3f)) return fail("layer: hidden overlay still drawn");
+
+  // With no overlay the same request goes through makePreview, which is the path
+  // the single-image document has always taken.
+  in.layers = nullptr;
+  worker.rebuildPreview(in);
+  if (preview.w != 8 || preview.h != 8 || !near(texel(preview, 4, 4, 0), 0.1f, 1e-3f))
+    return fail("layer: single image preview path");
+  printf("ok  layer preview flatten\n");
   return 0;
 }

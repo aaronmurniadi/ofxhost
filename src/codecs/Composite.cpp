@@ -130,47 +130,14 @@ bool placeLayer(const Layer &layer, int canvasW, int canvasH, Placed &out) {
   return true;
 }
 
-}  // namespace
-
-bool compositeLayers(const std::vector<Layer> &layers, int canvasW, int canvasH, int outW, int outH, Image &out,
-                     int threads) {
-  if (canvasW <= 0 || canvasH <= 0 || outW <= 0 || outH <= 0) return false;
-  if (layers.empty()) return false;
-  PerfScope _ps("compositeLayers");
-
-  const double scaleX = (double)outW / (double)canvasW;
-  const double scaleY = (double)outH / (double)canvasH;
+// Draws every prepared layer into a fresh output buffer. The buffer is cleared
+// first, so a layer that does not cover the canvas leaves transparency there.
+bool flattenPrepared(const std::vector<Placed> &placed, int outW, int outH, double scaleX, double scaleY, int threads,
+                     Image &out) {
   const size_t totalPx = (size_t)outW * (size_t)outH;
-
-  // One visible layer placed as it was decoded needs no blend and no resample, so
-  // it is copied. This is the single-image document, and it must cost what it did
-  // before layers existed.
-  int visible = 0;
-  const Layer *only = nullptr;
-  for (const Layer &layer : layers) {
-    if (!layer.visible || layer.px.px.empty()) continue;
-    ++visible;
-    only = &layer;
-  }
-  if (visible == 1 && only && only->xf.isIdentity() && only->opacity >= 1.0f &&
-      only->blend == BlendMode::Normal && only->px.w == outW && only->px.h == outH) {
-    out.w = outW;
-    out.h = outH;
-    out.px = only->px.px;
-    return true;
-  }
-
   out.w = outW;
   out.h = outH;
   out.px.assign(totalPx * 4, 0.0f);
-
-  std::vector<Placed> placed;
-  placed.reserve(layers.size());
-  for (const Layer &layer : layers) {
-    Placed p;
-    if (!placeLayer(layer, canvasW, canvasH, p)) continue;
-    placed.push_back(p);
-  }
   if (placed.empty()) return true;  // an empty stack flattens to a transparent frame
 
   unsigned int nThreads = threads > 0 ? (unsigned int)threads
@@ -198,4 +165,86 @@ bool compositeLayers(const std::vector<Layer> &layers, int canvasW, int canvasH,
   }
   for (std::thread &th : workers) th.join();
   return true;
+}
+
+// A prepared layer for an image that covers the whole canvas and does not move.
+// The base of a stack is one of these, so the document's own buffer is drawn
+// without a Layer entry and without a copy.
+Placed placeCovering(const Image &img, int canvasW, int canvasH) {
+  Placed p;
+  p.px = img.px.data();
+  p.w = img.w;
+  p.h = img.h;
+  p.cx = (double)canvasW * 0.5;
+  p.cy = (double)canvasH * 0.5;
+  p.sx = (double)img.w / (double)canvasW;
+  p.sy = (double)img.h / (double)canvasH;
+  return p;
+}
+
+}  // namespace
+
+bool compositeLayers(const std::vector<Layer> &layers, int canvasW, int canvasH, int outW, int outH, Image &out,
+                     int threads) {
+  if (canvasW <= 0 || canvasH <= 0 || outW <= 0 || outH <= 0) return false;
+  if (layers.empty()) return false;
+  PerfScope _ps("compositeLayers");
+
+  const double scaleX = (double)outW / (double)canvasW;
+  const double scaleY = (double)outH / (double)canvasH;
+
+  // One visible layer placed as it was decoded needs no blend and no resample, so
+  // it is copied. This is the single-image document, and it must cost what it did
+  // before layers existed.
+  int visible = 0;
+  const Layer *only = nullptr;
+  for (const Layer &layer : layers) {
+    if (!layer.visible || layer.px.px.empty()) continue;
+    ++visible;
+    only = &layer;
+  }
+  if (visible == 1 && only && only->xf.isIdentity() && only->opacity >= 1.0f &&
+      only->blend == BlendMode::Normal && only->px.w == outW && only->px.h == outH) {
+    out.w = outW;
+    out.h = outH;
+    out.px = only->px.px;
+    return true;
+  }
+
+  std::vector<Placed> placed;
+  placed.reserve(layers.size());
+  for (const Layer &layer : layers) {
+    Placed p;
+    if (!placeLayer(layer, canvasW, canvasH, p)) continue;
+    placed.push_back(p);
+  }
+  return flattenPrepared(placed, outW, outH, scaleX, scaleY, threads, out);
+}
+
+bool compositeLayers(const Image &base, const std::vector<Layer> &over, int canvasW, int canvasH, int outW, int outH,
+                     Image &out, int threads) {
+  if (canvasW <= 0 || canvasH <= 0 || outW <= 0 || outH <= 0) return false;
+  if (base.w <= 0 || base.h <= 0 || base.px.empty()) return false;
+  PerfScope _ps("compositeLayers");
+
+  // No overlay, and the base already the wanted size: nothing to blend and
+  // nothing to resample, so it is copied.
+  if (over.empty() && base.w == outW && base.h == outH) {
+    out.w = outW;
+    out.h = outH;
+    out.px = base.px;
+    return true;
+  }
+
+  const double scaleX = (double)outW / (double)canvasW;
+  const double scaleY = (double)outH / (double)canvasH;
+  std::vector<Placed> placed;
+  placed.reserve(over.size() + 1);
+  placed.push_back(placeCovering(base, canvasW, canvasH));
+  for (const Layer &layer : over) {
+    Placed p;
+    if (!placeLayer(layer, canvasW, canvasH, p)) continue;
+    placed.push_back(p);
+  }
+  return flattenPrepared(placed, outW, outH, scaleX, scaleY, threads, out);
 }

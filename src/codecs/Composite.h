@@ -25,3 +25,9 @@
 // pixel, because every destination row is independent.
 bool compositeLayers(const std::vector<Layer> &layers, int canvasW, int canvasH, int outW, int outH, Image &out,
                      int threads = 0);
+
+// The same flatten, with the document's own image as the bottom of the stack
+// instead of a Layer entry. The base is borrowed, so an open image costs no
+// second copy of itself, and `over` holds the images layered on top of it.
+bool compositeLayers(const Image &base, const std::vector<Layer> &over, int canvasW, int canvasH, int outW, int outH,
+                     Image &out, int threads = 0);
