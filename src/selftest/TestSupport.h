@@ -8,6 +8,7 @@
 #include "services/managers/chain/ParamEditManager.h"
 #include "services/managers/document/DocumentManager.h"
 #include "services/managers/export/ExportManager.h"
+#include "services/managers/layers/LayerManager.h"
 #include "services/managers/session/ColorSpaceManager.h"
 #include "services/managers/session/UpdateManager.h"
 
@@ -30,6 +31,7 @@ struct TestBootstrap {
   std::unique_ptr<ExportManager> exportsOwned;
   std::unique_ptr<ColorSpaceManager> colorSpacesOwned;
   std::unique_ptr<NodeGraphManager> nodeGraphOwned;
+  std::unique_ptr<LayerManager> layerManagerOwned;
   std::unique_ptr<ParamEditManager> paramEditsOwned;
   std::unique_ptr<UpdateManager> updatesOwned;
 
@@ -41,12 +43,14 @@ struct TestBootstrap {
     exportsOwned = createExportManager(session, *sidecarDao);
     colorSpacesOwned = createColorSpaceManager(session);
     nodeGraphOwned = createNodeGraphManager(session);
+    layerManagerOwned = createLayerManager(session);
     paramEditsOwned = createParamEditManager(session);
     updatesOwned = createUpdateManager(app.updates);
     app.documents = documentsOwned.get();
     app.exports = exportsOwned.get();
     app.colorSpaces = colorSpacesOwned.get();
     app.nodeGraph = nodeGraphOwned.get();
+    app.layerManager = layerManagerOwned.get();
     app.paramEdits = paramEditsOwned.get();
     app.updateManager = updatesOwned.get();
   }

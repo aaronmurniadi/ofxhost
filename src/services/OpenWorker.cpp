@@ -2,6 +2,7 @@
 
 #include "codecs/ImageIO.h"
 
+#include <algorithm>
 #include <functional>
 #include <utility>
 
@@ -46,16 +47,30 @@ std::thread startLargeStackThread(std::function<void()> work) {
 
 OpenWorker::~OpenWorker() { wait(); }
 
-bool OpenWorker::develop(const std::string &path, bool useSavedChain, unsigned generation, DecodeQuality quality) {
+bool OpenWorker::develop(const std::string &path, bool useSavedChain, unsigned generation, DecodeQuality quality,
+                         DecodeTarget target, int capEdge) {
   DecodedImage decoded;
   decoded.path = path;
   decoded.useSavedChain = useSavedChain;
+  decoded.target = target;
   // Only the RAW decoder hands back a half-size frame, so only its result can be
   // a proxy. Every other file arrives complete from the one pass it takes.
   decoded.quality = DecodeQuality::Full;
-  if (isRawImageExtension(lowerFileExtension(path))) decoded.quality = quality;
+  const bool raw = isRawImageExtension(lowerFileExtension(path));
+  if (raw) decoded.quality = quality;
+  // A layer is never the document image, so it never reports a proxy quality and
+  // never asks for the second develop below.
+  if (target == DecodeTarget::Layer) decoded.quality = DecodeQuality::Full;
   const bool ok = loadImage(path, decoded.full, decoded.fileSpace, decoded.workingSpace, &decoded.meta, quality);
   decoded.ok = ok;
+  decoded.frameW = decoded.full.w;
+  decoded.frameH = decoded.full.h;
+  // A layer is held at the size the stack works at, so a 24 MP file does not sit
+  // in memory at full size for a preview pass to shrink it again.
+  if (ok && capEdge > 0 && std::max(decoded.full.w, decoded.full.h) > capEdge) {
+    Image capped;
+    if (makePreview(decoded.full, capEdge, capped)) decoded.full.swap(capped);
+  }
   const bool published = publish(std::move(decoded), generation);
   return ok && published;
 }
@@ -82,18 +97,22 @@ void OpenWorker::loop() {
     std::string path;
     bool useSavedChain = true;
     unsigned generation = 0;
+    DecodeTarget target = DecodeTarget::Document;
+    int capEdge = 0;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       path = path_;
       useSavedChain = useSavedChain_;
       generation = generation_;
+      target = target_;
+      capEdge = capEdge_;
     }
     // The preview develop fills the frame while the full one is still to come.
     // Only a RAW file develops twice: every other codec returns the stored
     // pixels, so a second pass would read the same bytes again. A request that
     // is already waiting means the user left this file, so its full decode is
     // not worth the wait.
-    const bool previewed = develop(path, useSavedChain, generation, DecodeQuality::Preview);
+    const bool previewed = develop(path, useSavedChain, generation, DecodeQuality::Preview, target, capEdge);
     if (!waitUntilTaken()) break;
     bool moreWaiting = false;
     {
@@ -101,8 +120,9 @@ void OpenWorker::loop() {
       moreWaiting = queued_;
     }
     // A file that just failed to decode fails the same way at full size.
-    if (previewed && !moreWaiting && isRawImageExtension(lowerFileExtension(path))) {
-      develop(path, useSavedChain, generation, DecodeQuality::Full);
+    if (target == DecodeTarget::Document && previewed && !moreWaiting &&
+        isRawImageExtension(lowerFileExtension(path))) {
+      develop(path, useSavedChain, generation, DecodeQuality::Full, target, capEdge);
       if (!waitUntilTaken()) break;
     }
     std::unique_lock<std::mutex> lock(mutex_);
@@ -110,6 +130,8 @@ void OpenWorker::loop() {
     if (!queued_) break;
     path_ = std::move(queuedPath_);
     useSavedChain_ = queuedUseSavedChain_;
+    target_ = queuedTarget_;
+    capEdge_ = queuedCapEdge_;
     queued_ = false;
     opening_ = true;
     // A result still in flight for the previous file belongs to a file the user
@@ -119,13 +141,15 @@ void OpenWorker::loop() {
   busy_ = false;
 }
 
-bool OpenWorker::start(std::string path, bool useSavedChain) {
+bool OpenWorker::start(std::string path, bool useSavedChain, DecodeTarget target, int capEdge) {
   if (busy_.load()) {
     // A decode still runs. The newest request replaces any queued one, so the
     // caller's last choice wins.
     std::lock_guard<std::mutex> lock(mutex_);
     queuedPath_ = std::move(path);
     queuedUseSavedChain_ = useSavedChain;
+    queuedTarget_ = target;
+    queuedCapEdge_ = capEdge;
     queued_ = true;
     return false;
   }
@@ -134,6 +158,8 @@ bool OpenWorker::start(std::string path, bool useSavedChain) {
     std::lock_guard<std::mutex> lock(mutex_);
     path_ = std::move(path);
     useSavedChain_ = useSavedChain;
+    target_ = target;
+    capEdge_ = capEdge;
     ++generation_;
     result_ = DecodedImage{};
     resultReady_ = false;

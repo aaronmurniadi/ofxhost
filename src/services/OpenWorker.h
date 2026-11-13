@@ -18,9 +18,18 @@
 #include <string>
 #include <thread>
 
+// What the caller wants the decode for. The document image opens with its own
+// chain and may develop twice; a layer is placed into the stack of the document
+// that is already open, so it is decoded once at the size the stack holds.
+enum class DecodeTarget { Document, Layer };
+
 struct DecodedImage {
   std::string path;
   Image full;
+  DecodeTarget target = DecodeTarget::Document;
+  // Size of the source frame. `full` may be a smaller copy of it, and a layer
+  // needs the real size to know how much canvas it covers.
+  int frameW = 0, frameH = 0;
   ColorSpace fileSpace = ColorSpace::LinearRec2020;
   ColorSpace workingSpace = ColorSpace::LinearRec709;
   ImageMeta meta;
@@ -43,7 +52,9 @@ class OpenWorker {
   // Starts decoding path. When a decode already runs, the worker remembers the
   // request instead of losing it, and runs it once the current image is done.
   // Returns false in that case, so the caller can report that the decode waits.
-  bool start(std::string path, bool useSavedChain);
+  // capEdge caps the long edge of the result, which is how a layer is held at a
+  // size the stack can afford. 0 keeps the decoded size.
+  bool start(std::string path, bool useSavedChain, DecodeTarget target = DecodeTarget::Document, int capEdge = 0);
   // True while a file is developed, including the full decode that follows a
   // preview one.
   bool busy() const { return busy_.load(); }
@@ -62,7 +73,8 @@ class OpenWorker {
   void loop();
   // Develops one image and publishes it. Returns false when the decode failed
   // or the result was dropped because a newer request replaced it.
-  bool develop(const std::string &path, bool useSavedChain, unsigned generation, DecodeQuality quality);
+  bool develop(const std::string &path, bool useSavedChain, unsigned generation, DecodeQuality quality,
+               DecodeTarget target, int capEdge);
   bool publish(DecodedImage image, unsigned generation);
   // Waits for the caller to take the published result, which leaves the buffer
   // of a preview decode free before the full one allocates its own. False when
@@ -77,6 +89,8 @@ class OpenWorker {
   std::atomic<bool> opening_{false};
   std::string path_;
   bool useSavedChain_ = true;
+  DecodeTarget target_ = DecodeTarget::Document;
+  int capEdge_ = 0;
   DecodedImage result_;
   bool resultReady_ = false;
   // One remembered request, overwritten each time start() queues a newer one.
@@ -84,6 +98,8 @@ class OpenWorker {
   bool queued_ = false;
   std::string queuedPath_;
   bool queuedUseSavedChain_ = true;
+  DecodeTarget queuedTarget_ = DecodeTarget::Document;
+  int queuedCapEdge_ = 0;
   // Bumped for every request, so a result that was still being developed when
   // the caller moved on is dropped instead of replacing the newer image.
   unsigned generation_ = 0;

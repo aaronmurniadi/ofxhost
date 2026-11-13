@@ -9,6 +9,7 @@
 #include "services/managers/chain/ParamEditManager.h"
 #include "services/managers/document/DocumentManager.h"
 #include "services/managers/export/ExportManager.h"
+#include "services/managers/layers/LayerManager.h"
 #include "services/managers/session/ColorSpaceManager.h"
 #include "services/managers/session/UpdateManager.h"
 
@@ -21,6 +22,7 @@ struct Bootstrap {
   std::unique_ptr<ExportManager> exports;
   std::unique_ptr<ColorSpaceManager> colorSpaces;
   std::unique_ptr<NodeGraphManager> nodeGraph;
+  std::unique_ptr<LayerManager> layerManager;
   std::unique_ptr<ParamEditManager> paramEdits;
   std::unique_ptr<UpdateManager> updates;
 };

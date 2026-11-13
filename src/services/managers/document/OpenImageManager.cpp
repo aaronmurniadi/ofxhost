@@ -78,6 +78,10 @@ class OpenImageManagerImpl : public OpenImageManager {
       session_.reportStatus("Could not decode " + fs::path(decoded.path).filename().string());
       return true;
     }
+    if (decoded.target == DecodeTarget::Layer) {
+      applyLayerDecode(std::move(decoded));
+      return true;
+    }
     applyDecoded(std::move(decoded));
     return true;
   }
@@ -110,6 +114,38 @@ class OpenImageManagerImpl : public OpenImageManager {
     session_.rebuildPreviewImage();
     session_.reportStatus("Developed " + fs::path(decoded.path).filename().string() + " at full resolution");
     return true;
+  }
+
+  // Adds a finished layer decode to the stack of the image that is open. The
+  // layer is converted into the document working space first, because the
+  // compositor blends every layer in that one space.
+  void applyLayerDecode(DecodedImage &&decoded) {
+    const std::string name = fs::path(decoded.path).filename().string();
+    Layer layer;
+    layer.path = decoded.path;
+    layer.px = std::move(decoded.full);
+    layer.fullW = decoded.frameW > 0 ? decoded.frameW : layer.px.w;
+    layer.fullH = decoded.frameH > 0 ? decoded.frameH : layer.px.h;
+    layer.fileSpace = decoded.fileSpace;
+    layer.workingSpace = decoded.workingSpace;
+    layer.meta = decoded.meta;
+
+    const ColorSpace target = session_.document.workingSpace;
+    if (layer.workingSpace != target) {
+      if (!convertColorSpace(layer.px, layer.workingSpace, target, RenderIntent::Perceptual)) {
+        session_.reportStatus("Could not convert " + name + " to " + colorSpaceName(target));
+        return;
+      }
+      layer.workingSpace = target;
+    }
+
+    session_.render.waitIdle();  // the worker borrows the stack
+    session_.document.layers.push_back(std::move(layer));
+    session_.document.selectedLayer = (int)session_.document.layers.size() - 1;
+    session_.rebuildPreviewImage();
+    const size_t count = session_.document.layers.size();
+    session_.reportStatus("Added " + name + " as layer " + std::to_string(count) + " of " +
+                          std::to_string(count));
   }
 
   // Applies a sidecar to the image now open: the input space the user picked for

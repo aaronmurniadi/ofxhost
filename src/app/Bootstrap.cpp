@@ -9,6 +9,7 @@ Bootstrap initBootstrap(Workspace &workspace) {
   boot.exports = createExportManager(session, *boot.sidecarDao);
   boot.colorSpaces = createColorSpaceManager(session);
   boot.nodeGraph = createNodeGraphManager(session);
+  boot.layerManager = createLayerManager(session);
   boot.paramEdits = createParamEditManager(session);
   boot.updates = createUpdateManager(workspace.updates);
   return boot;

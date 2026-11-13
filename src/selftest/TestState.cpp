@@ -419,6 +419,123 @@ int testOpenWithSidecarPrompt() {
   return rc;
 }
 
+// A layer is decoded off the interface thread, converted into the document
+// working space, and folded into the frame the chain renders. The numbers come
+// from the two buffers rather than from literals, because a PNG decodes through
+// its transfer curve and the case must not depend on that detail.
+int testLayerAdd() {
+  const fs::path base = fs::temp_directory_path() / "ofxhost-selftest-layer";
+  std::error_code ec;
+  fs::remove_all(base, ec);
+  fs::create_directories(base, ec);
+
+#ifdef _WIN32
+  const char *envKey = "APPDATA";
+#else
+  const char *envKey = "HOME";
+#endif
+  const char *oldEnv = std::getenv(envKey);
+  std::string oldValue;
+  if (oldEnv) oldValue = oldEnv;
+#ifdef _WIN32
+  _putenv_s(envKey, base.string().c_str());
+#else
+  setenv(envKey, base.string().c_str(), 1);
+#endif
+
+  int rc = 0;
+  Image under, over;
+  under.w = 8;
+  under.h = 8;
+  under.px.assign((size_t)under.w * under.h * 4, 0.4f);
+  over.w = 8;
+  over.h = 8;
+  over.px.assign((size_t)over.w * over.h * 4, 0.85f);
+  // Opaque on both sides, so an opaque layer must cover the base exactly.
+  for (size_t i = 0; i < (size_t)under.w * under.h; ++i) under.px[i * 4 + 3] = 1.0f;
+  for (size_t i = 0; i < (size_t)over.w * over.h; ++i) over.px[i * 4 + 3] = 1.0f;
+  const std::string underPath = (base / "under.png").string();
+  const std::string overPath = (base / "over.png").string();
+  if (!writeImage(under, underPath)) rc = fail("layer: the base image was not written");
+  if (rc == 0 && !writeImage(over, overPath)) rc = fail("layer: the overlay was not written");
+
+  App app;
+  TestBootstrap wired(app);
+  if (rc == 0) {
+    app.documents->openPath(underPath);
+    if (!finishOpen(app)) return fail("layer: the base image did not open");
+  }
+  // Nothing is layered yet, so the preview is the base image alone.
+  const float baseValue = app.document.full.px[0];
+  if (rc == 0 && !app.document.layers.empty()) rc = fail("layer: an open image already has layers");
+  if (rc == 0 && std::fabs(app.document.preview.px[0] - baseValue) > 1e-6f)
+    rc = fail("layer: the preview is not the base image");
+
+  // Adding a layer decodes it and folds it in, with no chain involved.
+  if (rc == 0) {
+    app.layerManager->addLayer(overPath);
+    if (!finishOpen(app)) return fail("layer: the layer decode did not finish");
+    if (app.document.layers.size() != 1) rc = fail("layer: the layer was not added");
+    if (rc == 0 && app.document.layers[0].path != overPath) rc = fail("layer: the wrong layer was added");
+    if (rc == 0 && app.document.selectedLayer != 0) rc = fail("layer: the added layer was not selected");
+  }
+  const float layerValue = app.document.layers.empty() ? 0.0f : app.document.layers[0].px.px[0];
+  if (rc == 0 && std::fabs(app.document.preview.px[0] - layerValue) > 1e-6f)
+    rc = fail("layer: an opaque layer did not cover the base");
+
+  // Opacity weights the two, and Multiply blends them.
+  if (rc == 0) {
+    app.layerManager->setOpacity(0, 0.5f);
+    const float expect = 0.5f * layerValue + 0.5f * baseValue;
+    if (std::fabs(app.document.preview.px[0] - expect) > 1e-6f) rc = fail("layer: opacity did not blend");
+  }
+  if (rc == 0) {
+    app.layerManager->setBlend(0, BlendMode::Multiply);
+    app.layerManager->setOpacity(0, 1.0f);
+    const float expect = baseValue * layerValue;
+    if (std::fabs(app.document.preview.px[0] - expect) > 1e-6f) rc = fail("layer: multiply did not blend");
+  }
+
+  // A nudge moves the layer, and the frame keeps its size.
+  if (rc == 0) {
+    app.layerManager->nudge(0, 3.0, -2.0);
+    const LayerTransform xf = app.document.layers[0].xf;
+    if (xf.x != 3.0 || xf.y != -2.0) rc = fail("layer: nudge did not move the layer");
+    if (app.document.preview.w != under.w || app.document.preview.h != under.h)
+      rc = fail("layer: the canvas changed size");
+  }
+
+  // A file that is not an image is refused instead of opening a decode.
+  if (rc == 0) {
+    const std::string junk = (base / "notes.txt").string();
+    std::ofstream file(junk);
+    file << "not an image";
+    file.close();
+    app.layerManager->addLayer(junk);
+    if (app.opener.busy()) rc = fail("layer: a text file started a decode");
+  }
+
+  // Removing the layer brings the base image back.
+  if (rc == 0) {
+    app.layerManager->removeLayer(0);
+    if (!app.document.layers.empty()) rc = fail("layer: the layer was not removed");
+    if (std::fabs(app.document.preview.px[0] - baseValue) > 1e-6f)
+      rc = fail("layer: the base image did not come back");
+  }
+
+  if (rc == 0) std::printf("ok  layer add and edit\n");
+
+#ifdef _WIN32
+  if (oldValue.empty()) _putenv_s(envKey, "");
+  else _putenv_s(envKey, oldValue.c_str());
+#else
+  if (oldValue.empty()) unsetenv(envKey);
+  else setenv(envKey, oldValue.c_str(), 1);
+#endif
+  fs::remove_all(base, ec);
+  return rc;
+}
+
 // The per-user settings file must round-trip the preference fields, so a
 // restart restores the theme, font, panel visibility, and export defaults. The
 // case points the config directory at a temp folder, so it never reads or

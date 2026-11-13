@@ -292,6 +292,7 @@ add_library(ofxhost_services STATIC
   src/services/managers/document/OpenImageManager.cpp
   src/services/managers/document/OpenWorkspaceManager.cpp
   src/services/managers/export/ExportManager.cpp
+  src/services/managers/layers/LayerManager.cpp
   src/services/managers/session/ColorSpaceManager.cpp
   src/services/managers/session/UpdateManager.cpp
 )

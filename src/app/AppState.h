@@ -9,6 +9,7 @@ class DocumentManager;
 class ExportManager;
 class ColorSpaceManager;
 class NodeGraphManager;
+class LayerManager;
 class ParamEditManager;
 class UpdateManager;
 
@@ -23,6 +24,7 @@ struct App : Workspace {
   ExportManager *exports = nullptr;
   ColorSpaceManager *colorSpaces = nullptr;
   NodeGraphManager *nodeGraph = nullptr;
+  LayerManager *layerManager = nullptr;
   ParamEditManager *paramEdits = nullptr;
   UpdateManager *updateManager = nullptr;
 };

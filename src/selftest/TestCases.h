@@ -36,6 +36,7 @@ int testDenoisePlugin();
 int testTransformPlugin(Image &src);
 int testTransformLegacyMigration();
 int testOpenWithSidecarPrompt();
+int testLayerAdd();
 int testAutoExposurePlugin();
 int testResetNodeParams();
 int testChainColorSpaceFlow();

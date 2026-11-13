@@ -56,6 +56,7 @@ int runSelfTest() {
   if (const int rc = testTransformPlugin(src)) return rc;
   if (const int rc = testTransformLegacyMigration()) return rc;
   if (const int rc = testOpenWithSidecarPrompt()) return rc;
+  if (const int rc = testLayerAdd()) return rc;
   if (const int rc = testNoiseProfiles()) return rc;
   if (const int rc = testLensProfiles()) return rc;
   if (const int rc = testAutoExposurePlugin()) return rc;

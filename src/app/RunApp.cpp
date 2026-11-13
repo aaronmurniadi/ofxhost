@@ -86,6 +86,7 @@ int runApp(const std::string &optionalPath) {
   app.exports = boot.exports.get();
   app.colorSpaces = boot.colorSpaces.get();
   app.nodeGraph = boot.nodeGraph.get();
+  app.layerManager = boot.layerManager.get();
   app.paramEdits = boot.paramEdits.get();
   app.updateManager = boot.updates.get();
   glfwMakeContextCurrent(app.window);

@@ -33,4 +33,7 @@ struct DocumentState {
   // `full`, so a single-image document costs no second copy of its pixels and
   // every reader of `full` keeps its meaning.
   std::vector<Layer> layers;
+  // The layer the panels and the preview edit: an index into `layers`, or -1 for
+  // the document image itself.
+  int selectedLayer = -1;
 };
