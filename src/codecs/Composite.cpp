@@ -62,7 +62,7 @@ inline void sampleBilinear(const Placed &L, double x, double y, float rgba[4]) {
 }
 
 // Composites one prepared layer over the destination rows [y0, y1).
-void compositeRows(const Placed &L, float *dst, int outW, int outH, double scaleX, double scaleY, int y0, int y1) {
+void compositeRows(const Placed &L, float *dst, int outW, double scaleX, double scaleY, int y0, int y1) {
   for (int j = y0; j < y1; ++j) {
     // Destination row j covers canvas row (j + 0.5) / scaleY, measured up from
     // the bottom edge like the buffers themselves.
@@ -149,7 +149,7 @@ bool flattenPrepared(const std::vector<Placed> &placed, int outW, int outH, doub
   // Layers are composited in stack order inside each thread over its own rows, so
   // no thread touches a row another one writes.
   auto runRows = [&](int y0, int y1) {
-    for (const Placed &p : placed) compositeRows(p, out.px.data(), outW, outH, scaleX, scaleY, y0, y1);
+    for (const Placed &p : placed) compositeRows(p, out.px.data(), outW, scaleX, scaleY, y0, y1);
   };
 
   if (nThreads <= 1) {

@@ -2,7 +2,6 @@
 
 #include "engine/RenderWorker.h"
 #include "persist/ProjectPersist.h"
-#include "services/Filmstrip.h"
 #include "services/ManagerSession.h"
 #include "services/OpenWorker.h"
 
