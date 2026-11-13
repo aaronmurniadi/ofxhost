@@ -13,8 +13,8 @@
 enum class DecodeQuality { Preview, Full };
 
 // Loads RAW via LibRaw (linear, camera WB), TIFF via libtiff, or PNG/JPEG/EXR via stb/tinyexr.
-// detected: inferred Input Color Space (RAW / untagged float → Linear Rec.2020; untagged LDR → sRGB;
-// embedded ICC → nearest of the four tags). Does not convert pixels.
+// detected: inferred Input Color Space (RAW → Linear Rec.709; untagged float → Linear Rec.2020;
+// untagged LDR → sRGB; embedded ICC → nearest of the four tags). Does not convert pixels.
 // working: color space of the returned buffer. It equals detected when the
 // samples are stored as they are (integer TIFF, EXR), and the linear counterpart
 // of detected when the decoder removed the transfer curve (RAW, PNG/JPEG).

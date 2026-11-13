@@ -529,12 +529,13 @@ bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorS
 
   // A decoder that removes the transfer curve leaves a linear buffer, so the
   // working space is the linear counterpart of the tag it detected. A RAW file
-  // carries no tag, and its sensor wide gamut fits Rec.2020 better than Rec.709.
+  // carries no tag, so it takes Linear Rec.709: that is the default the Input
+  // Color Space control shows, and the control stays free to pick a wider space.
   const bool raw = format && format->codec == ImageCodec::Raw;
   if (raw) {
     if (!loadRaw(path, out, found, quality)) return false;
     if (meta) *meta = found;
-    detected = ColorSpace::LinearRec2020;
+    detected = ColorSpace::LinearRec709;
     working = detected;
     return true;
   }
@@ -577,7 +578,7 @@ bool loadImage(const std::string &path, Image &out, ColorSpace &detected, ColorS
   // that a full decode is needed later, so this one always develops fully.
   if (loadRaw(path, out, found, DecodeQuality::Full)) {
     if (meta) *meta = found;
-    detected = ColorSpace::LinearRec2020;
+    detected = ColorSpace::LinearRec709;
     working = detected;
     return true;
   }
