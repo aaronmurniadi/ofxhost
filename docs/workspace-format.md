@@ -81,7 +81,8 @@ The other preferences are in `settings.json` beside it:
 - `outputIndex` is the preview color space and `exportIndex` the export color
   space, both as an index into the color space list.
 - `exportIntent` is the rendering intent, and `exportFormat`, `exportBitDepth`,
-  `exportQuality`, and `exportLossless` are the export options.
+  `exportQuality`, and `exportLossless` are the export options. `exportBitDepth` is
+  8, 16, or 32, and only TIFF writes 32, where the samples are floats.
 - `exportSidecar` writes the record of an export, and it is off by default.
 - `previewRes` is the preview size, and `showPlugins`, `showParameters`, and
   `showFilmstrip` are the panel visibility.

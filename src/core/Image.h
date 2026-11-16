@@ -98,11 +98,12 @@ struct ImageMeta {
 };
 
 // Encoding settings for the raster export formats. Formats ignore what they cannot
-// use: PNG and TIFF honor bitDepth, JPEG ignores it (always 8-bit), and WebP is
-// always 8-bit. quality applies to JPEG, WebP, and JPEG XL; lossless applies to
+// use: PNG, TIFF, and JPEG XL honor bitDepth, JPEG ignores it (always 8-bit), and
+// WebP is always 8-bit. TIFF also takes 32, which writes float samples that keep
+// tones above 1.0. quality applies to JPEG, WebP, and JPEG XL; lossless applies to
 // WebP and JPEG XL only.
 struct EncodeOptions {
-  int bitDepth = 8;      // 8 or 16
+  int bitDepth = 8;      // 8, 16, or 32 (32 is TIFF only)
   int quality = 92;      // 1..100 (lossy formats)
   bool lossless = false; // WebP / JPEG XL
 };

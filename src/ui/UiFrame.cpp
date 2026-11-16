@@ -129,12 +129,15 @@ static void drawMenuBar(App &app) {
 
 // Save-dialog filters, one pair per ExportFormat value.
 static const char *const kExportFilters[] = {
-    "PNG (8/16-bit)", "*.png",
-    "JPEG",            "*.jpg *.jpeg",
-    "TIFF (8/16-bit)", "*.tif *.tiff",
-    "WebP",            "*.webp",
-    "JPEG XL",         "*.jxl",
+    "PNG (8/16-bit)",     "*.png",
+    "JPEG",               "*.jpg *.jpeg",
+    "TIFF (8/16/32-bit)", "*.tif *.tiff",
+    "WebP",               "*.webp",
+    "JPEG XL",            "*.jxl",
 };
+
+// Labels for the bit depths exportBitDepths() lists, in the same order.
+static const char *const kExportBitDepths[kExportBitDepthsMax] = {"8-bit", "16-bit", "32-bit float"};
 
 // Opens the export dialog; the destination is chosen from inside it.
 void exportImage(App &app) {
@@ -161,18 +164,25 @@ static void drawExportDialog(App &app) {
   int outSpace = static_cast<int>(app.gui.exportSpace);
   if (uiChoiceCombo("Export colorspace", nullptr, kColorSpaces, kColorSpaceCount, &outSpace))
     app.colorSpaces->apply({ColorSpaceChange::Target::Export, outSpace});
-  int intent = static_cast<int>(app.gui.exportIntent);
-  if (uiChoiceCombo("Intent", nullptr, kIntents, kRenderIntentCount, &intent))
-    app.colorSpaces->apply({ColorSpaceChange::Target::ExportIntent, intent});
 
   const ExportFormat format = app.gui.exportFormat;
-  if (exportUsesBitDepth(format)) {
-    static const char *const kDepths[] = {"8-bit", "16-bit"};
+  if (exportUsesIntent(format)) {
+    int intent = static_cast<int>(app.gui.exportIntent);
+    if (uiChoiceCombo("Intent", nullptr, kIntents, kRenderIntentCount, &intent))
+      app.colorSpaces->apply({ColorSpaceChange::Target::ExportIntent, intent});
+  }
+
+  // A format change can leave a depth the new format cannot write, so the state
+  // snaps back into the list before the combo reads it.
+  app.gui.exportBitDepth = clampExportBitDepth(format, app.gui.exportBitDepth);
+  int depths[kExportBitDepthsMax] = {};
+  const int depthCount = exportBitDepths(format, depths);
+  if (depthCount > 0) {
     int depth = 0;
-    if (app.gui.exportBitDepth >= 16) depth = 1;
-    if (uiChoiceCombo("Bit depth", nullptr, kDepths, 2, &depth)) {
-      app.gui.exportBitDepth = 8;
-      if (depth == 1) app.gui.exportBitDepth = 16;
+    for (int i = 0; i < depthCount; ++i)
+      if (depths[i] == app.gui.exportBitDepth) depth = i;
+    if (uiChoiceCombo("Bit depth", nullptr, kExportBitDepths, depthCount, &depth)) {
+      app.gui.exportBitDepth = depths[depth];
     }
   }
 

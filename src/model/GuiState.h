@@ -26,6 +26,40 @@ inline bool exportUsesQuality(ExportFormat fmt) {
 inline bool exportSupportsLossless(ExportFormat fmt) {
   return fmt == ExportFormat::WEBP || fmt == ExportFormat::JXL;
 }
+// The rendering intent maps one gamut into another, so the dialog offers it for
+// the formats that carry a full profile. PNG and JPEG keep the stored intent and
+// hide the chooser.
+inline bool exportUsesIntent(ExportFormat fmt) {
+  return fmt != ExportFormat::PNG && fmt != ExportFormat::JPEG;
+}
+
+// Bit depths the export dialog offers, in the order it shows them. TIFF alone
+// writes 32 bits, and those samples are floats. A format that ignores the
+// setting reports none.
+inline constexpr int kExportBitDepthsMax = 3;
+inline int exportBitDepths(ExportFormat fmt, int (&depths)[kExportBitDepthsMax]) {
+  if (!exportUsesBitDepth(fmt)) return 0;
+  depths[0] = 8;
+  depths[1] = 16;
+  if (fmt == ExportFormat::TIFF) {
+    depths[2] = 32;
+    return 3;
+  }
+  return 2;
+}
+
+// The depth the format can write that is nearest to depth, never above it. A
+// format that ignores the setting keeps the value, so switching format and back
+// leaves the choice where the user put it.
+inline int clampExportBitDepth(ExportFormat fmt, int depth) {
+  int depths[kExportBitDepthsMax] = {};
+  const int count = exportBitDepths(fmt, depths);
+  if (count == 0) return depth;
+  int best = depths[0];
+  for (int i = 0; i < count; ++i)
+    if (depths[i] <= depth) best = depths[i];
+  return best;
+}
 
 // The combo shows these in enum order, so the values double as the persisted
 // setting. "Fit to preview" tracks the preview panel size; the fixed entries

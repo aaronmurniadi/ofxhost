@@ -597,9 +597,9 @@ int testEveryPlugin(Image &src) {
     };
     static const ExportCase cases[] = {
         {"png", {8, 92, false}},  {"png", {16, 92, false}}, {"jpg", {8, 92, false}},
-        {"tif", {8, 92, false}},  {"tif", {16, 92, false}}, {"webp", {8, 92, false}},
-        {"webp", {8, 92, true}},  {"jxl", {8, 92, false}},  {"jxl", {16, 92, false}},
-        {"jxl", {16, 92, true}},
+        {"tif", {8, 92, false}},  {"tif", {16, 92, false}}, {"tif", {32, 92, false}},
+        {"webp", {8, 92, false}}, {"webp", {8, 92, true}},  {"jxl", {8, 92, false}},
+        {"jxl", {16, 92, false}}, {"jxl", {16, 92, true}},
     };
     for (const ExportCase &c : cases) {
       const fs::path p = dir / ("ofxhost-selftest." + std::string(c.ext));

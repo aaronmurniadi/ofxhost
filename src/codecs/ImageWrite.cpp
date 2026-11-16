@@ -213,28 +213,40 @@ static bool writePng16WithIcc(const Image &img, const std::string &path, const s
 
 // --- TIFF ---
 
+// 8 and 16 write unsigned integers. 32 writes floats, so the samples carry the
+// values the chain produced, including tones above 1.0.
 static bool writeTiff(const Image &img, const std::string &path, const std::vector<uint8_t> &icc, int bitDepth) {
   TIFF *tif = TIFFOpen(path.c_str(), "w");
   if (!tif) return false;
   const uint32_t w = (uint32_t)img.w, h = (uint32_t)img.h;
+  const bool isFloat = bitDepth == 32;
   TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, w);
   TIFFSetField(tif, TIFFTAG_IMAGELENGTH, h);
   TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 4);
   TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, (uint16_t)bitDepth);
-  TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_UINT);
+  if (isFloat) TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_IEEEFP);
+  else TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_UINT);
   TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
   TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
   TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
+  // The fourth sample is alpha, and the export does not premultiply it.
+  const uint16_t extraSample = EXTRASAMPLE_UNASSALPHA;
+  TIFFSetField(tif, TIFFTAG_EXTRASAMPLES, 1, &extraSample);
   if (!icc.empty()) TIFFSetField(tif, TIFFTAG_ICCPROFILE, (uint32_t)icc.size(), icc.data());
 
+  std::vector<float> row32;
   std::vector<uint16_t> row16;
   std::vector<uint8_t> row8;
-  if (bitDepth == 16) row16.resize((size_t)w * 4);
+  if (isFloat) row32.resize((size_t)w * 4);
+  else if (bitDepth == 16) row16.resize((size_t)w * 4);
   else row8.resize((size_t)w * 4);
   for (uint32_t y = 0; y < h; ++y) {
     const float *src = img.px.data() + (size_t)(img.h - 1 - (int)y) * img.w * 4;
     void *row = nullptr;
-    if (bitDepth == 16) {
+    if (isFloat) {
+      for (uint32_t i = 0; i < w * 4; ++i) row32[i] = src[i];
+      row = row32.data();
+    } else if (bitDepth == 16) {
       for (uint32_t i = 0; i < w * 4; ++i) row16[i] = toUint16(src[i]);
       row = row16.data();
     } else {
@@ -454,7 +466,8 @@ bool writeImage(const Image &img, const std::string &path, ColorSpace space, Enc
   if (e == ".jpg" || e == ".jpeg") return writeJpgWithIcc(img, path, icc, opts.quality);
   if (e == ".tif" || e == ".tiff") {
     int bitDepth = 8;
-    if (opts.bitDepth >= 16) bitDepth = 16;
+    if (opts.bitDepth >= 32) bitDepth = 32;
+    else if (opts.bitDepth >= 16) bitDepth = 16;
     return writeTiff(img, path, icc, bitDepth);
   }
   if (e == ".webp") return writeWebpWithIcc(img, path, icc, opts.quality, opts.lossless);

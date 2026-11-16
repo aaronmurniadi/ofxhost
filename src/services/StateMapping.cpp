@@ -25,8 +25,8 @@ PersistGui captureGui(const GuiState &gui) {
 void applyGui(GuiState &gui, const PersistGui &g) {
   gui.previewSpace = outputSpace(g.outputIndex);
   gui.exportFormat = static_cast<ExportFormat>(std::clamp(g.exportFormat, 0, kExportFormatCount - 1));
-  gui.exportBitDepth = 8;
-  if (g.exportBitDepth >= 16) gui.exportBitDepth = 16;
+  // A depth the stored format cannot write snaps back to the nearest one it can.
+  gui.exportBitDepth = clampExportBitDepth(gui.exportFormat, g.exportBitDepth);
   gui.exportQuality = std::clamp(g.exportQuality, 1, 100);
   gui.exportLossless = g.exportLossless;
   gui.exportSidecar = g.exportSidecar;

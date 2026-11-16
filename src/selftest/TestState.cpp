@@ -452,6 +452,9 @@ int testGlobalSettingsRoundTrip() {
   saved.exportIntent = 2;
   saved.exportQuality = 71;
   saved.exportSidecar = true;
+  // A bit depth the TIFF writer takes, to hold the 32-bit value in the file.
+  saved.exportFormat = static_cast<int>(ExportFormat::TIFF);
+  saved.exportBitDepth = 32;
 
   // The theme and the interface font size belong to the user, so they travel in
   // their own part of the settings file.
@@ -475,6 +478,7 @@ int testGlobalSettingsRoundTrip() {
                 loaded.showParameters == saved.showParameters && loaded.showFilmstrip == saved.showFilmstrip &&
                 loaded.previewRes == saved.previewRes && loaded.outputIndex == saved.outputIndex &&
                 loaded.exportIndex == saved.exportIndex && loaded.exportIntent == saved.exportIntent &&
+                loaded.exportFormat == saved.exportFormat && loaded.exportBitDepth == saved.exportBitDepth &&
                 loaded.exportQuality == saved.exportQuality && loaded.exportSidecar == saved.exportSidecar;
     if (!same) rc = fail("settings: values did not round-trip");
   }
