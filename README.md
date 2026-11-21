@@ -126,6 +126,12 @@ OFX_PLUGIN_PATH=/path/to/plugins /Applications/OfxHost.app/Contents/MacOS/OfxHos
 
 Restart OfxHost after installing plugins. If none are found, the status bar says so.
 
+A plugin appears once in the Add Plugin list, even when more than one search path
+reaches its bundle. Installers often set `OFX_PLUGIN_PATH` to the platform default
+above, or to a folder inside it, and either case is safe: OfxHost resolves every
+search path first and walks each directory once. When one search path sits inside
+another, it prints the path it skipped to stderr and keeps the wider one.
+
 ---
 
 ## Build

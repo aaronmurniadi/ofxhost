@@ -84,6 +84,52 @@ int testLensProfiles() {
   return 0;
 }
 
+// The directories the loader scans must not overlap. A bundle under two roots
+// would load twice, and the plugin then appears twice in the picker, where the
+// second row cannot be selected. Windows reaches this easily: OFX_PLUGIN_PATH
+// often names the same directory as the built-in default, and a subfolder of a
+// listed root is reached by the walk as well.
+int testPluginScanRoots() {
+  const fs::path base = fs::temp_directory_path() / "ofxhost-scan-roots";
+  std::error_code ec;
+  fs::remove_all(base, ec);
+  const fs::path vendor = base / "a" / "Vendor";
+  const fs::path bundle = vendor / "Thing.ofx.bundle" / "Contents";
+  fs::create_directories(bundle, ec);
+  if (ec) return fail("scan roots: cannot create the test tree");
+  const fs::path other = base / "b";
+  fs::create_directories(other, ec);
+  if (ec) return fail("scan roots: cannot create the second directory");
+
+  // The same directory twice, a subfolder of a listed root, and the same
+  // directory reached through "..": one root is left, because one walk reaches
+  // everything.
+  const std::string a = (base / "a").string();
+  std::vector<std::string> roots = pluginScanRoots({a, a, vendor.string(), (base / "a" / ".." / "a").string()});
+  if (roots.size() != 1) return fail("scan roots: overlapping roots were not merged");
+  if (fs::path(roots[0]) != fs::weakly_canonical(base / "a")) return fail("scan roots: wrong directory kept");
+
+  // A parent root replaces the children it covers.
+  roots = pluginScanRoots({a, vendor.string(), base.string()});
+  if (roots.size() != 1) return fail("scan roots: a parent root did not replace its children");
+  if (fs::path(roots[0]) != fs::weakly_canonical(base)) return fail("scan roots: the parent root was not kept");
+
+  // Two unrelated directories both stay, in the order they were given.
+  roots = pluginScanRoots({a, other.string()});
+  if (roots.size() != 2) return fail("scan roots: unrelated roots were merged");
+  if (fs::path(roots[0]) != fs::weakly_canonical(base / "a")) return fail("scan roots: order changed");
+  if (fs::path(roots[1]) != fs::weakly_canonical(other)) return fail("scan roots: order changed");
+
+  // A candidate that is not a directory cannot hold a bundle and is dropped, and
+  // a directory named twice is one root.
+  roots = pluginScanRoots({(base / "missing").string(), other.string(), other.string()});
+  if (roots.size() != 1) return fail("scan roots: a missing directory was not dropped");
+
+  fs::remove_all(base, ec);
+  printf("ok  plugin scan roots\n");
+  return 0;
+}
+
 int testNoiseProfiles() {
   const std::vector<NoiseCamera> &table = noiseProfileTable();
   if (table.size() < 300) return fail("noise profiles: the bundled table did not load");

@@ -38,11 +38,15 @@ static void drawPluginPicker(App &app) {
           curAuthor = pe.author;
           ImGui::SeparatorText(curAuthor.c_str());
         }
+        // The row id is the index, not the label: two plugins may share a label,
+        // and a repeated label would make the second row unselectable.
+        ImGui::PushID(i);
         if (ImGui::Selectable(pe.label.c_str())) {
           app.nodeGraph->addNode(i);
           app.gui.pluginFilter[0] = '\0';
           ImGui::CloseCurrentPopup();
         }
+        ImGui::PopID();
         ++shown;
       }
       if (shown == 0) ImGui::TextDisabled("No matches");

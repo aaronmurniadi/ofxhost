@@ -8,6 +8,7 @@
 #include "ofxParam.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -175,6 +176,68 @@ static void loadEmbeddedPlugins() {
 #endif
 }
 
+// One spelling of a directory, so two spellings of the same one compare equal:
+// absolute, with symlinks and ".." resolved, and folded to lower case on Windows
+// where the file system ignores case.
+static std::string pathKey(const fs::path &p) {
+  std::string key = p.string();
+#ifdef _WIN32
+  std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+#endif
+  return key;
+}
+
+// True when root is candidate itself or one of its parent directories. Both are
+// canonical, so this compares the components the two paths share.
+static bool covers(const fs::path &root, const fs::path &candidate) {
+  auto r = root.begin();
+  auto c = candidate.begin();
+  for (; r != root.end(); ++r, ++c) {
+    if (c == candidate.end()) return false;
+    if (pathKey(*r) != pathKey(*c)) return false;
+  }
+  return true;
+}
+
+std::vector<std::string> pluginScanRoots(const std::vector<std::string> &candidates) {
+  std::vector<fs::path> roots;
+  for (const std::string &candidate : candidates) {
+    std::error_code ec;
+    const fs::path resolved = fs::weakly_canonical(fs::path(candidate), ec);
+    if (ec) {
+      std::fprintf(stderr, "Ignoring plugin path %s: %s\n", candidate.c_str(), ec.message().c_str());
+      continue;
+    }
+    if (!fs::is_directory(resolved, ec) || ec) continue;  // nothing to scan
+    // The walk recurses into every subdirectory, so a root that is the same
+    // directory as an accepted one, or a parent or a child of it, would reach a
+    // bundle the accepted root already reaches and load it a second time. The
+    // broader root wins, because its walk covers everything the narrower one
+    // holds. That leaves a set of roots none of which overlaps another.
+    bool covered = false;
+    for (size_t i = 0; i < roots.size();) {
+      if (covers(roots[i], resolved)) {
+        covered = true;
+        break;
+      }
+      if (covers(resolved, roots[i])) {
+        std::fprintf(stderr, "Scanning %s instead of %s\n", resolved.string().c_str(), roots[i].string().c_str());
+        roots.erase(roots.begin() + (std::ptrdiff_t)i);
+        continue;
+      }
+      ++i;
+    }
+    if (covered) {
+      std::fprintf(stderr, "Ignoring plugin path %s: a scanned path already covers it\n", resolved.string().c_str());
+      continue;
+    }
+    roots.push_back(resolved);
+  }
+  std::vector<std::string> scan;
+  for (const fs::path &root : roots) scan.push_back(root.string());
+  return scan;
+}
+
 void loadPlugins() {
   loadEmbeddedPlugins();
   std::vector<std::string> dirs;
@@ -205,9 +268,12 @@ void loadPlugins() {
     dirs.push_back((exe / "Plugins").string());
     dirs.push_back((exe / ".." / "PlugIns").string());
   }
-  for (auto &d : dirs) {
+  // An installer often sets OFX_PLUGIN_PATH to the platform directory above, or
+  // to a folder inside it. Resolving the candidates before the walk means no
+  // bundle is reachable from two roots, so no plugin registers twice.
+  for (const std::string &root : pluginScanRoots(dirs)) {
     std::error_code ec;
-    for (auto it = fs::recursive_directory_iterator(d, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+    for (auto it = fs::recursive_directory_iterator(root, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
       const fs::path &path = it->path();
       if (path.extension() == ".bundle" && path.stem().extension() == ".ofx") {
         loadBundle(path);

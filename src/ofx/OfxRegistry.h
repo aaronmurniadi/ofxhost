@@ -38,6 +38,14 @@ OfxRegistry &ofxRegistry();
 // Shorthand for the table every caller actually wants.
 inline std::vector<PluginEntry> &plugins() { return ofxRegistry().entries(); }
 
+// The directories loadPlugins() scans: each candidate resolved to one absolute
+// spelling of the directory, in candidate order, with a candidate that an
+// accepted root already covers dropped. The walk recurses into every
+// subdirectory, so an overlapping or repeated root would reach the same bundle a
+// second time and register the same plugin twice. Candidates that are not a
+// directory are dropped.
+std::vector<std::string> pluginScanRoots(const std::vector<std::string> &candidates);
+
 // Scans the platform OFX directories, OFX_PLUGIN_PATH, and the app bundle.
 void loadPlugins();
 // Creates a plugin instance from a loaded plugin's descriptor.

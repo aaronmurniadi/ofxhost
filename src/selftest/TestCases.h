@@ -21,6 +21,7 @@ int testUpdateVersionOrdering();
 int testExportManager();
 
 // The bundled plugins and every installed one. src is the shared test image.
+int testPluginScanRoots();
 int testNoiseProfiles();
 int testLensProfiles();
 int testDenoiseSeeding();
